@@ -22,7 +22,7 @@ export function computeAdvice(
   dailyHr?: number,
 ): CoachInsight[] {
   const out: CoachInsight[] = [];
-  const subjects = ["bio", "chem", "phy", "agri"] as SubjectId[];
+  const subjects = ["bio", "chem", "phy", "agri", "dt"] as SubjectId[];
   const paperTypes: PaperType[] = ["MCQ", "Structured", "Essay"];
 
   for (const sub of subjects) {

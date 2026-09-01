@@ -42,6 +42,7 @@ export interface AIChatRequest {
   subtopicId?: string;
   mode?: AIMode;
   language?: "en" | "si";
+  subjectId?: string;
 }
 
 export interface AIChatResponse {

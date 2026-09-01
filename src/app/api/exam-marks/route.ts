@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 
-const SUBJECT_IDS = ["bio", "chem", "phy", "agri", "math", "ict"] as const;
+const SUBJECT_IDS = ["bio", "chem", "phy", "agri", "math", "ict", "dt"] as const;
 
 const createSchema = z.object({
   subjectId: z.enum(SUBJECT_IDS),

@@ -2,9 +2,9 @@ import { config } from "@/config";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 
-// Models are tried in order. The env-configured model (default "gemini-flash-latest")
-// comes first, then we fall back through the other stable models when the primary
-// one is overloaded (HTTP 503 / "high demand") or unavailable to the account.
+// Models are tried in order. The env-configured model comes first, then we fall
+// back through the other stable models when the primary one is overloaded
+// (HTTP 503 / "high demand"), unavailable to the account, or not found.
 const FALLBACK_MODELS = [
   "gemini-3.6-flash",
   "gemini-2.5-flash",
@@ -37,6 +37,13 @@ function isRetryable(error: unknown): boolean {
   return /503|UNAVAILABLE|high demand|overloaded|resource_exhausted|429|temporar/i.test(msg);
 }
 
+function keySetupHint(): string | null {
+  if (!GEMINI_API_KEY) {
+    return "AI generation is not configured. Add GEMINI_API_KEY to enable AI features.";
+  }
+  return null;
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -50,8 +57,9 @@ export async function generateGeminiContent(
   prompt: string,
   options: GeminiOptions = {},
 ): Promise<string> {
-  if (!GEMINI_API_KEY) {
-    throw new Error("AI generation is not configured. Add GEMINI_API_KEY to enable AI features.");
+  const hint = keySetupHint();
+  if (hint) {
+    throw new Error(hint);
   }
 
   const { GoogleGenAI } = await import("@google/genai");
@@ -84,6 +92,7 @@ export async function generateGeminiContent(
     }
   }
 
+  const detail = lastError instanceof Error ? lastError.message : String(lastError);
   console.error("[GEMINI] All models failed:", lastError);
-  throw new Error("AI generation failed. Please try again later.");
+  throw new Error(`AI generation failed. ${detail.slice(0, 500)}`);
 }

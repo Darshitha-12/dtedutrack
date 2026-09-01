@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/lib/language-context";
+import { SUBJECT_LIST } from "@/types/subject";
 
 interface Message {
   id: string;
@@ -97,6 +98,8 @@ export default function AITutorPage() {
   const [editTitle, setEditTitle] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [modeDropdownOpen, setModeDropdownOpen] = useState(false);
+  const [subjectDropdownOpen, setSubjectDropdownOpen] = useState(false);
+  const [activeSubject, setActiveSubject] = useState("bio");
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -270,6 +273,7 @@ export default function AITutorPage() {
           message: content,
           mode: activeMode,
           language,
+          subjectId: activeSubject,
         }),
         signal: controller.signal,
       });
@@ -380,6 +384,7 @@ export default function AITutorPage() {
 
   const currentConversation = conversations.find((c) => c.id === activeConversationId);
   const currentMode = modes.find((m) => m.id === activeMode);
+  const currentSubject = SUBJECT_LIST.find((s) => s.id === activeSubject) || SUBJECT_LIST[0];
 
   const renderMessage = (msg: Message) => {
     if (msg.role === "USER") {
@@ -637,6 +642,38 @@ export default function AITutorPage() {
                 </div>
               )}
             </div>
+            <div className="relative">
+              <button
+                onClick={() => setSubjectDropdownOpen(!subjectDropdownOpen)}
+                className="flex items-center gap-2 text-sm font-medium hover:bg-accent px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <span>{currentSubject.icon}</span>
+                <span>{currentSubject.name}</span>
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+              </button>
+              {subjectDropdownOpen && (
+                <div className="absolute top-full left-0 mt-1 w-56 bg-card border border-border rounded-xl shadow-lg py-1 z-50">
+                  {SUBJECT_LIST.map((subject) => (
+                    <button
+                      key={subject.id}
+                      onClick={() => {
+                        setActiveSubject(subject.id);
+                        setSubjectDropdownOpen(false);
+                      }}
+                      className={cn(
+                        "w-full flex items-center gap-3 px-3 py-2.5 text-sm transition-colors text-left",
+                        activeSubject === subject.id
+                          ? "bg-primary/10 text-primary"
+                          : "text-foreground hover:bg-accent"
+                      )}
+                    >
+                      <span className="text-base">{subject.icon}</span>
+                      <p className="font-medium">{subject.name}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             {currentConversation && (
               <div className="hidden sm:block">
                 <Badge variant="secondary" className="text-xs">
@@ -677,11 +714,11 @@ export default function AITutorPage() {
               <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-6">
                 <Sparkles className="h-8 w-8 text-primary" />
               </div>
-              <h2 className="text-xl font-bold mb-2">{t("AI ජීව විද්‍යා ගුරුවරයා", "AI Biology Tutor")}</h2>
+              <h2 className="text-xl font-bold mb-2">{t("AI ගුරුවරයා", "AI Tutor")}</h2>
               <p className="text-sm text-muted-foreground mb-8">
                 {t(
-                  "ජීව විද්‍යාව ගැන ඕනෑම දෙයක් මගෙන් අහන්න. මට සංකල්ප පැහැදිලි කිරීමට, ඔබට ප්‍රශ්න ඇසීමට, හෝ විභාග සඳහා සමාලෝචනයට උදව් කළ හැක.",
-                  "Ask me anything about biology. I can explain concepts, quiz you, or help you review for exams."
+                  `${currentSubject.name} ගැන ඕනෑම දෙයක් මගෙන් අහන්න. මට සංකල්ප පැහැදිලි කිරීමට, ඔබට ප්‍රශ්න ඇසීමට, හෝ විභාග සඳහා සමාලෝචනයට උදව් කළ හැක.`,
+                  `Ask me anything about ${currentSubject.name}. I can explain concepts, quiz you, or help you review for exams.`
                 )}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
@@ -720,7 +757,7 @@ export default function AITutorPage() {
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={t("ජීව විද්‍යා ප්‍රශ්නයක් අසන්න...", "Ask a biology question...")}
+                placeholder={t(`${currentSubject.name} ප්‍රශ්නයක් අසන්න...`, `Ask a ${currentSubject.name} question...`)}
                 rows={1}
                 className="w-full resize-none bg-transparent px-4 py-3 pr-24 text-sm placeholder:text-muted-foreground focus:outline-none min-h-[48px] max-h-[200px]"
                 style={{ height: "auto" }}

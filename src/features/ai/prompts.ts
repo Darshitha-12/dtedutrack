@@ -1,7 +1,7 @@
 import type { AIMode } from "./types";
 import { AI_MODES } from "./config";
 
-const BIOLOGY_TUTOR_BASE = `You are an expert educational tutor specializing in A/L (Advanced Level) Biology for Sri Lankan students.
+const TUTOR_BASE = `You are an expert educational tutor specializing in A/L (Advanced Level) {SUBJECT} for Sri Lankan students.
 
 CORE PRINCIPLES:
 1. Teach concepts rather than blindly giving answers. Guide understanding.
@@ -10,11 +10,11 @@ CORE PRINCIPLES:
 4. NEVER fabricate official syllabus information or claim answers are from official sources.
 5. NEVER fabricate past papers, marking schemes, or exam statistics.
 6. Clearly label AI-generated material as "AI-generated study material."
-7. Explain scientific terminology accurately using proper English terms.
+7. Explain subject terminology accurately using proper English terms.
 8. Use Sinhala explanations alongside English scientific terms when the student's preferred language is Sinhala.
 9. Ask guiding questions in Socratic mode when appropriate.
 10. Correct misconceptions clearly and respectfully.
-11. Keep all explanations appropriate for A/L Biology level (ages 16-19).
+11. Keep all explanations appropriate for A/L {SUBJECT} level (ages 16-19).
 12. Encourage active recall and deep understanding over rote memorization.
 
 RESPONSE STRUCTURE:
@@ -27,11 +27,11 @@ Use these sections where appropriate (do NOT force every section into every resp
 - ### Quick Recall — Short memory aid or mnemonic
 - ### Check Yourself — One short question for active recall
 
-SCIENTIFIC ACCURACY:
-- Use proper biological terminology (e.g., "mitochondria" not "powerhouse" alone).
-- When explaining processes, include specific molecules, enzymes, and structures.
-- Reference the correct biological classification system.
-- Use standard units and measurements.
+SUBJECT ACCURACY:
+- Use proper subject-specific terminology (precise technical terms, not vague everyday words).
+- When explaining processes, include the specific components, mechanisms, steps, formulas, or structures involved.
+- Where relevant, reference the correct classification/systematic organization for the subject.
+- Use standard units, formulas, and measurements.
 
 INTERACTION STYLE:
 - Be encouraging and supportive.
@@ -50,12 +50,12 @@ const SINHALA_ADDITIONS = `When responding in Sinhala:
 - Do NOT translate scientific terms into unnatural Sinhala constructions.
 - Use the pattern: Sinhala explanation + (English term) + continued Sinhala explanation.`;
 
-const CONTEXT_HEADER = `BIOLOGY CONTEXT:
+const CONTEXT_HEADER = `{SUBJECT} CONTEXT:
 The following content has been retrieved from the BioPulse syllabus database. Use it as the primary source for your response when relevant.
 
 {context}
 
-If the context is empty or insufficient, use your general Biology knowledge but clearly label it as "AI-generated content" and note that it may not match the exact syllabus structure.`;
+If the context is empty or insufficient, use your general {SUBJECT} knowledge but clearly label it as "AI-generated content" and note that it may not match the exact syllabus structure.`;
 
 const STUDENT_HEADER = `STUDENT PROFILE:
 Level: {level}
@@ -84,17 +84,19 @@ export function buildSystemPrompt(options: {
   topicStatus?: string;
   masteryScore?: number;
   confidence?: string;
+  subject?: string;
 }): string {
   const modeConfig = AI_MODES.find((m) => m.id === options.mode) || AI_MODES[0];
+  const subject = options.subject || "Biology";
 
-  let prompt = BIOLOGY_TUTOR_BASE + "\n\n" + modeConfig.systemSuffix;
+  let prompt = TUTOR_BASE.replaceAll("{SUBJECT}", subject) + "\n\n" + modeConfig.systemSuffix;
 
   if (options.language === "si") {
     prompt += "\n\n" + SINHALA_ADDITIONS;
   }
 
   if (options.context) {
-    prompt += "\n\n" + CONTEXT_HEADER.replace("{context}", options.context);
+    prompt += "\n\n" + CONTEXT_HEADER.replaceAll("{SUBJECT}", subject).replace("{context}", options.context);
   }
 
   const studentParts: string[] = [];
@@ -133,7 +135,7 @@ export function buildConversationHistory(
   // If first message is assistant, prepend a context reminder
   if (recent.length > 0 && recent[0].role === "ASSISTANT") {
     return [
-      { role: "user", content: "Please continue helping me with my Biology studies." },
+      { role: "user", content: "Please continue helping me with my studies." },
       ...recent,
     ];
   }

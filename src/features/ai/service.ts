@@ -3,6 +3,7 @@ import { getAIProvider } from "./provider";
 import { aiConfig } from "./config";
 import { buildSystemPrompt, buildConversationHistory, formatBiologyContext, generateConversationTitle } from "./prompts";
 import { getBiologyContext } from "@/features/content/service";
+import { getSubject } from "@/types/subject";
 import { toUserFacingError, toDiagnostic } from "./errors";
 import type { AIMode, AIChatRequest, AIChatResponse, AIStreamChunk, ConversationSummary, ChatMessage } from "./types";
 
@@ -90,6 +91,7 @@ export class AIService {
       topicStatus: topicProgress?.status || undefined,
       masteryScore: topicProgress?.masteryScore || undefined,
       confidence: topicProgress?.confidence || undefined,
+      subject: request.subjectId ? getSubject(request.subjectId as "bio" | "chem" | "phy" | "agri" | "math" | "ict" | "dt").name : "Biology",
     });
 
     // Build messages array
@@ -235,6 +237,7 @@ export class AIService {
       topicStatus: topicProgress?.status || undefined,
       masteryScore: topicProgress?.masteryScore || undefined,
       confidence: topicProgress?.confidence || undefined,
+      subject: request.subjectId ? getSubject(request.subjectId as "bio" | "chem" | "phy" | "agri" | "math" | "ict" | "dt").name : "Biology",
     });
 
     const conversationHistory = buildConversationHistory(

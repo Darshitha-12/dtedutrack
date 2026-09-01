@@ -12,6 +12,7 @@ export const chatRequestSchema = z.object({
   subtopicId: z.string().optional(),
   mode: aiModeEnum.optional().default("tutor"),
   language: z.enum(["en", "si"]).optional().default("en"),
+  subjectId: z.string().max(20).optional(),
 });
 
 export type ChatRequestInput = z.infer<typeof chatRequestSchema>;

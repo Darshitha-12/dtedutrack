@@ -172,8 +172,19 @@ describe("buildSystemPrompt", () => {
       mode: "tutor",
       context: "Photosynthesis converts light energy to chemical energy.",
     });
-    expect(prompt).toContain("BIOLOGY CONTEXT:");
+    expect(prompt).toContain("Biology CONTEXT:");
     expect(prompt).toContain("Photosynthesis converts light energy to chemical energy.");
+  });
+
+  it("uses the selected subject in the base prompt and context header", () => {
+    const prompt = buildSystemPrompt({
+      mode: "tutor",
+      subject: "Design & Technology",
+      context: "Isometric projection fundamentals.",
+    });
+    expect(prompt).toContain("specializing in A/L (Advanced Level) Design & Technology");
+    expect(prompt).toContain("Design & Technology CONTEXT:");
+    expect(prompt).toContain("Isometric projection fundamentals.");
   });
 
   it("includes student profile with level", () => {

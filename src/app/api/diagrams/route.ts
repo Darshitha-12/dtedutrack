@@ -60,8 +60,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ content: toMarkdown(text.split("\n")) });
     } catch (error) {
       console.error("[DIAGRAMS] Gemini error:", error);
+      const message = error instanceof Error ? error.message : "Failed to generate the diagram.";
       return NextResponse.json(
-        { error: "Failed to generate the diagram. Please try again." },
+        { error: message.slice(0, 500) },
         { status: 500 },
       );
     }

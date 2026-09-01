@@ -1,4 +1,4 @@
-export type SubjectId = "bio" | "chem" | "phy" | "agri" | "math" | "ict";
+export type SubjectId = "bio" | "chem" | "phy" | "agri" | "math" | "ict" | "dt";
 
 export interface Subject {
   id: SubjectId;
@@ -14,6 +14,7 @@ export const SUBJECTS: Record<SubjectId, Subject> = {
   agri: { id: "agri", name: "Agriculture", icon: "🌾", color: "#F59E0B" },
   math: { id: "math", name: "Mathematics", icon: "📐", color: "#EF4444" },
   ict: { id: "ict", name: "ICT", icon: "💻", color: "#EC4899" },
+  dt: { id: "dt", name: "Design & Technology", icon: "🛠️", color: "#0EA5E9" },
 };
 
 export const SUBJECT_LIST = Object.values(SUBJECTS);
