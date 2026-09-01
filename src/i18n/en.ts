@@ -128,6 +128,7 @@ export const en = {
     search: "Search",
     pomodoro: "Pomodoro",
     alarms: "Alarms",
+    reminders: "Reminders",
     marks: "Marks",
     settings: "Settings",
     profile: "Profile",

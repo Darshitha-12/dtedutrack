@@ -19,6 +19,7 @@ import {
   Search,
   Clock,
   Bell,
+  BellRing,
   Settings,
   User,
   X,
@@ -72,6 +73,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "Pomodoro", labelKey: "sidebar.pomodoro", href: "/focus", icon: Clock },
       { label: "Alarms", labelKey: "sidebar.alarms", href: "/alarms", icon: Bell },
+      { label: "Reminders", labelKey: "sidebar.reminders", href: "/reminders", icon: BellRing },
     ],
   },
   {

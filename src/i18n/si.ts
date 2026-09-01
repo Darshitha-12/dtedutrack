@@ -128,6 +128,7 @@ export const si = {
     search: "සොයන්න",
     pomodoro: "පොමොඩෝරෝ",
     alarms: "ඇලාරම්",
+    reminders: "මතක් කිරීම්",
     marks: "ලකුණු",
     settings: "සැකසුම්",
     profile: "පැතිකඩ",

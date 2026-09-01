@@ -367,6 +367,36 @@ export default function TelegramPage() {
         description="Join Sri Lankan A/L study groups and channels, or chat live with the BioPulse community."
       />
 
+      {/* ─── Official Telegram Web (phone number + OTP login) ─── */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="flex items-center gap-2 text-lg font-semibold">
+                <Send className="h-4 w-4 text-sky-500" /> Official Telegram Web
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Enter your phone number on Telegram&apos;s official web app, get the OTP, and sign in
+                to your own account. Telegram blocks in-app embedding, so it opens in a new tab.
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <a
+                href="https://web.telegram.org/k/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex"
+              >
+                <Button className="gap-2">
+                  <ExternalLink className="h-4 w-4" />
+                  Continue on Telegram Web
+                </Button>
+              </a>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* ─── App channels (join & chat in-app, no Telegram needed) ─── */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
