@@ -13,6 +13,7 @@ import { notificationService } from "@/services/notification";
 
 const CONFIG_KEY = "biopulse_pomodoro_config_v1";
 const LIVE_KEY = "biopulse_pomodoro_live_v1";
+const STATUS_TAG = "biopulse-pomodoro-status";
 
 function loadConfig(): PomodoroConfig {
   try {
@@ -52,7 +53,7 @@ function phaseDuration(phase: PomodoroPhase, config: PomodoroConfig): number {
   }
 }
 
-export function usePomodoro() {
+export function usePomodoroTimer() {
   const [config, setConfig] = useState<PomodoroConfig>(() =>
     loadConfig(),
   );
@@ -126,6 +127,32 @@ export function usePomodoro() {
     const id = setInterval(tick, 500);
     return () => clearInterval(id);
   }, [tick]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const current = liveRef.current;
+      const cfg = configRef.current;
+      if (!current.running && current.pausedMs === 0) {
+        notificationService.clearStatus(STATUS_TAG);
+        return;
+      }
+      const raw = current.running ? current.endTs - Date.now() : current.pausedMs;
+      const remaining = Math.max(0, raw);
+      const totalSec = Math.ceil(remaining / 1000);
+      const mm = Math.floor(totalSec / 60);
+      const ss = totalSec % 60;
+      const timeLeft = `${mm}:${String(ss).padStart(2, "0")}`;
+      const phaseName =
+        current.phase === "longbreak" ? "Long Break" : current.phase === "break" ? "Short Break" : "Focus";
+      const title = `🧘 BioPulse · ${phaseName}`;
+      const body = `${timeLeft} left${current.running ? "" : " (paused)"} · ${current.cyclesDone}/${cfg.cycles} cycles`;
+      notificationService.updateStatus(STATUS_TAG, title, body);
+    }, 1000);
+    return () => {
+      clearInterval(id);
+      notificationService.clearStatus(STATUS_TAG);
+    };
+  }, []);
 
   useEffect(() => {
     try {

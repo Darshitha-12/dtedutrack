@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
-import { usePomodoro } from "@/features/pomodoro/hooks/use-pomodoro";
+import { usePomodoro } from "@/features/pomodoro/PomodoroProvider";
 import {
   Play,
   Pause,

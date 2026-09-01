@@ -79,6 +79,8 @@ class NtfyNotificationProvider implements NotificationProvider {
 export interface NotificationService {
   sendAlarm(alarm: Alarm): Promise<void>;
   sendBrowser(title: string, body: string): Promise<boolean>;
+  updateStatus(tag: string, title: string, body: string): Promise<void>;
+  clearStatus(tag: string): Promise<void>;
   requestPermission(): Promise<NotificationPermission>;
   getPermission(): NotificationPermission | "unsupported";
 }
@@ -99,6 +101,41 @@ class NotificationServiceImpl implements NotificationService {
 
   async sendBrowser(title: string, body: string): Promise<boolean> {
     return this.browser.send(title, body);
+  }
+
+  async updateStatus(tag: string, title: string, body: string): Promise<void> {
+    if (
+      typeof navigator === "undefined" ||
+      !("serviceWorker" in navigator) ||
+      typeof window === "undefined" ||
+      !("Notification" in window)
+    ) {
+      return;
+    }
+    if (Notification.permission !== "granted") return;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification(title, {
+        body,
+        icon: "/icon-192.png",
+        badge: "/icon-192.png",
+        tag,
+        renotify: false,
+      } as NotificationOptions);
+    } catch {
+      // notification update failed — ignore
+    }
+  }
+
+  async clearStatus(tag: string): Promise<void> {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const notifications = await reg.getNotifications({ tag });
+      for (const notification of notifications) notification.close();
+    } catch {
+      // cleanup failed — ignore
+    }
   }
 
   async requestPermission(): Promise<NotificationPermission> {

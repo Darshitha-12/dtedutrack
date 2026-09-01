@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { AlarmForm } from "@/features/alarms/components/AlarmForm";
@@ -11,9 +11,13 @@ import { useAlarmRinger } from "@/features/alarms/hooks/use-alarm-ringer";
 import {
   checkAlarms,
   getDedupKey,
+  nextOccurrenceFor,
 } from "@/features/alarms/lib/scheduler";
 import type { Alarm, CreateAlarmInput } from "@/features/alarms/lib/scheduler";
+import { notificationService } from "@/services/notification";
 import { BellOff } from "lucide-react";
+
+const ALARM_STATUS_TAG = "biopulse-alarm-status";
 
 export default function AlarmsPage() {
   const {
@@ -61,6 +65,51 @@ export default function AlarmsPage() {
     }, 1000);
     return () => clearInterval(id);
   }, [alarms, fired, markFired, triggerAlarm]);
+
+  // persistent status notification — shows next upcoming alarm
+  const lastAlarmStatusRef = useRef("");
+
+  useEffect(() => {
+    const update = () => {
+      const upcoming = alarms
+        .filter((alarm) => alarm.enabled)
+        .map((alarm) => ({ alarm, next: nextOccurrenceFor(alarm) }))
+        .filter(
+          (item): item is { alarm: Alarm; next: Date } => item.next !== null,
+        )
+        .sort((a, b) => a.next.getTime() - b.next.getTime());
+
+      if (upcoming.length === 0) {
+        lastAlarmStatusRef.current = "";
+        notificationService.clearStatus(ALARM_STATUS_TAG);
+        return;
+      }
+
+      const { alarm, next } = upcoming[0];
+      const mins = Math.max(0, Math.round((next.getTime() - Date.now()) / 60000));
+      const hrs = Math.floor(mins / 60);
+      const rm = mins % 60;
+      const countdown = hrs > 0 ? `${hrs}h ${rm}m` : `${rm}m`;
+      const label =
+        alarm.label || (alarm.subject !== "none" ? alarm.subject : "Alarm");
+      const title =
+        alarm.priority === "high"
+          ? `🚨 Alarm · ${alarm.time}`
+          : `⏰ Alarm · ${alarm.time}`;
+      const body = `${label} · in ${countdown}`;
+      const key = `${title}|${body}`;
+      if (key === lastAlarmStatusRef.current) return;
+      lastAlarmStatusRef.current = key;
+      notificationService.updateStatus(ALARM_STATUS_TAG, title, body);
+    };
+
+    const id = setInterval(update, 5000);
+    update();
+    return () => {
+      clearInterval(id);
+      notificationService.clearStatus(ALARM_STATUS_TAG);
+    };
+  }, [alarms]);
 
   const handleFormSubmit = useCallback(
     (input: CreateAlarmInput) => {
