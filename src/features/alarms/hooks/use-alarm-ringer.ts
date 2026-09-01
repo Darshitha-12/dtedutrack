@@ -1,0 +1,110 @@
+"use client";
+
+import { useState, useCallback, useRef, useEffect } from "react";
+import { AudioEngine } from "../lib/audio-engine";
+import type { Alarm } from "../lib/scheduler";
+
+export function useAlarmRinger() {
+  const [currentAlarm, setCurrentAlarm] = useState<Alarm | null>(null);
+  const [isRinging, setIsRinging] = useState(false);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const vibrationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const snoozeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const requestWakeLock = useCallback(async () => {
+    try {
+      if ("wakeLock" in navigator) {
+        wakeLockRef.current = await navigator.wakeLock.request("screen");
+      }
+    } catch {
+      // wake lock denied or unavailable
+    }
+  }, []);
+
+  const releaseWakeLock = useCallback(() => {
+    if (wakeLockRef.current) {
+      wakeLockRef.current.release().catch(() => {});
+      wakeLockRef.current = null;
+    }
+  }, []);
+
+  const startVibration = useCallback(() => {
+    if ("vibrate" in navigator) {
+      const pattern = [300, 100, 300, 100, 500, 200, 300, 100, 300];
+      navigator.vibrate(pattern);
+      vibrationTimerRef.current = setInterval(() => {
+        navigator.vibrate(pattern);
+      }, 2500);
+    }
+  }, []);
+
+  const stopVibration = useCallback(() => {
+    if (vibrationTimerRef.current !== null) {
+      clearInterval(vibrationTimerRef.current);
+      vibrationTimerRef.current = null;
+    }
+    if ("vibrate" in navigator) {
+      navigator.vibrate(0);
+    }
+  }, []);
+
+  const triggerAlarm = useCallback(
+    (alarm: Alarm) => {
+      setCurrentAlarm(alarm);
+      setIsRinging(true);
+      AudioEngine.play(alarm.sound);
+      startVibration();
+      requestWakeLock();
+    },
+    [startVibration, requestWakeLock],
+  );
+
+  const dismiss = useCallback(() => {
+    AudioEngine.stop();
+    stopVibration();
+    releaseWakeLock();
+    setCurrentAlarm(null);
+    setIsRinging(false);
+  }, [stopVibration, releaseWakeLock]);
+
+  const snooze = useCallback(
+    (minutes: number) => {
+      const alarmToSnooze = currentAlarm;
+      dismiss();
+      if (alarmToSnooze) {
+        snoozeTimerRef.current = setTimeout(() => {
+          triggerAlarm(alarmToSnooze);
+        }, minutes * 60 * 1000);
+      }
+    },
+    [currentAlarm, dismiss, triggerAlarm],
+  );
+
+  const stopAll = useCallback(() => {
+    if (snoozeTimerRef.current !== null) {
+      clearTimeout(snoozeTimerRef.current);
+      snoozeTimerRef.current = null;
+    }
+    dismiss();
+  }, [dismiss]);
+
+  useEffect(() => {
+    return () => {
+      AudioEngine.stop();
+      stopVibration();
+      releaseWakeLock();
+      if (snoozeTimerRef.current !== null) {
+        clearTimeout(snoozeTimerRef.current);
+      }
+    };
+  }, [stopVibration, releaseWakeLock]);
+
+  return {
+    currentAlarm,
+    isRinging,
+    triggerAlarm,
+    dismiss,
+    snooze,
+    stopAll,
+  };
+}
