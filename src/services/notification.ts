@@ -19,6 +19,11 @@ class BrowserNotificationProvider implements NotificationProvider {
           badge: "/icon-192.png",
           tag: `bp-${Date.now()}`,
           renotify: true,
+          vibrate: [200, 100, 200, 100, 500],
+          ...({
+            urgency: "high",
+            priority: 2,
+          } as Record<string, unknown>),
           ...options,
         } as NotificationOptions);
         return true;
