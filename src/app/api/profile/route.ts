@@ -65,6 +65,14 @@ export async function PATCH(req: Request) {
     const userId = session.user.id;
     const body = await req.json();
 
+    const name = typeof body.name === "string" ? body.name.trim() : undefined;
+    if (name !== undefined && (name.length < 2 || name.length > 100)) {
+      return NextResponse.json(
+        { error: { name: ["Name must be 2-100 characters"] } },
+        { status: 400 }
+      );
+    }
+
     const parsed = studentProfileSchema.partial().safeParse(body);
 
     if (!parsed.success) {
@@ -74,12 +82,12 @@ export async function PATCH(req: Request) {
       );
     }
 
-    const { name, ...profileData } = parsed.data as Record<string, unknown>;
+    const { ...profileData } = parsed.data as Record<string, unknown>;
 
     if (name) {
       await db.user.update({
         where: { id: userId },
-        data: { name: name as string },
+        data: { name },
       });
     }
 

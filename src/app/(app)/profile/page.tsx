@@ -164,10 +164,21 @@ export default function ProfilePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setProfile((prev) => ({ ...prev, weakTopics }));
         setSaveState("saved");
       } else {
+        const err = data?.error;
+        const msg =
+          typeof err === "string"
+            ? err
+            : err && typeof err === "object"
+            ? Object.values(err)
+                .flat()
+                .join("; ")
+            : "Failed to save profile. Please try again.";
+        if (msg) showToast(msg, "error");
         setSaveState("error");
       }
     } catch {

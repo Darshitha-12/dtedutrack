@@ -188,7 +188,7 @@ describe("onboarding validation", () => {
     const result = onboardingSchema.safeParse({
       fullName: "Test Student",
       language: "en",
-      examYear: 2020,
+      examYear: 1999,
       dailyStudyTarget: 4,
       weeklyStudyTarget: 28,
       currentLevel: "intermediate",

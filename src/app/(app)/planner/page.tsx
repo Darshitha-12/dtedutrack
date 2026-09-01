@@ -31,6 +31,7 @@ import {
   ListChecks,
   RotateCcw,
   SkipForward,
+  Copy,
 } from "lucide-react";
 import {
   DAY_NAMES,
@@ -141,10 +142,15 @@ export default function PlannerPage() {
   const [sessions, setSessions] = useState<PlannerSession[]>([]);
   const [subjects, setSubjects] = useState<SubjectOption[]>([]);
   const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [syncMode, setSyncMode] = useState(false);
   const [today, setToday] = useState(new Date());
 
   // generator state
   const [preview, setPreview] = useState<{ sessions: PlannedSession[]; weeklyAvailableMin: number; weeklyPlannedMin: number; weeklyTargetMin: number; remainingMin: number; byDay: { dayOfWeek: number; availableMin: number; plannedMin: number }[] } | null>(null);
+  const [aiGoals, setAiGoals] = useState("");
+  const [aiPlan, setAiPlan] = useState<string | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   // manual add / edit state
   const [formOpen, setFormOpen] = useState(false);
@@ -279,33 +285,52 @@ export default function PlannerPage() {
     setDays((prev) => prev.map((d) => (d.dayOfWeek === dow ? { ...d, ...patch } : d)));
   }
 
+  function mutateDayBlocks(dow: number, updater: (blocks: TimeBlock[]) => TimeBlock[], enable = false) {
+    setDays((prev) => {
+      let next = prev.map((d) =>
+        d.dayOfWeek === dow ? { ...d, enabled: enable ? true : d.enabled, blocks: updater(d.blocks) } : d,
+      );
+      if (syncMode) {
+        const src = next.find((d) => d.dayOfWeek === dow);
+        if (src) {
+          next = next.map((d) =>
+            d.dayOfWeek === dow ? d : { ...d, enabled: enable ? true : d.enabled, blocks: [...src.blocks] },
+          );
+        }
+      }
+      return next;
+    });
+  }
+
   function addBlock(dow: number) {
-    setDays((prev) =>
-      prev.map((d) => {
-        if (d.dayOfWeek !== dow) return d;
-        const blocks = [...d.blocks, { startMinute: 480, endMinute: 540 }];
-        return { ...d, blocks };
-      }),
-    );
+    mutateDayBlocks(dow, (blocks) => [...blocks, { startMinute: 480, endMinute: 540 }], true);
   }
 
   function updateBlock(dow: number, idx: number, patch: Partial<TimeBlock>) {
-    setDays((prev) =>
-      prev.map((d) => {
-        if (d.dayOfWeek !== dow) return d;
-        return { ...d, blocks: d.blocks.map((b, i) => (i === idx ? { ...b, ...patch } : b)) };
-      }),
-    );
+    mutateDayBlocks(dow, (blocks) => blocks.map((b, i) => (i === idx ? { ...b, ...patch } : b)), true);
   }
 
   function removeBlock(dow: number, idx: number) {
-    setDays((prev) =>
-      prev.map((d) => {
-        if (d.dayOfWeek !== dow) return d;
-        const blocks = d.blocks.filter((_, i) => i !== idx);
-        return { ...d, blocks: blocks.length === 0 ? [] : blocks };
-      }),
-    );
+    mutateDayBlocks(dow, (blocks) => blocks.filter((_, i) => i !== idx));
+  }
+
+  function setDayHours(dow: number, hours: number) {
+    setDays((prev) => {
+      const minutes = Math.max(0, Math.min(24, (Number.isFinite(hours) ? hours : 0) || 0)) * 60;
+      const day = prev.find((d) => d.dayOfWeek === dow);
+      const start = day?.blocks[0]?.startMinute ?? 480;
+      const nextBlocks = minutes <= 0 ? [] : [{ startMinute: start, endMinute: Math.min(1440, start + minutes) }];
+      let next = prev.map((d) =>
+        d.dayOfWeek === dow ? { ...d, blocks: nextBlocks } : d,
+      );
+      if (syncMode) {
+        const src = next.find((d) => d.dayOfWeek === dow);
+        if (src) {
+          next = next.map((d) => (d.dayOfWeek === dow ? d : { ...d, blocks: [...src.blocks] }));
+        }
+      }
+      return next;
+    });
   }
 
   async function saveAvailability() {
@@ -397,6 +422,33 @@ export default function PlannerPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function runAIPlan() {
+    if (!aiGoals.trim()) {
+      showToast("Tell me what you need help with first", "error");
+      return;
+    }
+    setAiBusy(true);
+    setAiError(null);
+    try {
+      await api("saveDays", { days });
+      const res = await api("aiPlan", { goals: aiGoals });
+      setAiPlan(res.plan);
+      showToast("AI study plan ready", "success");
+    } catch (e: any) {
+      setAiError(e?.data?.error || "Failed to generate AI plan");
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  function copyAIPlan() {
+    if (!aiPlan) return;
+    navigator.clipboard?.writeText(aiPlan).then(
+      () => showToast("Plan copied to clipboard", "success"),
+      () => showToast("Could not copy plan", "error"),
+    );
   }
 
   async function savePreview() {
@@ -852,6 +904,18 @@ export default function PlannerPage() {
             </p>
           </CardHeader>
           <CardContent>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Toggle
+                  checked={syncMode}
+                  onCheckedChange={setSyncMode}
+                  label="Same time for all days"
+                />
+                <span className="text-xs text-muted-foreground">
+                  {syncMode ? "Edits apply to every day automatically" : "Add one time, then every day stays independent"}
+                </span>
+              </div>
+            </div>
             <div className="space-y-4">
               {days.map((d) => (
                 <div key={d.dayOfWeek} className={`rounded-lg border p-3 ${d.enabled ? "border-primary/40 bg-primary/5" : "border-border"}`}>
@@ -861,7 +925,19 @@ export default function PlannerPage() {
                       onCheckedChange={(v) => patchDay(d.dayOfWeek, { enabled: v })}
                       label={DAY_NAMES[d.dayOfWeek]}
                     />
-                    <div className="ml-auto flex items-center gap-2 text-sm">
+                    <div className="ml-auto flex flex-wrap items-center gap-2 text-sm">
+                      <span className="text-muted-foreground">Hours:</span>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={24}
+                        step={0.5}
+                        className="h-8 w-16"
+                        value={Math.round((dayTotalAvailable(d.blocks) / 60) * 2) / 2 || ""}
+                        placeholder="0"
+                        onChange={(e) => setDayHours(d.dayOfWeek, Number(e.target.value))}
+                        title="Set total available hours for this day (auto-converts to a time block)"
+                      />
                       <span className="text-muted-foreground">Daily target (min):</span>
                       <Input
                         type="number"
@@ -1111,6 +1187,60 @@ export default function PlannerPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* AI Study Plan */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Sparkles className="h-4 w-4 text-primary" /> AI Study Plan
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Tell me what&apos;s on your mind — upcoming exams, weak subjects, goals, or anything else. I&apos;ll build a
+                personalized weekly plan inside your available time.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <textarea
+                className="min-h-[110px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                placeholder={`e.g. මගේ ජීව විද්‍යාව හරියටම හරි නෑ, ලබන සතියේ ගණිතය ටෙස්ට් එකක් තියෙනවා...`}
+                value={aiGoals}
+                onChange={(e) => setAiGoals(e.target.value)}
+              />
+              <Button onClick={runAIPlan} disabled={aiBusy} className="mt-2 gap-2">
+                {aiBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                Generate AI Study Plan
+              </Button>
+              {aiError && <p className="mt-2 text-sm text-destructive">{aiError}</p>}
+            </CardContent>
+          </Card>
+
+          {aiPlan && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Sparkles className="h-4 w-4 text-primary" /> My AI Study Plan
+                </CardTitle>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={copyAIPlan} className="gap-1">
+                    <Copy className="h-3.5 w-3.5" /> Copy
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setAiPlan(null);
+                      setAiGoals("");
+                    }}
+                  >
+                    Discard
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <pre className="whitespace-pre-wrap rounded-md bg-muted/50 p-4 text-sm leading-relaxed">{aiPlan}</pre>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Preview */}
           {preview && (

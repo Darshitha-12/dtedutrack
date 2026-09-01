@@ -15,8 +15,11 @@ import {
   type TimeBlock,
 } from "@/features/planner/lib/scheduler";
 import { getSubjects } from "@/features/content/service";
+import { SUBJECT_LIST } from "@/types/subject";
+import { getAIProvider } from "@/features/ai/provider";
 
 const DAYS = [0, 1, 2, 3, 4, 5, 6];
+const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 const blockSchema = z.object({
   startMinute: z.number().int().min(0).max(1439),
@@ -155,13 +158,7 @@ export async function GET() {
             weeklyStudyTarget: profile.weeklyStudyTarget,
           }
         : null,
-      subjects: subjects.map((s) => ({
-        id: s.id,
-        slug: s.slug,
-        name: s.name,
-        icon: s.icon,
-        color: s.color,
-      })),
+      subjects: mergeSubjects(subjects),
       dayNames: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
     });
   } catch (error) {
@@ -171,6 +168,15 @@ export async function GET() {
     console.error("Planner GET error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
+}
+
+function mergeSubjects(dbSubjects: { id: string; slug: string; name: string; icon: string; color: string }[]) {
+  const seen = new Set<string>();
+  const all = [
+    ...SUBJECT_LIST.map((s) => ({ id: s.id, slug: s.id, name: s.name, icon: s.icon, color: s.color })),
+    ...dbSubjects.map((s) => ({ id: s.id, slug: s.slug, name: s.name, icon: s.icon, color: s.color })),
+  ];
+  return all.filter((s) => (seen.has(s.id) ? false : (seen.add(s.id), true)));
 }
 
 export async function POST(req: Request) {
@@ -306,6 +312,86 @@ export async function POST(req: Request) {
           remainingMin: result.remainingMin,
           byDay: result.byDay,
         });
+      }
+
+      case "aiPlan": {
+        const goals = z.string().min(1).max(4000).parse(body.goals);
+        const provider = getAIProvider();
+        if (!provider.isAvailable()) {
+          return NextResponse.json(
+            { error: "AI is not configured. Set GEMINI_API_KEY in the deployment environment." },
+            { status: 503 },
+          );
+        }
+
+        const [prefs, profile] = await Promise.all([
+          db.timetablePref.findUnique({ where: { userId } }),
+          db.studentProfile.findUnique({ where: { userId } }),
+        ]);
+        const prefDefaults = {
+          weeklyTargetMin: 0,
+          subjectPriorities: [] as { subjectId: string; name: string; priority: string }[],
+          weakTopics: [] as string[],
+        };
+        const effPrefs = prefs
+          ? {
+              weeklyTargetMin: prefs.weeklyTargetMin,
+              subjectPriorities: (prefs.subjectPriorities as unknown as { subjectId: string; name: string; priority: string }[]) ?? [],
+              weakTopics: prefs.weakTopics ?? [],
+            }
+          : prefDefaults;
+
+        const dayRows = await db.timetableDay.findMany({ where: { userId } });
+        const dayLines = DAYS.map((d) => {
+          const row = dayRows.find((r) => r.dayOfWeek === d);
+          const blocks: TimeBlock[] = row ? ((row.blocks as unknown as TimeBlock[]) ?? []) : [];
+          const avail = dayTotalAvailable(blocks);
+          return `${DAY_NAMES[d]}: ${row?.enabled ? `${Math.round((avail / 60) * 10) / 10}h available${blocks.length > 0 ? ` (${blocks.map((b) => `${b.startMinute}–${b.endMinute}`).join(", ")})` : ""}` : "not available"}`;
+        }).join("\n");
+
+        const subjectsLine = effPrefs.subjectPriorities.length > 0
+          ? effPrefs.subjectPriorities.map((s) => `${s.name} (${s.priority})`).join(", ")
+          : "not set yet";
+        const examLine = profile
+          ? `Exam type: ${profile.examType || "A/L"}${profile.examYear ? `, Year: ${profile.examYear}` : ""}${profile.examDate ? `, Date: ${profile.examDate.toISOString().split("T")[0]}` : ""}`
+          : "not set";
+
+        const system = [
+          "You are the AI study-plan assistant inside BioPulse, a Sri Lankan A/L study planner.",
+          "The student explains their situation and goals in their own words. Using their available time, subjects, and exam info, create ONE personalized weekly study plan.",
+          "Rules:",
+          "- Stay strictly inside the student's stated weekly available time. Never invent extra hours.",
+          "- Prioritize weak topics and high-priority subjects.",
+          "- Mix study types smartly: Learn, Revision, MCQ/PastPaper practice, WeakTopic drills.",
+          "- Include realistic breaks between sessions and at least one full rest slot across the week.",
+          "- Reply in proper Sinhala letters if the student writes in Sinhala/Singlish; otherwise reply in English.",
+          "Format the answer with clear sections:",
+          "### මගේ සති කාලසටහන (My Weekly Plan) — day-by-day: suggested time ranges, subject, topic/focus, and type",
+          "### අවධානය / Focus Points",
+          "### විභාගයට කලින් / Before Exam — a short revision strategy",
+        ].join("\n");
+
+        const userMsg = [
+          "Given my situation and goals, build my study plan.",
+          `My goals/thoughts: ${goals}`,
+          `My subjects and priorities: ${subjectsLine}`,
+          `Weak topics: ${effPrefs.weakTopics.length > 0 ? effPrefs.weakTopics.join(", ") : "none set"}`,
+          `Weekly target (minutes): ${effPrefs.weeklyTargetMin || "no target"}`,
+          `Exam info: ${examLine}`,
+          `My weekly availability:\n${dayLines}`,
+        ].join("\n");
+
+        try {
+          const result = await provider.chat([
+            { role: "system", content: system },
+            { role: "user", content: userMsg },
+          ]);
+          return NextResponse.json({ ok: true, plan: result.content });
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error("[AI-PLAN]", msg);
+          return NextResponse.json({ error: "AI generation failed. Please try again later." }, { status: 502 });
+        }
       }
 
       case "saveGenerated": {

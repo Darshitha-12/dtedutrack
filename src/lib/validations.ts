@@ -32,7 +32,7 @@ export const examYearNumber = z.preprocess(
     if (typeof v === "string" && v.trim() !== "") return Number(v);
     return v;
   },
-  z.number().int().min(2024).max(2030).optional(),
+  z.number().int().min(2000).max(2045).optional(),
 );
 
 export const studentProfileSchema = z.object({

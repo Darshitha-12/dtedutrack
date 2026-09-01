@@ -79,6 +79,7 @@ export default function DashboardPage() {
   const [marks, setMarks] = useState<Mark[]>([]);
   const [studyWeek, setStudyWeek] = useState<{ date: string; minutes: number }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [authTimeout, setAuthTimeout] = useState(false);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -87,11 +88,24 @@ export default function DashboardPage() {
       fetchAlarms();
       fetchExamMarks();
       fetchAnalytics();
-    } else {
+    } else if (status === "unauthenticated") {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAuthTimeout(true);
+      fetchProfile();
+      fetchStudyStats();
+      fetchAlarms();
+      fetchExamMarks();
+      fetchAnalytics();
+    }, 8000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function fetchProfile() {
     try {
@@ -206,7 +220,7 @@ export default function DashboardPage() {
     return completeness;
   }
 
-  if (status === "loading") {
+  if (status === "loading" && !authTimeout) {
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="flex items-center justify-center min-h-[400px]">
@@ -216,7 +230,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (status === "unauthenticated") {
+  if (status === "unauthenticated" && !authTimeout) {
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="flex items-center justify-center min-h-[400px]">
