@@ -121,6 +121,7 @@ export const si = {
     examMarks: "විභාග ලකුණු",
     diagramLab: "රූප සටහන් රසායනාගාරය",
     telegramGroup: "ටෙලිග්‍රෑම් කණ්ඩායම්",
+    messages: "පණිවිඩ",
     studyPlanner: "අධ්‍යයන සැලසුම්කරු",
     mistakeBook: "වැරදි පොත",
     analytics: "විශ්ලේෂණ",

@@ -42,6 +42,9 @@ model User {
   flashcardDecks   FlashcardDeck[]
   chatMessages     ChatMessage[]
   groupMembers     GroupMember[]
+  sentMessages     DirectMessage[] @relation("DirectMessageSender")
+  receivedMessages DirectMessage[] @relation("DirectMessageReceiver")
+  presence         Presence?
 
   @@map("users")
 }
@@ -768,4 +771,38 @@ model GroupMember {
   @@index([channelId])
   @@index([telegramGroupId])
   @@map("group_members")
+}
+
+// ============================================================
+// DIRECT MESSAGING (WhatsApp-style 1-on-1 chat)
+// ============================================================
+
+model DirectMessage {
+  id         String   @id @default(uuid())
+  senderId   String
+  sender     User     @relation("DirectMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId String
+  receiver   User     @relation("DirectMessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  text       String   @default("")
+  mediaUrl   String?
+  mediaType  String? // image, video, audio
+  mediaName  String?
+  readAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([senderId, createdAt])
+  @@index([receiverId, createdAt])
+  @@index([receiverId, readAt])
+  @@map("direct_messages")
+}
+
+model Presence {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status    String   @default("offline") // online, offline
+  lastSeen  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user_presence")
 }

@@ -121,6 +121,7 @@ export const en = {
     examMarks: "Exam Marks",
     diagramLab: "Diagram Lab",
     telegramGroup: "Telegram Groups",
+    messages: "Messages",
     studyPlanner: "Study Planner",
     mistakeBook: "Mistake Book",
     analytics: "Analytics",

@@ -27,6 +27,7 @@ import {
   Award,
   StickyNote,
   MessagesSquare,
+  MessageCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useT, useLanguage } from "@/lib/language-context"
@@ -59,6 +60,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Exam Marks", labelKey: "sidebar.examMarks", href: "/exam-marks", icon: Award },
       { label: "Diagram Lab", labelKey: "sidebar.diagramLab", href: "/diagrams", icon: Microscope },
       { label: "Telegram Groups", labelKey: "sidebar.telegramGroup", href: "/telegram", icon: MessagesSquare },
+      { label: "Messages", labelKey: "sidebar.messages", href: "/chat", icon: MessageCircle },
       { label: "Study Planner", labelKey: "sidebar.studyPlanner", href: "/planner", icon: CalendarDays },
       { label: "Mistake Book", labelKey: "sidebar.mistakeBook", href: "/mistakes", icon: AlertTriangle },
       { label: "Analytics", labelKey: "sidebar.analytics", href: "/analytics", icon: BarChart3 },
