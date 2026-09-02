@@ -369,27 +369,47 @@ export default function TelegramPage() {
 
       {/* ─── Official Telegram Web (phone number + OTP login) ─── */}
       <Card>
-        <CardContent className="p-4">
+        <CardContent className="p-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <h2 className="flex items-center gap-2 text-lg font-semibold">
-                <Send className="h-4 w-4 text-sky-500" /> Official Telegram Web
+                <Send className="h-4 w-4 text-sky-500" /> Telegram Login (in-app)
               </h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Enter your phone number on Telegram&apos;s official web app, get the OTP, and sign in
-                to your own account. Telegram blocks in-app embedding, so it opens in a new tab.
+                On the BioPulse Android app you can sign in to Telegram right here and use it without
+                leaving the app. Enter your phone number, get the OTP, and you&apos;re in.
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
+              <a
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  const inApp = typeof window !== "undefined" &&
+                    (window as unknown as { BioPulseBridge?: { openTelegram?: () => void } })
+                      .BioPulseBridge?.openTelegram;
+                  if (inApp) {
+                    inApp();
+                  } else {
+                    window.open("https://web.telegram.org/k/", "_blank", "noopener,noreferrer");
+                  }
+                }}
+                className="inline-flex"
+              >
+                <Button className="gap-2">
+                  <ExternalLink className="h-4 w-4" />
+                  Log in inside app
+                </Button>
+              </a>
               <a
                 href="https://web.telegram.org/k/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex"
               >
-                <Button className="gap-2">
+                <Button variant="outline" className="gap-2">
                   <ExternalLink className="h-4 w-4" />
-                  Continue on Telegram Web
+                  Open Telegram Web (new tab)
                 </Button>
               </a>
             </div>
