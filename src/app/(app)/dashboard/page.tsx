@@ -95,7 +95,6 @@ export default function DashboardPage() {
   const [authTimeout, setAuthTimeout] = useState(false);
 
   function fmtWork(mins: number) {
-    if (mins < 60) return `${mins} min`;
     return `${Math.floor(mins / 60)}h ${mins % 60}m`;
   }
 
@@ -365,9 +364,7 @@ export default function DashboardPage() {
             </div>
             <div>
               <p className="text-2xl font-bold">
-                {stats.weeklyHours > 0
-                  ? `${stats.weeklyHours}h`
-                  : `${Math.round(stats.weeklyMinutes)}m`}
+                {fmtWork(stats.weeklyMinutes)}
               </p>
               <p className="text-xs text-muted-foreground">Study This Week</p>
             </div>

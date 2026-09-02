@@ -38,7 +38,6 @@ export default function WorkLogPage() {
   const [loading, setLoading] = useState(true);
 
   function fmtWork(mins: number) {
-    if (mins < 60) return `${mins} min`;
     return `${Math.floor(mins / 60)}h ${mins % 60}m`;
   }
 
