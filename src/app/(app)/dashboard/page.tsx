@@ -92,6 +92,36 @@ export default function DashboardPage() {
   const [savingWork, setSavingWork] = useState(false);
 
   useEffect(() => {
+    (window as any).__bpWorkLog = async (r: { date?: string; minutes?: number; note?: string }) => {
+      const minutes = Math.floor(Number(r?.minutes));
+      if (!minutes || minutes < 1) {
+        showToast("Enter minutes worked", "error");
+        return;
+      }
+      setSavingWork(true);
+      try {
+        const res = await fetch("/api/work-log", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date: r?.date || new Date().toISOString().slice(0, 10),
+            minutes,
+            note: r?.note || undefined,
+          }),
+        });
+        if (!res.ok) throw new Error("Failed to save");
+        showToast(`${minutes} min logged 🎉`, "success");
+        await fetchAnalytics();
+      } catch {
+        showToast("Failed to save work", "error");
+      } finally {
+        setSavingWork(false);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     if (status === "authenticated") {
       fetchProfile();
       fetchStudyStats();
@@ -224,6 +254,11 @@ export default function DashboardPage() {
 
   async function logWork(ev: React.FormEvent) {
     ev.preventDefault();
+    const bridge = (window as any).BioPulseBridge;
+    if (bridge && typeof bridge.openWorkLog === "function") {
+      bridge.openWorkLog();
+      return;
+    }
     const minutes = Math.floor(Number(workMinutes));
     if (!minutes || minutes < 1) {
       showToast("Enter minutes worked", "error");
