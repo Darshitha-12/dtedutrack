@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireSession } from "@/lib/auth-helpers";
+import { auth } from "@/lib/auth";
 
 const postSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date"),
@@ -19,7 +19,7 @@ function formatDay(d: Date): string {
 
 export async function GET() {
   try {
-    const session = await requireSession();
+    const session = await auth();
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -54,7 +54,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const session = await requireSession();
+    const session = await auth();
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
