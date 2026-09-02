@@ -78,14 +78,17 @@ export default function WorkLogPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date: new Date().toISOString().slice(0, 10), minutes, note }),
       });
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.detail || body?.error || `Failed (${res.status})`);
+      }
       setWorkHours("");
       setWorkMins("");
       setWorkNote("");
       showToast(`${fmtWork(minutes)} logged`, "success");
       await loadAll();
-    } catch {
-      showToast("Failed to save work", "error");
+    } catch (e) {
+      showToast(`Failed to save work: ${e instanceof Error ? e.message : "Unknown error"}`, "error");
     } finally {
       setSavingWork(false);
     }
