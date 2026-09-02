@@ -86,8 +86,14 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [authTimeout, setAuthTimeout] = useState(false);
   const { showToast } = useToast();
-  const [workMinutes, setWorkMinutes] = useState("");
+  const [workHours, setWorkHours] = useState("");
+  const [workMins, setWorkMins] = useState("");
   const [savingWork, setSavingWork] = useState(false);
+
+  function fmtWork(mins: number) {
+    if (mins < 60) return `${mins} min`;
+    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+  }
 
   useEffect(() => {
     (window as any).__bpWorkLog = async (r: { date?: string; minutes?: number; note?: string }) => {
@@ -108,7 +114,7 @@ export default function DashboardPage() {
           }),
         });
         if (!res.ok) throw new Error("Failed to save");
-        showToast(`${minutes} min logged 🎉`, "success");
+        showToast(`${fmtWork(minutes)} logged`, "success");
         await fetchAnalytics();
       } catch {
         showToast("Failed to save work", "error");
@@ -257,9 +263,11 @@ export default function DashboardPage() {
       bridge.openWorkLog();
       return;
     }
-    const minutes = Math.floor(Number(workMinutes));
-    if (!minutes || minutes < 1) {
-      showToast("Enter minutes worked", "error");
+    const hrs = Math.floor(Number(workHours)) || 0;
+    const mins = Math.floor(Number(workMins)) || 0;
+    const minutes = hrs * 60 + mins;
+    if (minutes < 1) {
+      showToast("Enter hours or minutes", "error");
       return;
     }
     setSavingWork(true);
@@ -270,8 +278,9 @@ export default function DashboardPage() {
         body: JSON.stringify({ date: new Date().toISOString().slice(0, 10), minutes }),
       });
       if (!res.ok) throw new Error("Failed to save");
-      setWorkMinutes("");
-      showToast(`${minutes} min logged 🎉`, "success");
+      setWorkHours("");
+      setWorkMins("");
+      showToast(`${fmtWork(minutes)} logged`, "success");
       await fetchAnalytics();
     } catch {
       showToast("Failed to save work", "error");
@@ -456,9 +465,7 @@ export default function DashboardPage() {
             <div>
               <p className="text-sm font-medium">Community Total Work</p>
               <p className="text-2xl font-bold">
-                {stats.communityMinutes >= 60
-                  ? `${Math.round((stats.communityMinutes / 60) * 10) / 10}h`
-                  : `${stats.communityMinutes}m`}{" "}
+                {fmtWork(stats.communityMinutes)}{" "}
                 <span className="text-sm font-normal text-muted-foreground">
                   across {stats.communityActiveUsers} student{stats.communityActiveUsers === 1 ? "" : "s"}
                 </span>
@@ -563,18 +570,30 @@ export default function DashboardPage() {
       <Card className="p-6 mb-6">
         <h2 className="text-lg font-semibold mb-1">Log Today&apos;s Work</h2>
         <p className="text-sm text-muted-foreground mb-4">
-          Add how many minutes you worked today (study + extra). It shows on your analytics and the community total.
+          Add how long you worked today (study + extra). Shows on analytics & community total.
         </p>
         <form onSubmit={logWork} className="flex flex-wrap items-end gap-3">
-          <div className="flex-1 min-w-[160px]">
+          <div className="flex items-center gap-1 flex-1 min-w-[120px]">
             <Input
               type="number"
-              min={1}
-              max={1440}
-              placeholder="Minutes worked (e.g. 45)"
-              value={workMinutes}
-              onChange={(e) => setWorkMinutes(e.target.value)}
+              min={0}
+              max={24}
+              placeholder="0"
+              value={workHours}
+              onChange={(e) => setWorkHours(e.target.value)}
+              className="flex-1"
             />
+            <span className="text-sm text-muted-foreground mb-2">hrs</span>
+            <Input
+              type="number"
+              min={0}
+              max={59}
+              placeholder="45"
+              value={workMins}
+              onChange={(e) => setWorkMins(e.target.value)}
+              className="flex-1"
+            />
+            <span className="text-sm text-muted-foreground mb-2">min</span>
           </div>
           <Button type="submit" disabled={savingWork} className="gap-2">
             <Plus className="h-4 w-4" />
