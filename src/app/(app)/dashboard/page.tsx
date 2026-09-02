@@ -21,8 +21,6 @@ import {
   Timer,
   AlertTriangle,
   Loader2,
-  ArrowRight,
-  User,
   Award,
   Target,
   TrendingUp,
@@ -324,30 +322,6 @@ export default function DashboardPage() {
         <div className="flex items-center justify-center min-h-[400px]">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
-      </div>
-    );
-  }
-
-  if (profile && !profile.onboarded) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <Card className="max-w-2xl mx-auto p-8 text-center">
-          <div className="flex justify-center mb-4">
-            <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
-              <User className="h-8 w-8 text-primary" />
-            </div>
-          </div>
-          <h2 className="text-2xl font-bold mb-2">Welcome to BioPulse!</h2>
-          <p className="text-muted-foreground mb-6">
-            Let&apos;s set up your profile to personalize your study experience.
-          </p>
-          <Link href="/onboarding">
-            <Button size="lg" className="gap-2">
-              Get Started
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
-        </Card>
       </div>
     );
   }
