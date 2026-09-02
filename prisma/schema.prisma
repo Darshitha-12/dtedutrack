@@ -30,6 +30,7 @@ model User {
   timetableDays    TimetableDay[]
   plannerSessions  PlannerSession[]
   pomodoroSessions PomodoroSession[]
+  workLogs         WorkLog[]
   notificationPrefs NotificationPreference?
   accounts         Account[]
   sessions         Session[]
@@ -440,6 +441,21 @@ model StudySession {
 
   @@index([userId, completedAt])
   @@map("study_sessions")
+}
+
+model WorkLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime
+  minutes   Int
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@map("work_logs")
 }
 
 model PomodoroSession {

@@ -15,7 +15,9 @@ export async function GET() {
     }
     const userId = session.user.id;
 
-    const [quizzes, topicPerf, weakTopics, wrongSummaries, studySessions, aiUsage, conversations, examRecords] =
+    const last30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [quizzes, topicPerf, weakTopics, wrongSummaries, studySessions, aiUsage, conversations, examRecords, workLogs, communityWork] =
       await Promise.all([
         getUserQuizzes(userId),
         getTopicPerformances(userId),
@@ -28,7 +30,17 @@ export async function GET() {
         db.aIUsage.count({ where: { userId } }),
         db.conversation.count({ where: { userId } }),
         db.markRecord.findMany({ where: { userId }, orderBy: { examDate: "asc" } }),
+        db.workLog.findMany({
+          where: { userId, date: { gte: last30 } },
+          orderBy: { date: "asc" },
+        }),
+        db.workLog.aggregate({ _sum: { minutes: true } }),
       ]);
+
+    const communityMinutes = communityWork._sum.minutes ?? 0;
+    const communityActiveUsers = await db.workLog
+      .groupBy({ by: ["userId"], _count: { _all: true } })
+      .then((rows) => rows.length);
 
     const completedQuizzes = quizzes.filter((q) => q.status === "COMPLETED" && q.total > 0);
     const totalQuestionsAnswered = topicPerf.reduce((s, p) => s + p.attempted, 0);
@@ -43,7 +55,7 @@ export async function GET() {
           )
         : 0;
     const totalMistakes = totalQuestionsAnswered - totalCorrect;
-    const totalStudyMinutes = studySessions.reduce((s, x) => s + x.minutes, 0);
+    const totalStudyMinutes = studySessions.reduce((s, x) => s + x.minutes, 0) + workLogs.reduce((s, x) => s + x.minutes, 0);
 
     const scoreTrend = completedQuizzes
       .slice(-10)
@@ -56,7 +68,6 @@ export async function GET() {
         date: q.completedAt || q.createdAt,
       }));
 
-    const last30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const studyByDay: { date: string; minutes: number }[] = [];
     const dayMap = new Map<string, number>();
     for (let i = 29; i >= 0; i--) {
@@ -68,6 +79,10 @@ export async function GET() {
         const key = s.completedAt.toISOString().slice(0, 10);
         if (dayMap.has(key)) dayMap.set(key, dayMap.get(key)! + s.minutes);
       }
+    }
+    for (const w of workLogs) {
+      const key = w.date.toISOString().slice(0, 10);
+      if (dayMap.has(key)) dayMap.set(key, dayMap.get(key)! + w.minutes);
     }
     for (const [date, minutes] of dayMap) {
       studyByDay.push({ date, minutes });
@@ -136,6 +151,10 @@ export async function GET() {
         totalFullMarks,
         trend: examTrend.slice(-15),
         subject: examSubject,
+      },
+      community: {
+        totalMinutes: communityMinutes,
+        activeUsers: communityActiveUsers,
       },
     });
   } catch (error) {

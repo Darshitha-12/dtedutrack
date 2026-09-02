@@ -11,6 +11,8 @@ import {
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/components/ui/toast";
 import { Loader2 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -24,6 +26,9 @@ import {
   TrendingUp,
   AlertTriangle,
   Award,
+  Plus,
+  Users,
+  ClipboardList,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -62,6 +67,10 @@ interface AnalyticsData {
     trend: { id: string; subject: string; name: string; fullMarks: number; date: string }[];
     subject: { subject: string; fullMarks: number; count: number }[];
   };
+  community: {
+    totalMinutes: number;
+    activeUsers: number;
+  };
 }
 
 const COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#ec4899", "#84cc16"];
@@ -80,10 +89,16 @@ export default function AnalyticsPage() {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const { showToast } = useToast();
+  const [workMinutes, setWorkMinutes] = useState("");
+  const [workNote, setWorkNote] = useState("");
+  const [savingWork, setSavingWork] = useState(false);
+  const [workHistory, setWorkHistory] = useState<{ date: string; minutes: number }[]>([]);
 
   useEffect(() => {
     if (status === "authenticated") {
       fetchAnalytics();
+      fetchWorkHistory();
     } else if (status === "unauthenticated") {
       setLoading(false);
     }
@@ -102,6 +117,48 @@ export default function AnalyticsPage() {
       setError(e instanceof Error ? e.message : "Failed to load analytics");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function fetchWorkHistory() {
+    try {
+      const res = await fetch("/api/work-log");
+      if (res.ok) {
+        const body = await res.json();
+        setWorkHistory(body.logs || []);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  async function logWork(ev: React.FormEvent) {
+    ev.preventDefault();
+    const minutes = Math.floor(Number(workMinutes));
+    if (!minutes || minutes < 1) {
+      showToast("Enter minutes worked", "error");
+      return;
+    }
+    setSavingWork(true);
+    try {
+      const res = await fetch("/api/work-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: new Date().toISOString().slice(0, 10),
+          minutes,
+          note: workNote.trim() || undefined,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      setWorkMinutes("");
+      setWorkNote("");
+      showToast(`${minutes} min logged 🎉`, "success");
+      await Promise.all([fetchAnalytics(), fetchWorkHistory()]);
+    } catch {
+      showToast("Failed to save work", "error");
+    } finally {
+      setSavingWork(false);
     }
   }
 
@@ -159,7 +216,7 @@ export default function AnalyticsPage() {
     );
   }
 
-  const { stats, scoreTrend, topicAccuracy, studyByDay, weakTopics, examMarks } = data;
+  const { stats, scoreTrend, topicAccuracy, studyByDay, weakTopics, examMarks, community } = data;
   const noQuizData = stats.totalQuestionsAnswered === 0;
   const trendData = scoreTrend.map((s, i) => ({ ...s, label: `#${i + 1}` }));
   const examTrendData = examMarks.trend.map((m) => ({
@@ -235,9 +292,77 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Marks & Analytics"
-        description="Track your performance with charts and insights"
-      />
+          title="Marks & Analytics"
+          description="Track your performance with charts and insights"
+        />
+
+      {/* Daily Work Log + Community */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <ClipboardList className="h-4 w-4 text-primary" />
+            <CardTitle className="text-base">Daily Work Log</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={logWork} className="flex flex-wrap items-end gap-3 mb-4">
+            <div className="flex-1 min-w-[120px]">
+              <Input
+                type="number"
+                min={1}
+                max={1440}
+                placeholder="Minutes (e.g. 45)"
+                value={workMinutes}
+                onChange={(e) => setWorkMinutes(e.target.value)}
+              />
+            </div>
+            <div className="flex-1 min-w-[180px]">
+              <Input
+                placeholder="Note (optional)"
+                value={workNote}
+                onChange={(e) => setWorkNote(e.target.value)}
+              />
+            </div>
+            <Button type="submit" disabled={savingWork} className="gap-2">
+              <Plus className="h-4 w-4" />
+              {savingWork ? "Saving..." : "Log Work"}
+            </Button>
+          </form>
+
+          {community && community.totalMinutes > 0 && (
+            <div className="flex items-center gap-3 rounded-md bg-primary/10 p-3 mb-4 text-primary">
+              <Users className="h-5 w-5" />
+              <p className="text-sm">
+                <span className="font-semibold">
+                  {community.totalMinutes >= 60
+                    ? `${Math.round((community.totalMinutes / 60) * 10) / 10}h`
+                    : `${community.totalMinutes}m`}
+                </span>{" "}
+                logged by the community • {community.activeUsers} students
+              </p>
+            </div>
+          )}
+
+          {workHistory.length > 0 ? (
+            <div className="space-y-1.5">
+              {workHistory.slice(0, 10).map((w) => (
+                <div
+                  key={w.date}
+                  className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm"
+                >
+                  <span>{w.date}</span>
+                  <span className="font-medium">{w.minutes} min</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No work logged yet. Add your daily minutes above.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

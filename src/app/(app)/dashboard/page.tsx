@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import {
+import { useToast } from "@/components/ui/toast";
+import { Input } from "@/components/ui/input";import {
   Card,
   CardHeader,
   CardTitle,
@@ -26,6 +27,8 @@ import {
   Target,
   TrendingUp,
   Brain,
+  Users,
+  Plus,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -55,6 +58,8 @@ interface DashboardStats {
   topicsCovered: number;
   studyMinutes: number;
   weeklyMinutes: number;
+  communityMinutes: number;
+  communityActiveUsers: number;
 }
 
 interface Mark {
@@ -75,11 +80,16 @@ export default function DashboardPage() {
     topicsCovered: 0,
     studyMinutes: 0,
     weeklyMinutes: 0,
+    communityMinutes: 0,
+    communityActiveUsers: 0,
   });
   const [marks, setMarks] = useState<Mark[]>([]);
   const [studyWeek, setStudyWeek] = useState<{ date: string; minutes: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [authTimeout, setAuthTimeout] = useState(false);
+  const { showToast } = useToast();
+  const [workMinutes, setWorkMinutes] = useState("");
+  const [savingWork, setSavingWork] = useState(false);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -191,6 +201,14 @@ export default function DashboardPage() {
           weeklyMinutes: weekly,
         }));
         setStudyWeek(last7);
+        const community = body.community;
+        if (community) {
+          setStats((prev) => ({
+            ...prev,
+            communityMinutes: community.totalMinutes || 0,
+            communityActiveUsers: community.activeUsers || 0,
+          }));
+        }
       }
     } catch (error) {
       console.error("Failed to fetch analytics:", error);
@@ -202,6 +220,31 @@ export default function DashboardPage() {
     if (session?.user?.name) return session.user.name.split(" ")[0];
     if (session?.user?.email) return session.user.email.split("@")[0];
     return "Student";
+  }
+
+  async function logWork(ev: React.FormEvent) {
+    ev.preventDefault();
+    const minutes = Math.floor(Number(workMinutes));
+    if (!minutes || minutes < 1) {
+      showToast("Enter minutes worked", "error");
+      return;
+    }
+    setSavingWork(true);
+    try {
+      const res = await fetch("/api/work-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: new Date().toISOString().slice(0, 10), minutes }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      setWorkMinutes("");
+      showToast(`${minutes} min logged 🎉`, "success");
+      await fetchAnalytics();
+    } catch {
+      showToast("Failed to save work", "error");
+    } finally {
+      setSavingWork(false);
+    }
   }
 
   function getProfileCompleteness(): number {
@@ -394,6 +437,31 @@ export default function DashboardPage() {
         </Card>
       </div>
 
+      {/* Community Work Banner */}
+      <Card className="p-4 mb-6 border-primary/30 bg-gradient-to-r from-primary/10 to-primary/5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Users className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <p className="text-sm font-medium">Community Total Work</p>
+              <p className="text-2xl font-bold">
+                {stats.communityMinutes >= 60
+                  ? `${Math.round((stats.communityMinutes / 60) * 10) / 10}h`
+                  : `${stats.communityMinutes}m`}{" "}
+                <span className="text-sm font-normal text-muted-foreground">
+                  across {stats.communityActiveUsers} student{stats.communityActiveUsers === 1 ? "" : "s"}
+                </span>
+              </p>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Log your daily work below to contribute to the community total.
+          </p>
+        </div>
+      </Card>
+
       {/* Exam Marks + Study Activity */}
       <div className="grid gap-6 lg:grid-cols-2 mb-6">
         <Card>
@@ -481,6 +549,30 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Daily Work Log */}
+      <Card className="p-6 mb-6">
+        <h2 className="text-lg font-semibold mb-1">Log Today&apos;s Work</h2>
+        <p className="text-sm text-muted-foreground mb-4">
+          Add how many minutes you worked today (study + extra). It shows on your analytics and the community total.
+        </p>
+        <form onSubmit={logWork} className="flex flex-wrap items-end gap-3">
+          <div className="flex-1 min-w-[160px]">
+            <Input
+              type="number"
+              min={1}
+              max={1440}
+              placeholder="Minutes worked (e.g. 45)"
+              value={workMinutes}
+              onChange={(e) => setWorkMinutes(e.target.value)}
+            />
+          </div>
+          <Button type="submit" disabled={savingWork} className="gap-2">
+            <Plus className="h-4 w-4" />
+            {savingWork ? "Saving..." : "Log Work"}
+          </Button>
+        </form>
+      </Card>
 
       {/* Quick Actions */}
       <Card className="p-6 mb-6">
