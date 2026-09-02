@@ -63,6 +63,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Telegram", labelKey: "sidebar.telegram", href: "/telegram", icon: MessagesSquare },
       { label: "Messages", labelKey: "sidebar.messages", href: "/chat", icon: MessageCircle },
       { label: "Study Planner", labelKey: "sidebar.studyPlanner", href: "/planner", icon: CalendarDays },
+      { label: "Work Log", labelKey: "sidebar.workLog", href: "/work-log", icon: Clock },
       { label: "Mistake Book", labelKey: "sidebar.mistakeBook", href: "/mistakes", icon: AlertTriangle },
       { label: "Analytics", labelKey: "sidebar.analytics", href: "/analytics", icon: BarChart3 },
       { label: "Search", labelKey: "sidebar.search", href: "/search", icon: Search },

@@ -11,8 +11,6 @@ import {
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
 import { Loader2 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -26,8 +24,6 @@ import {
   TrendingUp,
   AlertTriangle,
   Award,
-  Plus,
-  Users,
   ClipboardList,
 } from "lucide-react";
 import {
@@ -89,55 +85,10 @@ export default function AnalyticsPage() {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const { showToast } = useToast();
-  const [workHours, setWorkHours] = useState("");
-  const [workMins, setWorkMins] = useState("");
-  const [workNote, setWorkNote] = useState("");
-  const [savingWork, setSavingWork] = useState(false);
-  const [workHistory, setWorkHistory] = useState<{ date: string; minutes: number }[]>([]);
-
-  function fmtWork(mins: number) {
-    if (mins < 60) return `${mins} min`;
-    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
-  }
-
-  useEffect(() => {
-    (window as any).__bpWorkLog = async (r: { date?: string; minutes?: number; note?: string }) => {
-      const minutes = Math.floor(Number(r?.minutes));
-      if (!minutes || minutes < 1) {
-        showToast("Enter minutes worked", "error");
-        return;
-      }
-      setSavingWork(true);
-      try {
-        const res = await fetch("/api/work-log", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            date: r?.date || new Date().toISOString().slice(0, 10),
-            minutes,
-            note: r?.note || undefined,
-          }),
-        });
-        if (!res.ok) throw new Error("Failed to save");
-        setWorkHours("");
-        setWorkMins("");
-        setWorkNote("");
-        showToast(`${fmtWork(minutes)} logged`, "success");
-        await Promise.all([fetchAnalytics(), fetchWorkHistory()]);
-      } catch {
-        showToast("Failed to save work", "error");
-      } finally {
-        setSavingWork(false);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     if (status === "authenticated") {
       fetchAnalytics();
-      fetchWorkHistory();
     } else if (status === "unauthenticated") {
       setLoading(false);
     }
@@ -156,56 +107,6 @@ export default function AnalyticsPage() {
       setError(e instanceof Error ? e.message : "Failed to load analytics");
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function fetchWorkHistory() {
-    try {
-      const res = await fetch("/api/work-log");
-      if (res.ok) {
-        const body = await res.json();
-        setWorkHistory(body.logs || []);
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  async function logWork(ev: React.FormEvent) {
-    ev.preventDefault();
-    const bridge = (window as any).BioPulseBridge;
-    if (bridge && typeof bridge.openWorkLog === "function") {
-      bridge.openWorkLog();
-      return;
-    }
-    const hrs = Math.floor(Number(workHours)) || 0;
-    const mins = Math.floor(Number(workMins)) || 0;
-    const minutes = hrs * 60 + mins;
-    if (minutes < 1) {
-      showToast("Enter hours or minutes", "error");
-      return;
-    }
-    setSavingWork(true);
-    try {
-      const res = await fetch("/api/work-log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          date: new Date().toISOString().slice(0, 10),
-          minutes,
-          note: workNote.trim() || undefined,
-        }),
-      });
-      if (!res.ok) throw new Error("Failed to save");
-      setWorkHours("");
-      setWorkMins("");
-      setWorkNote("");
-      showToast(`${fmtWork(minutes)} logged`, "success");
-      await Promise.all([fetchAnalytics(), fetchWorkHistory()]);
-    } catch {
-      showToast("Failed to save work", "error");
-    } finally {
-      setSavingWork(false);
     }
   }
 
@@ -263,7 +164,7 @@ export default function AnalyticsPage() {
     );
   }
 
-  const { stats, scoreTrend, topicAccuracy, studyByDay, weakTopics, examMarks, community } = data;
+  const { stats, scoreTrend, topicAccuracy, studyByDay, weakTopics, examMarks } = data;
   const noQuizData = stats.totalQuestionsAnswered === 0;
   const trendData = scoreTrend.map((s, i) => ({ ...s, label: `#${i + 1}` }));
   const examTrendData = examMarks.trend.map((m) => ({
@@ -351,145 +252,18 @@ export default function AnalyticsPage() {
             <CardTitle className="text-base">Daily Work Log</CardTitle>
           </div>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={logWork} className="flex flex-wrap items-end gap-3 mb-4">
-            <div className="flex items-center gap-1 flex-1 min-w-[120px]">
-              <Input
-                type="number"
-                min={0}
-                max={24}
-                placeholder="0"
-                value={workHours}
-                onChange={(e) => setWorkHours(e.target.value)}
-                className="flex-1"
-              />
-              <span className="text-sm text-muted-foreground mb-2">hrs</span>
-              <Input
-                type="number"
-                min={0}
-                max={59}
-                placeholder="45"
-                value={workMins}
-                onChange={(e) => setWorkMins(e.target.value)}
-                className="flex-1"
-              />
-              <span className="text-sm text-muted-foreground mb-2">min</span>
-            </div>
-            <div className="flex-1 min-w-[180px]">
-              <Input
-                placeholder="Note (optional)"
-                value={workNote}
-                onChange={(e) => setWorkNote(e.target.value)}
-              />
-            </div>
-            <Button type="submit" disabled={savingWork} className="gap-2">
-              <Plus className="h-4 w-4" />
-              {savingWork ? "Saving..." : "Log Work"}
+        <CardContent className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            Log and view your daily work time, charts and community total.
+          </p>
+          <Link href="/work-log">
+            <Button className="gap-2">
+              <Clock className="h-4 w-4" />
+              Go to Work Log
             </Button>
-          </form>
-
-          {community && community.totalMinutes > 0 && (
-            <div className="flex items-center gap-3 rounded-md bg-primary/10 p-3 mb-4 text-primary">
-              <Users className="h-5 w-5" />
-              <p className="text-sm">
-                <span className="font-semibold">
-                  {fmtWork(community.totalMinutes)}
-                </span>{" "}
-                logged by the community • {community.activeUsers} students
-              </p>
-            </div>
-          )}
-
-          {workHistory.length > 0 ? (
-            <div className="space-y-1.5">
-              {workHistory.slice(0, 10).map((w) => (
-                <div
-                  key={w.date}
-                  className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm"
-                >
-                  <span>{w.date}</span>
-                  <span className="font-medium">{fmtWork(w.minutes)}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No work logged yet. Add your daily minutes above.
-            </p>
-          )}
+          </Link>
         </CardContent>
       </Card>
-
-      {/* Daily Work Time Chart */}
-      {workHistory.length > 0 && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4 text-primary" />
-              <CardTitle className="text-base">Daily Work Time</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-3 gap-3 mb-5">
-              <div className="rounded-lg bg-primary/10 p-3 text-center">
-                <p className="text-2xl font-bold">{fmtWork(workHistory[0]?.minutes ?? 0)}</p>
-                <p className="text-xs text-muted-foreground">Today</p>
-              </div>
-              <div className="rounded-lg bg-green-500/10 p-3 text-center">
-                <p className="text-2xl font-bold">
-                  {fmtWork(workHistory.slice(0, 7).reduce((s, w) => s + w.minutes, 0))}
-                </p>
-                <p className="text-xs text-muted-foreground">This Week</p>
-              </div>
-              <div className="rounded-lg bg-blue-500/10 p-3 text-center">
-                <p className="text-2xl font-bold">{fmtWork(data?.community?.totalMinutes ?? 0)}</p>
-                <p className="text-xs text-muted-foreground">Community</p>
-              </div>
-            </div>
-            <div className="h-[220px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={workHistory
-                    .slice(0, 7)
-                    .reverse()
-                    .map((w) => ({
-                      day: new Date(w.date + "T00:00:00").toLocaleDateString("en", { weekday: "short" }),
-                      min: w.minutes,
-                      hrs: +(w.minutes / 60).toFixed(1),
-                    }))}
-                  margin={{ top: 5, right: 10, left: -10, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="day" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
-                  <YAxis
-                    tick={{ fontSize: 12 }}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(v) => `${v}h`}
-                  />
-                  <Tooltip
-                    formatter={(v: number) => [`${Math.floor(v / 60)}h ${v % 60}m`, "Worked"]}
-                    contentStyle={{
-                      backgroundColor: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "8px",
-                      fontSize: "13px",
-                    }}
-                  />
-                  <Bar dataKey="min" radius={[6, 6, 0, 0]} maxBarSize={48}>
-                    {workHistory
-                      .slice(0, 7)
-                      .reverse()
-                      .map((_, i) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} fillOpacity={0.85} />
-                      ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

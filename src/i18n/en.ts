@@ -126,6 +126,7 @@ export const en = {
     mistakeBook: "Mistake Book",
     analytics: "Analytics",
     search: "Search",
+    workLog: "Work Log",
     pomodoro: "Pomodoro",
     alarms: "Alarms",
     reminders: "Reminders",

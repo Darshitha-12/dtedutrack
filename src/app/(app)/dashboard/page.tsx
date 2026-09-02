@@ -3,8 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { useToast } from "@/components/ui/toast";
-import { Input } from "@/components/ui/input";import {
+import {
   Card,
   CardHeader,
   CardTitle,
@@ -85,45 +84,11 @@ export default function DashboardPage() {
   const [studyWeek, setStudyWeek] = useState<{ date: string; minutes: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [authTimeout, setAuthTimeout] = useState(false);
-  const { showToast } = useToast();
-  const [workHours, setWorkHours] = useState("");
-  const [workMins, setWorkMins] = useState("");
-  const [savingWork, setSavingWork] = useState(false);
 
   function fmtWork(mins: number) {
     if (mins < 60) return `${mins} min`;
     return `${Math.floor(mins / 60)}h ${mins % 60}m`;
   }
-
-  useEffect(() => {
-    (window as any).__bpWorkLog = async (r: { date?: string; minutes?: number; note?: string }) => {
-      const minutes = Math.floor(Number(r?.minutes));
-      if (!minutes || minutes < 1) {
-        showToast("Enter minutes worked", "error");
-        return;
-      }
-      setSavingWork(true);
-      try {
-        const res = await fetch("/api/work-log", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            date: r?.date || new Date().toISOString().slice(0, 10),
-            minutes,
-            note: r?.note || undefined,
-          }),
-        });
-        if (!res.ok) throw new Error("Failed to save");
-        showToast(`${fmtWork(minutes)} logged`, "success");
-        await fetchAnalytics();
-      } catch {
-        showToast("Failed to save work", "error");
-      } finally {
-        setSavingWork(false);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -254,39 +219,6 @@ export default function DashboardPage() {
     if (session?.user?.name) return session.user.name.split(" ")[0];
     if (session?.user?.email) return session.user.email.split("@")[0];
     return "Student";
-  }
-
-  async function logWork(ev: React.FormEvent) {
-    ev.preventDefault();
-    const bridge = (window as any).BioPulseBridge;
-    if (bridge && typeof bridge.openWorkLog === "function") {
-      bridge.openWorkLog();
-      return;
-    }
-    const hrs = Math.floor(Number(workHours)) || 0;
-    const mins = Math.floor(Number(workMins)) || 0;
-    const minutes = hrs * 60 + mins;
-    if (minutes < 1) {
-      showToast("Enter hours or minutes", "error");
-      return;
-    }
-    setSavingWork(true);
-    try {
-      const res = await fetch("/api/work-log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: new Date().toISOString().slice(0, 10), minutes }),
-      });
-      if (!res.ok) throw new Error("Failed to save");
-      setWorkHours("");
-      setWorkMins("");
-      showToast(`${fmtWork(minutes)} logged`, "success");
-      await fetchAnalytics();
-    } catch {
-      showToast("Failed to save work", "error");
-    } finally {
-      setSavingWork(false);
-    }
   }
 
   function getProfileCompleteness(): number {
@@ -570,36 +502,14 @@ export default function DashboardPage() {
       <Card className="p-6 mb-6">
         <h2 className="text-lg font-semibold mb-1">Log Today&apos;s Work</h2>
         <p className="text-sm text-muted-foreground mb-4">
-          Add how long you worked today (study + extra). Shows on analytics & community total.
+          Track the time you worked today (study + extra). Shows on the community total.
         </p>
-        <form onSubmit={logWork} className="flex flex-wrap items-end gap-3">
-          <div className="flex items-center gap-1 flex-1 min-w-[120px]">
-            <Input
-              type="number"
-              min={0}
-              max={24}
-              placeholder="0"
-              value={workHours}
-              onChange={(e) => setWorkHours(e.target.value)}
-              className="flex-1"
-            />
-            <span className="text-sm text-muted-foreground mb-2">hrs</span>
-            <Input
-              type="number"
-              min={0}
-              max={59}
-              placeholder="45"
-              value={workMins}
-              onChange={(e) => setWorkMins(e.target.value)}
-              className="flex-1"
-            />
-            <span className="text-sm text-muted-foreground mb-2">min</span>
-          </div>
-          <Button type="submit" disabled={savingWork} className="gap-2">
+        <Link href="/work-log">
+          <Button className="gap-2">
             <Plus className="h-4 w-4" />
-            {savingWork ? "Saving..." : "Log Work"}
+            Go to Work Log
           </Button>
-        </form>
+        </Link>
       </Card>
 
       {/* Quick Actions */}

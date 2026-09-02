@@ -130,6 +130,7 @@ export const si = {
     alarms: "ඇලාරම්",
     reminders: "මතක් කිරීම්",
     marks: "ලකුණු",
+    workLog: "දෛනික වැඩ",
     settings: "සැකසුම්",
     profile: "පැතිකඩ",
     logout: "නික්මීම",
