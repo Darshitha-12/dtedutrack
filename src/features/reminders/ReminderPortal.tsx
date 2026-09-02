@@ -4,7 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioEngine } from "@/features/alarms/lib/audio-engine";
 import { notificationService } from "@/services/notification";
 import { ReminderPopup } from "@/features/reminders/components/ReminderPopup";
-import { loadReminders, reminderMatches, saveReminders, toDateKey } from "@/features/reminders/types";
+import {
+  loadReminders,
+  reminderMatches,
+  saveReminders,
+  toDateKey,
+  REMINDERS_STORAGE_KEY,
+} from "@/features/reminders/types";
 import type { Reminder } from "@/features/reminders/types";
 
 const POLL_MS = 15000;
@@ -13,8 +19,11 @@ function syncNative(reminders: Reminder[]) {
   if (typeof window === "undefined") return;
   const bridge = (
     window as unknown as {
+      BioPulseBridge?: { syncReminders?: (json: string) => void };
       AndroidBridge?: { syncReminders?: (json: string) => void };
     }
+  ).BioPulseBridge ?? (
+    window as unknown as { AndroidBridge?: { syncReminders?: (json: string) => void } }
   ).AndroidBridge;
   if (bridge?.syncReminders) {
     try {
@@ -130,15 +139,27 @@ export function ReminderPortal() {
         createdAt: Date.now(),
       } as Reminder);
     };
+    const onChanged = () => {
+      refresh();
+      syncNative(remindersRef.current);
+      checkDue();
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === REMINDERS_STORAGE_KEY || e.key === null) onChanged();
+    };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("biopulse:test-reminder", onTest);
+    window.addEventListener("biopulse:reminders-changed", onChanged);
+    window.addEventListener("storage", onStorage);
 
     return () => {
       clearInterval(checker);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("biopulse:test-reminder", onTest);
+      window.removeEventListener("biopulse:reminders-changed", onChanged);
+      window.removeEventListener("storage", onStorage);
       AudioEngine.stop();
       stopVibration();
       if (snoozeTimerRef.current !== null) {

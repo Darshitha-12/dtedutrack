@@ -62,14 +62,25 @@ export default function RemindersPage() {
 
   const reload = useCallback(() => setReminders(loadReminders()), []);
 
+  const notifyChanged = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("biopulse:reminders-changed"));
+    }
+  }, []);
+
   useEffect(() => {
     reload();
-  }, [reload]);
+    notifyChanged();
+  }, [reload, notifyChanged]);
 
-  const persist = useCallback((next: Reminder[]) => {
-    setReminders(next);
-    saveReminders(next);
-  }, []);
+  const persist = useCallback(
+    (next: Reminder[]) => {
+      setReminders(next);
+      saveReminders(next);
+      notifyChanged();
+    },
+    [notifyChanged],
+  );
 
   const addReminder = () => {
     if (!title.trim()) {
