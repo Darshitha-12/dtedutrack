@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
@@ -31,14 +30,15 @@ function LoginForm() {
 
     setLoading(true);
     try {
-      const res = await signIn("credentials", {
-        email: form.email,
-        password: form.password,
-        redirect: false,
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: form.email, password: form.password }),
       });
+      const data = await res.json().catch(() => ({}));
 
-      if (res?.error) {
-        setError("Invalid email or password. Please try again.");
+      if (!res.ok) {
+        setError(data.error || "Invalid email or password. Please try again.");
       } else {
         router.push(callbackUrl);
         router.refresh();
