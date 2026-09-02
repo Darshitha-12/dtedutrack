@@ -64,6 +64,19 @@ export function ReminderPortal() {
     [startVibration],
   );
 
+  const checkDue = useCallback(() => {
+    const now = new Date();
+    const due = remindersRef.current.find((r) => reminderMatches(r, now));
+    if (!due) return;
+    const next = remindersRef.current.map((r) =>
+      r.id === due.id ? { ...r, lastFiredKey: toDateKey(now) } : r,
+    );
+    remindersRef.current = next;
+    saveReminders(next);
+    syncNative(next);
+    fire(due);
+  }, [fire]);
+
   const dismiss = useCallback(() => {
     AudioEngine.stop();
     stopVibration();
@@ -87,37 +100,52 @@ export function ReminderPortal() {
   useEffect(() => {
     refresh();
     syncNative(remindersRef.current);
+    checkDue();
 
-    const checker = setInterval(() => {
-      const now = new Date();
-      const due = remindersRef.current.find((r) => reminderMatches(r, now));
-      if (due) {
-        const next = remindersRef.current.map((r) =>
-          r.id === due.id ? { ...r, lastFiredKey: toDateKey(now) } : r,
-        );
-        remindersRef.current = next;
-        saveReminders(next);
-        syncNative(next);
-        fire(due);
-      }
-    }, POLL_MS);
+    const checker = setInterval(checkDue, POLL_MS);
 
-const onFocus = () => {
+    const onFocus = () => {
+      refresh();
+      syncNative(remindersRef.current);
+      checkDue();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
         refresh();
         syncNative(remindersRef.current);
-      };
-      window.addEventListener("focus", onFocus);
+        checkDue();
+      }
+    };
+    const onTest = () => {
+      fire({
+        id: "test",
+        title: "Test reminder",
+        note: "Sound + full-screen popup working",
+        mode: "daily",
+        date: "",
+        days: [],
+        time: "00:00",
+        enabled: true,
+        lastFiredKey: "",
+        createdAt: Date.now(),
+      } as Reminder);
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("biopulse:test-reminder", onTest);
 
     return () => {
       clearInterval(checker);
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("biopulse:test-reminder", onTest);
       AudioEngine.stop();
       stopVibration();
       if (snoozeTimerRef.current !== null) {
         clearTimeout(snoozeTimerRef.current);
       }
     };
-  }, [refresh, fire, stopVibration]);
+  }, [refresh, fire, checkDue, stopVibration]);
 
   if (!active) return null;
   return <ReminderPopup reminder={active} onDismiss={dismiss} onSnooze={snooze} />;

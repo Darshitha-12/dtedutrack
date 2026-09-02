@@ -57,6 +57,8 @@ export function createReminder(input: CreateReminderInput): Reminder {
   };
 }
 
+export const REMINDER_GRACE_MINUTES = 5;
+
 export function reminderMatches(reminder: Reminder, now: Date): boolean {
   if (!reminder.enabled) return false;
   const dateKey = toDateKey(now);
@@ -64,7 +66,12 @@ export function reminderMatches(reminder: Reminder, now: Date): boolean {
 
   const [hh, mm] = reminder.time.split(":").map(Number);
   if (Number.isNaN(hh) || Number.isNaN(mm)) return false;
-  if (now.getHours() !== hh || now.getMinutes() !== mm) return false;
+
+  const targetMin = hh * 60 + mm;
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  // Tolerant matching: fire within a short grace window after the set time so a
+  // throttled/backgrounded tab or a slightly-late app open still alerts.
+  if (nowMin < targetMin || nowMin > targetMin + REMINDER_GRACE_MINUTES) return false;
 
   switch (reminder.mode) {
     case "once":

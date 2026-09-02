@@ -26,6 +26,18 @@ describe("reminder matching", () => {
     expect(reminderMatches(r, now)).toBe(false);
   });
 
+  it("fires within the grace window if the exact minute was missed", () => {
+    const r = makeReminder();
+    const now = new Date(2026, 8, 1, 8, 3);
+    expect(reminderMatches(r, now)).toBe(true);
+  });
+
+  it("does not fire beyond the grace window", () => {
+    const r = makeReminder();
+    const now = new Date(2026, 8, 1, 8, 6);
+    expect(reminderMatches(r, now)).toBe(false);
+  });
+
   it("matches a disabled reminder never", () => {
     const r = { ...makeReminder(), enabled: false };
     const now = new Date(2026, 8, 1, 8, 0);

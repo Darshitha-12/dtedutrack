@@ -116,6 +116,11 @@ export default function RemindersPage() {
     }
   };
 
+  const testAlert = () => {
+    showToast("Playing test alert now...", "info");
+    window.dispatchEvent(new CustomEvent("biopulse:test-reminder"));
+  };
+
   const sorted = [...reminders].sort((a, b) => a.time.localeCompare(b.time));
 
   return (
@@ -220,6 +225,10 @@ export default function RemindersPage() {
             <Button onClick={addReminder}>
               <Plus className="h-4 w-4 mr-2" />
               Add reminder
+            </Button>
+            <Button variant="outline" onClick={testAlert}>
+              <Bell className="h-4 w-4 mr-2" />
+              Test alert
             </Button>
             <Button variant="outline" onClick={askPermission}>
               <Bell className="h-4 w-4 mr-2" />
