@@ -120,7 +120,7 @@ export const si = {
     notePad: "සටහන් පෑඩ්",
     examMarks: "විභාග ලකුණු",
     diagramLab: "රූප සටහන් රසායනාගාරය",
-    telegramGroup: "ටෙලිග්‍රෑම් කණ්ඩායම්",
+    telegram: "ටෙලිග්‍රෑම්",
     messages: "පණිවිඩ",
     studyPlanner: "අධ්‍යයන සැලසුම්කරු",
     mistakeBook: "වැරදි පොත",

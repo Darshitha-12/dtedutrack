@@ -200,6 +200,22 @@ export default function TelegramPage() {
   const [tgUpdating, setTgUpdating] = useState<string | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const prevMessagesRef = useRef<ChatMessage[]>([]);
+
+  const notifyNewMessage = useCallback(
+    (user: string, text: string) => {
+      const snippet = text.length > 60 ? text.slice(0, 60) + "…" : text;
+      try {
+        if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+          new Notification(`New message from ${user}`, { body: snippet, tag: "bp-chat" });
+        }
+      } catch {
+        /* notification not available */
+      }
+      showToast(`💬 ${user}: ${snippet}`, "info");
+    },
+    [showToast],
+  );
 
   const loadGroups = useCallback(async () => {
     const params = new URLSearchParams();
@@ -221,18 +237,46 @@ export default function TelegramPage() {
     try {
       const res = await fetch(`/api/telegram/messages?room=${encodeURIComponent(room)}`);
       const data = await res.json();
-      setMessages(Array.isArray(data.messages) ? data.messages : []);
+      const next: ChatMessage[] = Array.isArray(data.messages) ? data.messages : [];
+      setMessages(next);
+      if (prevMessagesRef.current.length > 0 && next.length > prevMessagesRef.current.length) {
+        const knownIds = new Set(prevMessagesRef.current.map((m) => m.id));
+        const fresh = next.filter((m) => !knownIds.has(m.id));
+        for (const m of fresh.slice(-3)) {
+          notifyNewMessage(m.userName, m.text);
+        }
+      }
+      prevMessagesRef.current = next;
     } catch {
       /* polling errors are non-fatal */
     } finally {
       setChatLoading(false);
     }
-  }, [room]);
+  }, [room, notifyNewMessage]);
 
   useEffect(() => {
       const t = setTimeout(loadGroups, 250);
     return () => clearTimeout(t);
   }, [loadGroups]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    // In the Android app, open the full Telegram Web login automatically (no click needed).
+    const bridge = (window as unknown as { BioPulseBridge?: { openTelegram?: () => void } })
+      .BioPulseBridge;
+    if (bridge && typeof bridge.openTelegram === "function") {
+      try {
+        bridge.openTelegram();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
 
   useEffect(() => {
     setChatLoading(true);

@@ -120,7 +120,7 @@ export const en = {
     notePad: "Note Pad",
     examMarks: "Exam Marks",
     diagramLab: "Diagram Lab",
-    telegramGroup: "Telegram Groups",
+    telegram: "Telegram",
     messages: "Messages",
     studyPlanner: "Study Planner",
     mistakeBook: "Mistake Book",
