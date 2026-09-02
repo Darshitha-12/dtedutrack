@@ -32,6 +32,7 @@ import {
   RotateCcw,
   SkipForward,
   Copy,
+  CalendarPlus,
 } from "lucide-react";
 import {
   DAY_NAMES,
@@ -52,6 +53,15 @@ interface DayConfig {
   enabled: boolean;
   dailyTargetMin: number;
   blocks: TimeBlock[];
+}
+
+interface AIPlanSlot {
+  dayOfWeek: number;
+  startMinute: number;
+  endMinute: number;
+  title: string;
+  type: StudyType;
+  priority: Priority;
 }
 
 interface Prefs {
@@ -149,6 +159,7 @@ export default function PlannerPage() {
   const [preview, setPreview] = useState<{ sessions: PlannedSession[]; weeklyAvailableMin: number; weeklyPlannedMin: number; weeklyTargetMin: number; remainingMin: number; byDay: { dayOfWeek: number; availableMin: number; plannedMin: number }[] } | null>(null);
   const [aiGoals, setAiGoals] = useState("");
   const [aiPlan, setAiPlan] = useState<string | null>(null);
+  const [aiSlots, setAiSlots] = useState<AIPlanSlot[]>([]);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
@@ -435,6 +446,7 @@ export default function PlannerPage() {
       await api("saveDays", { days });
       const res = await api("aiPlan", { goals: aiGoals });
       setAiPlan(res.plan);
+      setAiSlots(Array.isArray(res.slots) ? res.slots : []);
       showToast("AI study plan ready", "success");
     } catch (e: any) {
       setAiError(e?.data?.error || "Failed to generate AI plan");
@@ -449,6 +461,49 @@ export default function PlannerPage() {
       () => showToast("Plan copied to clipboard", "success"),
       () => showToast("Could not copy plan", "error"),
     );
+  }
+
+  async function addAIPlanToTimetable() {
+    if (aiSlots.length === 0) {
+      showToast("This plan has no schedule to add — try regenerating", "error");
+      return;
+    }
+    setBusy(true);
+    let added = 0;
+    try {
+      for (const slot of aiSlots) {
+        const subject = subjects.find((s) => slot.title.toLowerCase().includes(s.name.toLowerCase()));
+        await api("createSession", {
+          session: {
+            subjectId: subject?.id ?? subjects[0]?.id ?? "bio",
+            subjectName: subject ? subject.name : slot.title,
+            topicId: null,
+            topicTitle: subject ? slot.title : "",
+            dayOfWeek: slot.dayOfWeek,
+            startMinute: slot.startMinute,
+            endMinute: slot.endMinute,
+            type: slot.type,
+            priority: slot.priority,
+            recurrence: "Weekly",
+            recurrenceDays: [slot.dayOfWeek],
+            reminderMin: 15,
+            notes: "",
+          },
+          force: true,
+        });
+        added++;
+      }
+      setAiSlots([]);
+      setAiPlan(null);
+      await load();
+      setTab("sessions");
+      showToast(`Added ${added} session${added === 1 ? "" : "s"} to your weekly timetable`, "success");
+    } catch {
+      if (added === 0) showToast("Failed to add sessions to your timetable", "error");
+      else showToast(`Added ${added}, some sessions failed`, "error");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function savePreview() {
@@ -1221,6 +1276,12 @@ export default function PlannerPage() {
                   <Sparkles className="h-4 w-4 text-primary" /> My AI Study Plan
                 </CardTitle>
                 <div className="flex gap-2">
+                  {aiSlots.length > 0 && (
+                    <Button size="sm" onClick={addAIPlanToTimetable} disabled={busy} className="gap-1">
+                      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarPlus className="h-3.5 w-3.5" />}
+                      Add to timetable ({aiSlots.length})
+                    </Button>
+                  )}
                   <Button size="sm" variant="outline" onClick={copyAIPlan} className="gap-1">
                     <Copy className="h-3.5 w-3.5" /> Copy
                   </Button>
@@ -1229,6 +1290,7 @@ export default function PlannerPage() {
                     variant="ghost"
                     onClick={() => {
                       setAiPlan(null);
+                      setAiSlots([]);
                       setAiGoals("");
                     }}
                   >
@@ -1237,6 +1299,23 @@ export default function PlannerPage() {
                 </div>
               </CardHeader>
               <CardContent>
+                {aiSlots.length > 0 && (
+                  <div className="mb-3 space-y-1.5 rounded-md border border-border bg-muted/40 p-3">
+                    <p className="text-xs font-semibold text-muted-foreground">
+                      Sessions ready to add to your weekly timetable ({aiSlots.length}):
+                    </p>
+                    {aiSlots.map((slot, idx) => (
+                      <div key={idx} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="truncate">
+                          <span className="font-medium">{DAY_NAMES[slot.dayOfWeek]}</span> · {slot.title}
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {formatClock(slot.startMinute, prefs.timeFormat)} – {formatClock(slot.endMinute, prefs.timeFormat)} · {slot.type}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <pre className="whitespace-pre-wrap rounded-md bg-muted/50 p-4 text-sm leading-relaxed">{aiPlan}</pre>
               </CardContent>
             </Card>

@@ -179,6 +179,62 @@ function mergeSubjects(dbSubjects: { id: string; slug: string; name: string; ico
   return all.filter((s) => (seen.has(s.id) ? false : (seen.add(s.id), true)));
 }
 
+const DAY_NAME_TO_INDEX: Record<string, number> = {
+  Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4, Saturday: 5, Sunday: 6,
+  Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6,
+};
+
+interface AISlot {
+  dayOfWeek: number;
+  startMinute: number;
+  endMinute: number;
+  title: string;
+  type: string;
+  priority: string;
+}
+
+function parseHM(t: string): number | null {
+  if (typeof t !== "string") return null;
+  const m = t.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const mi = parseInt(m[2], 10);
+  if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+  return h * 60 + mi;
+}
+
+function parseAISessions(text: string): AISlot[] {
+  try {
+    const fences = Array.from(text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g));
+    if (fences.length === 0) return [];
+    const raw = fences[fences.length - 1][1].trim();
+    const data: unknown = JSON.parse(raw);
+    if (!data || typeof data !== "object" || !Array.isArray((data as { sessions?: unknown }).sessions)) return [];
+    const out: AISlot[] = [];
+    for (const s of (data as { sessions: unknown[] }).sessions) {
+      if (!s || typeof s !== "object") continue;
+      const slot = s as { day?: unknown; start?: unknown; end?: unknown; title?: unknown; type?: unknown; priority?: unknown };
+      if (typeof slot.title !== "string" || !slot.title.trim()) continue;
+      const dayOfWeek = DAY_NAME_TO_INDEX[String(slot.day ?? "").trim()];
+      const startMinute = parseHM(String(slot.start ?? ""));
+      const endMinute = parseHM(String(slot.end ?? ""));
+      if (dayOfWeek === undefined || startMinute === null || endMinute === null) continue;
+      if (endMinute <= startMinute || endMinute > 1440) continue;
+      out.push({
+        dayOfWeek,
+        startMinute,
+        endMinute,
+        title: slot.title.trim().slice(0, 120),
+        type: (STUDY_TYPES as readonly string[]).includes(slot.type as string) ? (slot.type as string) : "Learn",
+        priority: (PRIORITIES as readonly string[]).includes(slot.priority as string) ? (slot.priority as string) : "Medium",
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 export async function POST(req: Request) {
   let userId: string;
   try {
@@ -365,6 +421,10 @@ export async function POST(req: Request) {
           "- Mix study types smartly: Learn, Revision, MCQ/PastPaper practice, WeakTopic drills.",
           "- Include realistic breaks between sessions and at least one full rest slot across the week.",
           "- Reply in proper Sinhala letters if the student writes in Sinhala/Singlish; otherwise reply in English.",
+          "- At the very end of your answer, after all text, output ONLY ONE strict JSON code block inside triple backticks with the language tag json, exactly like:", "```json",
+          "{\"sessions\":[{\"day\":\"Monday\",\"start\":\"18:00\",\"end\":\"19:30\",\"title\":\"Biology — Chapter 3 revision\",\"type\":\"Revision\",\"priority\":\"High\"}]}",
+          "```",
+          "- Put one entry in that JSON per planned session, using the SAME day, start, and end as the plan above. day is a full weekday name (Monday..Sunday). start/end are 24h HH:MM. type is one of Learn, Revision, MCQ, PastPaper, WeakTopic, AITutor, Review. priority is one of Low, Medium, High. Put nothing else inside that JSON block.",
           "Format the answer with clear sections:",
           "### මගේ සති කාලසටහන (My Weekly Plan) — day-by-day: suggested time ranges, subject, topic/focus, and type",
           "### අවධානය / Focus Points",
@@ -386,7 +446,7 @@ export async function POST(req: Request) {
             { role: "system", content: system },
             { role: "user", content: userMsg },
           ]);
-          return NextResponse.json({ ok: true, plan: result.content });
+          return NextResponse.json({ ok: true, plan: result.content, slots: parseAISessions(result.content) });
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
           console.error("[AI-PLAN]", msg);
