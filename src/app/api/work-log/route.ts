@@ -31,12 +31,22 @@ export async function GET() {
       take: 60,
     });
 
-    const dayMap = new Map<string, number>();
+    const dayMap = new Map<string, { id: string; minutes: number; note: string | null }>();
     for (const w of works) {
       const key = formatDay(w.date);
-      dayMap.set(key, (dayMap.get(key) ?? 0) + w.minutes);
+      const cur = dayMap.get(key);
+      if (cur) {
+        cur.minutes += w.minutes;
+      } else {
+        dayMap.set(key, { id: w.id, minutes: w.minutes, note: w.note });
+      }
     }
-    const logs = [...dayMap.entries()].map(([date, minutes]) => ({ date, minutes }));
+    const logs = [...dayMap.entries()].map(([date, v]) => ({
+      id: v.id,
+      date,
+      minutes: v.minutes,
+      note: v.note ?? undefined,
+    }));
 
     const todayKey = formatDay(new Date());
     const todayMinutes = dayMap.get(todayKey) ?? 0;
@@ -81,6 +91,38 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("Work log POST error:", error);
+    return NextResponse.json(
+      { error: "Internal server error", detail: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const userId = session.user.id;
+
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+    if (!id) {
+      return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    }
+
+    const deleted = await db.workLog.deleteMany({
+      where: { id, userId },
+    });
+
+    if (deleted.count === 0) {
+      return NextResponse.json({ error: "Work log entry not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("Work log DELETE error:", error);
     return NextResponse.json(
       { error: "Internal server error", detail: error instanceof Error ? error.message : String(error) },
       { status: 500 }

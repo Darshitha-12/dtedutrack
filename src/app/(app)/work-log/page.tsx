@@ -12,7 +12,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { Loader2, Plus, Users, Clock } from "lucide-react";
+import { Loader2, Plus, Users, Clock, Trash2 } from "lucide-react";
 import {
   ResponsiveContainer,
   BarChart,
@@ -33,7 +33,7 @@ export default function WorkLogPage() {
   const [workMins, setWorkMins] = useState("");
   const [workNote, setWorkNote] = useState("");
   const [savingWork, setSavingWork] = useState(false);
-  const [workHistory, setWorkHistory] = useState<{ date: string; minutes: number }[]>([]);
+  const [workHistory, setWorkHistory] = useState<{ id: string; date: string; minutes: number; note?: string }[]>([]);
   const [community, setCommunity] = useState<{ totalMinutes: number; activeUsers: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -105,6 +105,26 @@ export default function WorkLogPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function deleteWork(id: string) {
+    if (!confirm("Delete this work log entry?")) return;
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/work-log?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || `Delete failed (${res.status})`);
+      }
+      showToast("Work log deleted", "success");
+      await loadAll();
+    } catch (e) {
+      showToast(`Failed to delete: ${e instanceof Error ? e.message : "Unknown error"}`, "error");
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   function onSubmit(ev: React.FormEvent) {
     ev.preventDefault();
@@ -259,11 +279,27 @@ export default function WorkLogPage() {
             <div className="space-y-1.5">
               {workHistory.slice(0, 15).map((w) => (
                 <div
-                  key={w.date}
-                  className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm"
+                  key={w.id || w.date}
+                  className="flex items-center justify-between gap-2 rounded-md bg-muted/40 px-3 py-2 text-sm"
                 >
-                  <span>{w.date}</span>
-                  <span className="font-medium">{fmtWork(w.minutes)}</span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span>{w.date}</span>
+                      <span className="font-medium">{fmtWork(w.minutes)}</span>
+                    </div>
+                    {w.note && (
+                      <p className="truncate text-xs text-muted-foreground">{w.note}</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => w.id && deleteWork(w.id)}
+                    disabled={deletingId === w.id}
+                    className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                    aria-label={`Delete work log for ${w.date}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 </div>
               ))}
             </div>

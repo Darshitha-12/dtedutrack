@@ -26,6 +26,8 @@ import {
   Brain,
   Users,
   Plus,
+  Trophy,
+  Crown,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -67,6 +69,12 @@ interface Mark {
   name: string;
 }
 
+interface LeaderboardEntry {
+  id: string;
+  name: string;
+  todayMinutes: number;
+}
+
 export default function DashboardPage() {
   const { data: session, status } = useSession();
   const [profile, setProfile] = useState<ProfileData | null>(null);
@@ -82,6 +90,7 @@ export default function DashboardPage() {
   });
   const [marks, setMarks] = useState<Mark[]>([]);
   const [studyWeek, setStudyWeek] = useState<{ date: string; minutes: number }[]>([]);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [authTimeout, setAuthTimeout] = useState(false);
 
@@ -207,6 +216,9 @@ export default function DashboardPage() {
             communityMinutes: community.totalMinutes || 0,
             communityActiveUsers: community.activeUsers || 0,
           }));
+          if (Array.isArray(community.leaderboard)) {
+            setLeaderboard(community.leaderboard);
+          }
         }
       }
     } catch (error) {
@@ -408,6 +420,48 @@ export default function DashboardPage() {
             Log your daily work below to contribute to the community total.
           </p>
         </div>
+      </Card>
+
+      {/* Community Leaderboard */}
+      <Card className="p-4 mb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <Trophy className="h-4 w-4 text-amber-500" />
+          <h2 className="text-base font-semibold">Daily Work Leaderboard</h2>
+        </div>
+        {leaderboard.length > 0 ? (
+          <div className="space-y-1.5">
+            {leaderboard.map((entry, i) => {
+              const isMe = session?.user?.id === entry.id;
+              return (
+                <div
+                  key={entry.id}
+                  className={`flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm ${
+                    i === 0 ? "bg-amber-500/10" : "bg-muted/40"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-5 shrink-0 text-center font-semibold text-muted-foreground">
+                      {i === 0 ? <Crown className="h-4 w-4 inline text-amber-500" /> : i + 1}
+                    </span>
+                    <span className="truncate font-medium">{entry.name}</span>
+                    {isMe && (
+                      <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                        You
+                      </span>
+                    )}
+                  </div>
+                  <span className="shrink-0 font-medium">
+                    {fmtWork(entry.todayMinutes)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No community work logged yet. Be the first!
+          </p>
+        )}
       </Card>
 
       {/* Exam Marks + Study Activity */}

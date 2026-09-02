@@ -42,6 +42,31 @@ export async function GET() {
       .groupBy({ by: ["userId"], _count: { _all: true } })
       .then((rows) => rows.length);
 
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(todayStart);
+    todayEnd.setDate(todayEnd.getDate() + 1);
+    const [workRows, allUsers] = await Promise.all([
+      db.workLog.groupBy({
+        by: ["userId"],
+        where: { date: { gte: todayStart, lt: todayEnd } },
+        _sum: { minutes: true },
+      }),
+      db.user.findMany({
+        where: { workLogs: { some: {} } },
+        select: { id: true, name: true, email: true },
+      }),
+    ]);
+    const todayMap = new Map(workRows.map((r) => [r.userId, r._sum.minutes ?? 0]));
+    const leaderboard = allUsers
+      .map((u) => ({
+        id: u.id,
+        name: u.name || u.email.split("@")[0],
+        todayMinutes: todayMap.get(u.id) ?? 0,
+      }))
+      .sort((a, b) => b.todayMinutes - a.todayMinutes)
+      .slice(0, 10);
+
     const completedQuizzes = quizzes.filter((q) => q.status === "COMPLETED" && q.total > 0);
     const totalQuestionsAnswered = topicPerf.reduce((s, p) => s + p.attempted, 0);
     const totalCorrect = topicPerf.reduce((s, p) => s + Math.round(p.accuracy * p.attempted), 0);
@@ -155,6 +180,7 @@ export async function GET() {
       community: {
         totalMinutes: communityMinutes,
         activeUsers: communityActiveUsers,
+        leaderboard,
       },
     });
   } catch (error) {
