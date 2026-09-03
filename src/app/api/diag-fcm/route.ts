@@ -94,6 +94,29 @@ export async function GET(req: Request) {
       return NextResponse.json({ serviceAccount: sa, results });
     }
 
+    if (action === "mkwh") {
+      await db.$executeRawUnsafe(
+        `CREATE TABLE IF NOT EXISTS "_webhook_logs" (
+          id SERIAL PRIMARY KEY,
+          ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+          msg TEXT NOT NULL
+        )`
+      );
+      return NextResponse.json({ ok: true, table: "created" });
+    }
+
+    if (action === "whlogs") {
+      const rows = await db.$queryRawUnsafe<{ ts: Date; msg: string }[]>(
+        `SELECT ts, msg FROM "_webhook_logs" ORDER BY id DESC LIMIT 50`
+      );
+      return NextResponse.json({ logs: rows });
+    }
+
+    if (action === "whclear") {
+      await db.$executeRawUnsafe(`DELETE FROM "_webhook_logs"`);
+      return NextResponse.json({ ok: true });
+    }
+
     return NextResponse.json({ error: "unknown action" }, { status: 400 });
   } catch (error) {
     return NextResponse.json(
