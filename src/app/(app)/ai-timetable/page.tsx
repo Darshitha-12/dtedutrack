@@ -93,6 +93,7 @@ export default function AITimetablePage() {
   const [loadingList, setLoadingList] = useState(true);
 
   // Form state
+  const [description, setDescription] = useState("");
   const [weeklyHours, setWeeklyHours] = useState(30);
   const [examDate, setExamDate] = useState("");
   const [weakSubjects, setWeakSubjects] = useState("");
@@ -133,6 +134,7 @@ export default function AITimetablePage() {
     try {
       const body = {
         title: "My AI Timetable",
+        description,
         weeklyHours,
         examDate: examDate || undefined,
         weakSubjects: weakSubjects.split(",").map((s) => s.trim()).filter(Boolean),
@@ -238,6 +240,18 @@ export default function AITimetablePage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="px-0 space-y-4">
+            <div>
+              <label className="text-xs text-muted-foreground">
+                Describe your routine in your own words (Sinhala/Singlish ok)
+              </label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={5}
+                placeholder={'e.g. "I take Biology, Chemistry and Physics. I am very weak in Organic Chemistry and MCQ speed. My A/L exam is in December. I can study 6:00-7:30am and 7:30-10:00pm. I want more paper practice on weekends."'}
+                className="mt-1 w-full rounded-md border bg-transparent p-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground">Weekly study hours</label>

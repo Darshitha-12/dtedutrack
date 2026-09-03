@@ -10,6 +10,7 @@ export const maxDuration = 60;
 // ---- Input schema ----
 const inputSchema = z.object({
   title: z.string().default("My AI Timetable"),
+  description: z.string().default(""), // free-form English/Sinhala description of the routine
   weeklyHours: z.number().int().min(1).max(168).default(30),
   dailyHours: z.number().int().min(1).max(24).optional(),
   examDate: z.string().optional(), // yyyy-mm-dd (A/L exam countdown)
@@ -41,6 +42,11 @@ function buildPrompt(input: ValidatedInput, todayISO: string): string {
     : "My preference (create a realistic routine)";
   const weak = input.weakSubjects.length ? input.weakSubjects.join(", ") : "None";
   const techs = input.techniques.length ? input.techniques.join(", ") : "Pomodoro (25/5)";
+  const description = input.description?.trim();
+
+  const userWords = description
+    ? `The student describes their situation in their OWN WORDS (this is the MOST important information — follow it closely): "${description}"`
+    : "";
 
   return `You are an expert A/L study timetable planner.
 Today's date is ${todayISO}. The user's target A/L exam date is ${input.examDate || "not set"}.
@@ -51,8 +57,14 @@ Available weekly study time: ~${input.weeklyHours} hours per week (${
 Preferred time slots: ${slots}.
 Weak subjects / priority topics: ${weak}.
 Preferred study techniques: ${techs}.
+${userWords}
 
 Create a realistic, balanced weekly study plan. Balance all 3 main A/L science subjects, giving extra time to weak subjects. Mix Theory, Paper Practice (MCQ/Past Paper), and Revision.
+
+IMPORTANT:
+- If the student's own description mentions specific subjects, hours, days, times, weak topics, or study techniques, honour those exactly over the generic defaults above.
+- If the description is in Sinhala (Singlish), understand it and plan accordingly; you may answer in plain English.
+- Always cover a sensible spread across the week and fit within any time slots the student gave.
 
 Return ONLY valid JSON in exactly this shape (no markdown, no code fences):
 {
@@ -254,13 +266,17 @@ function mapType(t: string): string {
 // ---- Fallback deterministic balanced schedule (Monday..Sunday) ----
 function buildFallbackSchedule(input: ValidatedInput, todayDow: number) {
   const slots: any[] = [];
-  const preferred = input.timeSlots.length
-    ? input.timeSlots
-    : [];
+  const preferred = input.timeSlots.length ? input.timeSlots : [];
   // daily durations approx from weeklyHours
   const weekly = Math.max(1, input.weeklyHours || 24);
   const perDay = Math.max(1, Math.round(weekly / 7));
-  const subjects = ["Biology", "Chemistry", "Physics", "Revision"];
+  // pick subjects mentioned in the free description, else standard A/L set
+  const desc = (input.description || "").toLowerCase();
+  const mentioned = SUBJECT_LIST.filter((s) =>
+    desc.includes(s.name.toLowerCase().split(" ")[0]),
+  ).map((s) => s.name);
+  const pool = mentioned.length >= 2 ? mentioned : ["Biology", "Chemistry", "Physics", "Revision"];
+  const subjects = pool;
   for (let d = 0; d < 7; d++) {
     const daySlots = preferred.filter((t) => t.dayOfWeek === d);
     let startMin = daySlots.length
