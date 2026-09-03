@@ -499,6 +499,7 @@ model NotificationPreference {
   telegramAll      Boolean @default(false)
   ntfyEnabled      Boolean @default(false)
   ntfyTopic        String  @default("")
+  fcmToken         String  @default("")
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
