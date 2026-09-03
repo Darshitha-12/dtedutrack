@@ -137,63 +137,94 @@ export async function POST(req: Request) {
       planText = "AI generation unavailable (" + e + "). Showing a balanced default timetable.";
     }
 
-    // Persist
-    const timetable = await db.timetable.create({
-      data: {
-        userId,
-        title: input.title,
-        weeklyTargetMin: (input.weeklyHours || 0) * 60,
-        examDate: input.examDate ? new Date(input.examDate + "T00:00:00Z") : null,
-        rawInput: input as object,
-        planText,
-        slots: {
-          create: slots.map((s: any) => ({
-            subjectName: String(s.subjectName || "Study").slice(0, 100),
-            subjectId: "",
-            color: colorFor(String(s.subjectName || "")),
-            startMinute: clamp(s.startMinute ?? 0, 0, 1439),
-            endMinute: clamp(s.endMinute ?? 0, 1, 1440),
-            dayOfWeek: clamp(s.dayOfWeek ?? todayDow, 0, 6),
-            type: String(s.type || "Theory").slice(0, 40),
-            note: String(s.note || "").slice(0, 300),
-          })),
+    // Persist — if DB persistence fails, still return the generated plan so the
+    // user never sees a blank/broken result.
+    let persistedId: string | null = null;
+    let createdAt = new Date();
+    let savedSlots: any[] = slots;
+    try {
+      const timetable = await db.timetable.create({
+        data: {
+          userId,
+          title: input.title,
+          weeklyTargetMin: (input.weeklyHours || 0) * 60,
+          examDate: input.examDate ? new Date(input.examDate + "T00:00:00Z") : null,
+          rawInput: input as object,
+          planText,
+          slots: {
+            create: slots.map((s: any) => ({
+              subjectName: String(s.subjectName || "Study").slice(0, 100),
+              subjectId: "",
+              color: colorFor(String(s.subjectName || "")),
+              startMinute: clamp(s.startMinute ?? 0, 0, 1439),
+              endMinute: clamp(s.endMinute ?? 0, 1, 1440),
+              dayOfWeek: clamp(s.dayOfWeek ?? todayDow, 0, 6),
+              type: String(s.type || "Theory").slice(0, 40),
+              note: String(s.note || "").slice(0, 300),
+            })),
+          },
         },
-      },
-      include: { slots: true },
-    });
+        include: { slots: true },
+      });
+      persistedId = timetable.id;
+      createdAt = timetable.createdAt;
+      savedSlots = timetable.slots;
+    } catch (e) {
+      // persistence failed — fall back to returning the in-memory plan
+      createdAt = new Date();
+      savedSlots = slots.map((s: any) => ({
+        id: "",
+        subjectName: String(s.subjectName || "Study").slice(0, 100),
+        color: colorFor(String(s.subjectName || "")),
+        startMinute: clamp(s.startMinute ?? 0, 0, 1439),
+        endMinute: clamp(s.endMinute ?? 0, 1, 1440),
+        dayOfWeek: clamp(s.dayOfWeek ?? todayDow, 0, 6),
+        type: String(s.type || "Theory").slice(0, 40),
+        note: String(s.note || "").slice(0, 300),
+      }));
+      planText = (planText ? planText + " " : "") + "(Not saved to your account.)";
+    }
 
     // Auto-sync generated slots into the existing PlannerSession table so the
     // traditional "My Sessions" view also shows them (weekly recurrence).
-    const existing = await db.plannerSession.count({ where: { userId } });
-    if (existing < 200) {
-      await db.plannerSession.createMany({
-        data: timetable.slots.map((s) => ({
-          userId,
-          subjectId: s.subjectId || "bio",
-          subjectName: s.subjectName,
-          type: mapType(s.type),
-          priority: "Medium",
-          status: "scheduled",
-          dayOfWeek: s.dayOfWeek,
-          date: s.date,
-          startMinute: s.startMinute,
-          endMinute: s.endMinute,
-          recurrence: "Weekly",
-          notes: s.note,
-        })),
-        skipDuplicates: true,
-      });
+    if (persistedId) {
+      try {
+        const existing = await db.plannerSession.count({ where: { userId } });
+        if (existing < 200) {
+          await db.plannerSession.createMany({
+            data: savedSlots.map((s: any) => ({
+              userId,
+              subjectId: s.subjectId || "bio",
+              subjectName: s.subjectName,
+              type: mapType(s.type),
+              priority: "Medium",
+              status: "scheduled",
+              dayOfWeek: s.dayOfWeek,
+              date: s.date || null,
+              startMinute: s.startMinute,
+              endMinute: s.endMinute,
+              recurrence: "Weekly",
+              notes: s.note,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      } catch (_) {
+        // sync is best-effort; never block returning the generated timetable
+      }
     }
 
     return NextResponse.json({
       ok: true,
+      persisted: persistedId !== null,
       timetable: {
-        id: timetable.id,
-        title: timetable.title,
-        planText: timetable.planText,
-        examDate: timetable.examDate,
-        weeklyHours: (timetable.weeklyTargetMin || 0) / 60,
-        slots: timetable.slots,
+        id: persistedId || "tmp-" + Date.now(),
+        title: input.title,
+        planText,
+        examDate: input.examDate,
+        weeklyHours: (input.weeklyHours || 0),
+        createdAt,
+        slots: savedSlots,
       },
     });
   } catch (error) {

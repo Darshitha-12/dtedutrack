@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSession } from "next-auth/react";
 import {
   Search,
@@ -10,6 +10,7 @@ import {
   Check,
   CheckCheck,
   ArrowLeft,
+  Download,
 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -68,21 +69,40 @@ function lastSeenLabel(lastSeen: string | null, status: string): string {
   return `last seen ${formatDay(lastSeen)}`;
 }
 
-function mediaBubble(m: Dm) {
+function fileNameFromUrl(url: string, fallback: string | null): string {
+  if (fallback) return fallback;
+  const clean = url.split("?")[0].split("/").pop() || "media";
+  return decodeURIComponent(clean);
+}
+
+function mediaBubble(m: Dm, onDownload: (url: string, name: string) => void) {
   if (!m.mediaUrl) return null;
+  let body: ReactNode;
   if (m.mediaType === "image") {
-    return <img src={m.mediaUrl} alt={m.mediaName || "image"} className="max-h-64 rounded-lg object-cover" />;
+    body = <img src={m.mediaUrl} alt={m.mediaName || "image"} className="max-h-64 rounded-lg object-cover" />;
+  } else if (m.mediaType === "video") {
+    body = <video src={m.mediaUrl} controls className="max-h-64 rounded-lg" />;
+  } else if (m.mediaType === "audio") {
+    body = <audio src={m.mediaUrl} controls className="max-w-full" />;
+  } else {
+    body = (
+      <a href={m.mediaUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+        📎 {m.mediaName || "File"}
+      </a>
+    );
   }
-  if (m.mediaType === "video") {
-    return <video src={m.mediaUrl} controls className="max-h-64 rounded-lg" />;
-  }
-  if (m.mediaType === "audio") {
-    return <audio src={m.mediaUrl} controls className="max-w-full" />;
-  }
+  const name = fileNameFromUrl(m.mediaUrl, m.mediaName);
   return (
-    <a href={m.mediaUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">
-      📎 {m.mediaName || "File"}
-    </a>
+    <div className="space-y-1.5">
+      {body}
+      <button
+        type="button"
+        onClick={() => onDownload(m.mediaUrl as string, name)}
+        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+      >
+        <Download className="h-3 w-3" /> Save {name}
+      </button>
+    </div>
   );
 }
 
@@ -297,6 +317,33 @@ export default function ChatPage() {
     sendMessage({ text: t });
   };
 
+  const saveMedia = (url: string, name: string) => {
+    try {
+      const bridge = (window as any).BioPulseBridge;
+      if (bridge && typeof bridge.downloadFile === "function") {
+        bridge.downloadFile(url, name);
+        showToast("Download started — check your Downloads/BioPulse folder.", "success");
+        return;
+      }
+      // Web fallback: fetch as blob and save locally
+      fetch(url)
+        .then((r) => (r.ok ? r.blob() : Promise.reject()))
+        .then((blob) => {
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = name;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(a.href);
+          showToast("Downloaded.", "success");
+        })
+        .catch(() => showToast("Could not download this file.", "error"));
+    } catch {
+      showToast("Could not start download.", "error");
+    }
+  };
+
   const handleFile = async (file: File) => {
     if (!file) return;
     const fd = new FormData();
@@ -459,7 +506,7 @@ export default function ChatPage() {
                               mine ? "bg-primary text-primary-foreground rounded-br-sm" : "bg-muted rounded-bl-sm",
                             )}
                           >
-                            {mediaBubble(m)}
+                            {mediaBubble(m, saveMedia)}
                             {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
                             <div
                               className={cn(

@@ -289,18 +289,15 @@ export default function DashboardPage() {
     );
   }
 
-  if (loading) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="container mx-auto px-4 py-8">
+      {/* Feature cards render immediately — never hidden behind data loading */}
+      <div className="mb-6">
+        {loading && (
+          <div className="mb-6 flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading your data…
+          </div>
+        )}
       {/* Welcome Banner */}
       <Card className="p-6 mb-6 bg-gradient-to-r from-primary/10 to-primary/5">
         <div className="flex items-center justify-between">
