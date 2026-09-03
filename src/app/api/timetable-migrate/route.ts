@@ -41,6 +41,9 @@ CREATE INDEX IF NOT EXISTS "timetables_userId_idx" ON "timetables"("userId");
 
 const SLOT_INDEXES = `
 CREATE INDEX IF NOT EXISTS "timetable_slots_timetableId_date_idx" ON "timetable_slots"("timetableId", "date");
+`;
+
+const SLOT_INDEXES2 = `
 CREATE INDEX IF NOT EXISTS "timetable_slots_timetableId_dayOfWeek_idx" ON "timetable_slots"("timetableId", "dayOfWeek");
 `;
 
@@ -91,6 +94,12 @@ export async function GET(req: Request) {
     results.slot_indexes = "ok";
   } catch (e) {
     results.slot_indexes = "ERR " + (e instanceof Error ? e.message : String(e)).slice(0, 200);
+  }
+  try {
+    await db.$executeRawUnsafe(SLOT_INDEXES2);
+    results.slot_indexes2 = "ok";
+  } catch (e) {
+    results.slot_indexes2 = "ERR " + (e instanceof Error ? e.message : String(e)).slice(0, 200);
   }
   try {
     await db.$executeRawUnsafe(FKS);
