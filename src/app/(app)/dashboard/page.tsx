@@ -346,6 +346,28 @@ export default function DashboardPage() {
         </div>
       </Card>
 
+      {/* Work Log Card */}
+      <Card className="p-6 mb-6 border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 to-emerald-500/5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 rounded-xl bg-emerald-500/15 flex items-center justify-center">
+              <Clock className="h-6 w-6 text-emerald-500" />
+            </div>
+            <div>
+              <p className="text-lg font-semibold">Daily Work Log</p>
+              <p className="text-sm text-muted-foreground">
+                Log today&apos;s study &amp; extra work hours and see the community total.
+              </p>
+            </div>
+          </div>
+          <Link href="/work-log">
+            <Button variant="outline" className="gap-2">
+              <Clock className="h-4 w-4" /> Open Work Log
+            </Button>
+          </Link>
+        </div>
+      </Card>
+
       {/* Profile Incomplete Banner */}
       {getProfileCompleteness() < 100 && (
         <Card className="p-4 mb-6 border-yellow-500/50 bg-yellow-500/5">
