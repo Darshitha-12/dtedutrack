@@ -11,29 +11,20 @@ function getServiceAccount(): Record<string, string> | null {
   }
 }
 
-let appInitialized = false;
+let adminApp: any = null;
 
-function ensureApp(): boolean {
-  if (appInitialized) return true;
-  const sa = getServiceAccount();
-  if (!sa) return false;
-  if (getApps().length === 0) {
-    initializeApp({ credential: cert(sa) }, "biopulse-fcm");
-  }
-  appInitialized = true;
-  return true;
-}
+function ensureApp(): any { if (adminApp) return adminApp; const sa = getServiceAccount(); if (!sa) return null; const existing = getApps().find((a: any) => a.name === "biopulse-fcm"); if (existing) { adminApp = existing; return adminApp; } adminApp = initializeApp({ credential: cert(sa) }, "biopulse-fcm"); return adminApp; }
 
 export async function sendTelegramNotification(
   deviceToken: string,
   sender: string,
   text: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  if (!ensureApp()) {
+  const app = ensureApp(); if (!app) {
     return { ok: false, error: "FCM not configured" };
   }
   try {
-    await getMessaging().send({
+    await getMessaging(app).send({
       token: deviceToken,
       notification: {
         title: `Telegram \u00b7 ${sender}`,
