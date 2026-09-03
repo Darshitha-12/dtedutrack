@@ -29,6 +29,7 @@ import {
   Trophy,
   Crown,
   CalendarDays,
+  Sparkles,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -122,6 +123,25 @@ export default function DashboardPage() {
       fetchAnalytics();
     }, 8000);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    function onFocus() {
+      fetchProfile();
+      fetchStudyStats();
+      fetchAlarms();
+      fetchExamMarks();
+      fetchAnalytics();
+    }
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") onFocus();
+    });
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", () => {});
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -341,6 +361,28 @@ export default function DashboardPage() {
           <Link href="/planner">
             <Button className="gap-2">
               <CalendarDays className="h-4 w-4" /> Open Planner
+            </Button>
+          </Link>
+        </div>
+      </Card>
+
+      {/* AI Timetable Card */}
+      <Card className="p-6 mb-6 border-violet-500/30 bg-gradient-to-r from-violet-500/10 to-violet-500/5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 rounded-xl bg-violet-500/15 flex items-center justify-center">
+              <Sparkles className="h-6 w-6 text-violet-500" />
+            </div>
+            <div>
+              <p className="text-lg font-semibold">AI Study Timetable</p>
+              <p className="text-sm text-muted-foreground">
+                AI-generated visual weekly timetable with calendar &amp; analytics graphs.
+              </p>
+            </div>
+          </div>
+          <Link href="/ai-timetable">
+            <Button variant="outline" className="gap-2">
+              <Sparkles className="h-4 w-4" /> Open AI Timetable
             </Button>
           </Link>
         </div>

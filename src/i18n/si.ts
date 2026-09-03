@@ -123,6 +123,8 @@ export const si = {
     telegram: "ටෙලිග්‍රෑම්",
     messages: "පණිවිඩ",
     studyPlanner: "අධ්‍යයන සැලසුම්කරු",
+    aiTimetable: "AI කාලසටහන",
+    download: "බාගැනීම් කළමනාකරු",
     mistakeBook: "වැරදි පොත",
     analytics: "විශ්ලේෂණ",
     search: "සොයන්න",

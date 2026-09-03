@@ -123,6 +123,8 @@ export const en = {
     telegram: "Telegram",
     messages: "Messages",
     studyPlanner: "Study Planner",
+    aiTimetable: "AI Timetable",
+    download: "Download Manager",
     mistakeBook: "Mistake Book",
     analytics: "Analytics",
     search: "Search",

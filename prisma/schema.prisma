@@ -12,40 +12,42 @@ datasource db {
 // ============================================================
 
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
-  name         String?
-  passwordHash String
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String
   emailVerified DateTime?
-  image        String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  profile          Profile?
-  studentProfile   StudentProfile?
-  alarms           Alarm[]
-  studySessions    StudySession[]
-  markRecords      MarkRecord[]
-  timetablePref    TimetablePref?
-  timetableDays    TimetableDay[]
-  plannerSessions  PlannerSession[]
-  pomodoroSessions PomodoroSession[]
-  workLogs         WorkLog[]
+  profile           Profile?
+  studentProfile    StudentProfile?
+  alarms            Alarm[]
+  studySessions     StudySession[]
+  markRecords       MarkRecord[]
+  timetablePref     TimetablePref?
+  timetableDays     TimetableDay[]
+  plannerSessions   PlannerSession[]
+  timetables        Timetable[]
+  timetableSlots    TimetableSlot[]
+  pomodoroSessions  PomodoroSession[]
+  workLogs          WorkLog[]
   notificationPrefs NotificationPreference?
-  accounts         Account[]
-  sessions         Session[]
-  topicProgress    UserTopicProgress[]
-  conversations    Conversation[]
-  quizzes          Quiz[]
-  questionAttempts QuestionAttempt[]
-  notes            Note[]
-  notepadEntries   NotepadEntry[]
-  flashcardDecks   FlashcardDeck[]
-  chatMessages     ChatMessage[]
-  groupMembers     GroupMember[]
-  sentMessages     DirectMessage[] @relation("DirectMessageSender")
-  receivedMessages DirectMessage[] @relation("DirectMessageReceiver")
-  presence         Presence?
+  accounts          Account[]
+  sessions          Session[]
+  topicProgress     UserTopicProgress[]
+  conversations     Conversation[]
+  quizzes           Quiz[]
+  questionAttempts  QuestionAttempt[]
+  notes             Note[]
+  notepadEntries    NotepadEntry[]
+  flashcardDecks    FlashcardDeck[]
+  chatMessages      ChatMessage[]
+  groupMembers      GroupMember[]
+  sentMessages      DirectMessage[]         @relation("DirectMessageSender")
+  receivedMessages  DirectMessage[]         @relation("DirectMessageReceiver")
+  presence          Presence?
 
   @@map("users")
 }
@@ -90,41 +92,41 @@ model VerificationToken {
 }
 
 model Profile {
-  id          String   @id @default(uuid())
-  userId      String   @unique
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String    @id @default(uuid())
+  userId      String    @unique
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   examDate    DateTime?
-  targetGrade String   @default("A")
-  revHours    Int      @default(350)
-  dailyHr     Int      @default(4)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  targetGrade String    @default("A")
+  revHours    Int       @default(350)
+  dailyHr     Int       @default(4)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@map("profiles")
 }
 
 model StudentProfile {
-  id               String   @id @default(uuid())
-  userId           String   @unique
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  fullName         String   @default("")
-  avatarUrl        String?
-  language         String   @default("en")
-  examYear         Int?
-  examDate         DateTime?
-  examType         String   @default("A/L Biology")
-  dailyStudyTarget Int      @default(4)
-  weeklyStudyTarget Int     @default(28)
-  targetGrade      String   @default("A")
-  currentLevel     String   @default("intermediate")
-  preferredTime    String   @default("morning")
-  weakTopics       String[]
-  subjects         String[]
-  onboarded        Boolean  @default(false)
-  onboardedAt      DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  fullName          String    @default("")
+  avatarUrl         String?
+  language          String    @default("en")
+  examYear          Int?
+  examDate          DateTime?
+  examType          String    @default("A/L Biology")
+  dailyStudyTarget  Int       @default(4)
+  weeklyStudyTarget Int       @default(28)
+  targetGrade       String    @default("A")
+  currentLevel      String    @default("intermediate")
+  preferredTime     String    @default("morning")
+  weakTopics        String[]
+  subjects          String[]
+  onboarded         Boolean   @default(false)
+  onboardedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@map("student_profiles")
 }
@@ -134,35 +136,35 @@ model StudentProfile {
 // ============================================================
 
 model TimetablePref {
-  id                 String   @id @default(uuid())
-  userId             String   @unique
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  weeklyTargetMin    Int      @default(1800) // 0 = no target
-  sessionLengthMin   Int      @default(60)
-  breakAfterMin      Int      @default(60)
-  breakDurationMin   Int      @default(10)
-  timeFormat         String   @default("24h") // "12h" or "24h"
-  subjectPriorities  Json     @default("[]") // [{subjectId,name,priority,icon,color}]
-  studyTypeWeight    Json     @default("[]") // [{type,weight}]
-  weakTopics         String[] @default([])
-  showBreaks         Boolean  @default(true)
-  updatedAt          DateTime @updatedAt
-  createdAt          DateTime @default(now())
+  weeklyTargetMin   Int      @default(1800) // 0 = no target
+  sessionLengthMin  Int      @default(60)
+  breakAfterMin     Int      @default(60)
+  breakDurationMin  Int      @default(10)
+  timeFormat        String   @default("24h") // "12h" or "24h"
+  subjectPriorities Json     @default("[]") // [{subjectId,name,priority,icon,color}]
+  studyTypeWeight   Json     @default("[]") // [{type,weight}]
+  weakTopics        String[] @default([])
+  showBreaks        Boolean  @default(true)
+  updatedAt         DateTime @updatedAt
+  createdAt         DateTime @default(now())
 
   @@map("timetable_prefs")
 }
 
 model TimetableDay {
-  id              String   @id @default(uuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  dayOfWeek       Int      // 0=Mon .. 6=Sun
-  enabled         Boolean  @default(false)
-  dailyTargetMin  Int      @default(0) // 0 = no target
-  blocks          Json     @default("[]") // [{startMinute,endMinute}]
-  updatedAt       DateTime @updatedAt
-  createdAt       DateTime @default(now())
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dayOfWeek      Int // 0=Mon .. 6=Sun
+  enabled        Boolean  @default(false)
+  dailyTargetMin Int      @default(0) // 0 = no target
+  blocks         Json     @default("[]") // [{startMinute,endMinute}]
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
 
   @@unique([userId, dayOfWeek])
   @@index([userId])
@@ -170,33 +172,33 @@ model TimetableDay {
 }
 
 model PlannerSession {
-  id              String    @id @default(uuid())
-  userId          String
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  subjectId       String
-  subjectName     String    @default("")
-  topicId         String?
-  topicTitle      String?
+  subjectId   String
+  subjectName String  @default("")
+  topicId     String?
+  topicTitle  String?
 
   // Schedule placement
-  date            DateTime? // for a specific date
-  dayOfWeek       Int?      // 0=Mon..6=Sun for recurring schedules
-  startMinute     Int
-  endMinute       Int
+  date        DateTime? // for a specific date
+  dayOfWeek   Int? // 0=Mon..6=Sun for recurring schedules
+  startMinute Int
+  endMinute   Int
 
-  type            String    @default("Learn") // Learn, Revision, MCQ, PastPaper, WeakTopic, AITutor, Review
-  priority        String    @default("Medium") // Low, Medium, High
-  status          String    @default("scheduled") // scheduled, completed, skipped, missed
-  completedAt     DateTime?
+  type        String    @default("Learn") // Learn, Revision, MCQ, PastPaper, WeakTopic, AITutor, Review
+  priority    String    @default("Medium") // Low, Medium, High
+  status      String    @default("scheduled") // scheduled, completed, skipped, missed
+  completedAt DateTime?
 
-  recurrence      String    @default("Once") // Once, Daily, Weekly, SelectedWeekdays
-  recurrenceDays  Int[]     @default([])
-  reminderMin     Int       @default(0) // 0 = none
-  notes           String    @default("")
+  recurrence     String @default("Once") // Once, Daily, Weekly, SelectedWeekdays
+  recurrenceDays Int[]  @default([])
+  reminderMin    Int    @default(0) // 0 = none
+  notes          String @default("")
 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId, date])
   @@index([userId, dayOfWeek])
@@ -205,136 +207,185 @@ model PlannerSession {
 }
 
 // ============================================================
+// AI STUDY TIMETABLE GENERATOR MODELS
+// ============================================================
+
+model Timetable {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title           String    @default("My AI Timetable")
+  // The inputs used to generate this timetable
+  weeklyTargetMin Int       @default(0)
+  examDate        DateTime?
+  rawInput        Json      @default("{}")
+  // Human-readable AI plan text
+  planText        String    @default("") @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  slots TimetableSlot[]
+
+  @@index([userId])
+  @@map("timetables")
+}
+
+model TimetableSlot {
+  id          String    @id @default(uuid())
+  timetableId String
+  timetable   Timetable @relation(fields: [timetableId], references: [id], onDelete: Cascade)
+
+  subjectName String    @default("")
+  subjectId   String    @default("")
+  color       String    @default("#10B981")
+  // Slot placement
+  date        DateTime? // mapped to a specific calendar date
+  dayOfWeek   Int? // 0=Mon..6=Sun for recurring
+  startMinute Int
+  endMinute   Int
+  type        String    @default("Learn") // Theory / Practice / Revision / MCQ / PastPaper / WeakTopic
+  note        String    @default("")
+  user        User?     @relation(fields: [userId], references: [id])
+  userId      String?
+
+  @@index([timetableId, date])
+  @@index([timetableId, dayOfWeek])
+  @@map("timetable_slots")
+}
+
+// ============================================================
 // CONTENT HIERARCHY MODELS
 // ============================================================
 
 model ContentSubject {
-  id          String @id
-  slug        String @unique
-  name        String
-  nameSi      String @default("")
-  description String @default("")
-  descriptionSi String @default("")
-  icon        String
-  color       String
-  order       Int    @default(0)
-  status      String @default("DEMO") // DEMO, DRAFT, VERIFIED, ARCHIVED
-  source      String @default("DEMO") // DEMO, OFFICIAL, TEACHER_CREATED, AI_GENERATED, USER_CREATED
-  version     Int    @default(1)
-  publishedAt DateTime?
-  archivedAt  DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String    @id
+  slug          String    @unique
+  name          String
+  nameSi        String    @default("")
+  description   String    @default("")
+  descriptionSi String    @default("")
+  icon          String
+  color         String
+  order         Int       @default(0)
+  status        String    @default("DEMO") // DEMO, DRAFT, VERIFIED, ARCHIVED
+  source        String    @default("DEMO") // DEMO, OFFICIAL, TEACHER_CREATED, AI_GENERATED, USER_CREATED
+  version       Int       @default(1)
+  publishedAt   DateTime?
+  archivedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  units       ContentUnit[]
-  questions   Question[]
+  units     ContentUnit[]
+  questions Question[]
 
   @@map("content_subjects")
 }
 
 model ContentUnit {
-  id            String @id
-  subjectId     String
-  subject       ContentSubject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  slug          String
-  order         Int    @default(0)
-  title         String
-  titleSi       String @default("")
-  description   String @default("")
-  descriptionSi String @default("")
-  estimatedMinutes Int @default(0)
-  status        String @default("DEMO")
-  source        String @default("DEMO")
-  version       Int    @default(1)
-  publishedAt   DateTime?
-  archivedAt    DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id               String         @id
+  subjectId        String
+  subject          ContentSubject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  slug             String
+  order            Int            @default(0)
+  title            String
+  titleSi          String         @default("")
+  description      String         @default("")
+  descriptionSi    String         @default("")
+  estimatedMinutes Int            @default(0)
+  status           String         @default("DEMO")
+  source           String         @default("DEMO")
+  version          Int            @default(1)
+  publishedAt      DateTime?
+  archivedAt       DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
-  topics        ContentTopic[]
-  questions     Question[]
+  topics    ContentTopic[]
+  questions Question[]
 
   @@unique([subjectId, slug])
   @@map("content_units")
 }
 
 model ContentTopic {
-  id            String @id
-  unitId        String
-  unit          ContentUnit @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  slug          String
-  order         Int    @default(0)
-  title         String
-  titleSi       String @default("")
-  description   String @default("")
-  descriptionSi String @default("")
-  difficulty    String @default("intermediate") // beginner, intermediate, advanced
-  importance    String @default("normal") // low, normal, high, critical
-  examRelevance Int    @default(50) // 0-100
-  estimatedMinutes Int @default(0)
-  status        String @default("DEMO")
-  source        String @default("DEMO")
-  version       Int    @default(1)
-  publishedAt   DateTime?
-  archivedAt    DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id               String      @id
+  unitId           String
+  unit             ContentUnit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  slug             String
+  order            Int         @default(0)
+  title            String
+  titleSi          String      @default("")
+  description      String      @default("")
+  descriptionSi    String      @default("")
+  difficulty       String      @default("intermediate") // beginner, intermediate, advanced
+  importance       String      @default("normal") // low, normal, high, critical
+  examRelevance    Int         @default(50) // 0-100
+  estimatedMinutes Int         @default(0)
+  status           String      @default("DEMO")
+  source           String      @default("DEMO")
+  version          Int         @default(1)
+  publishedAt      DateTime?
+  archivedAt       DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 
-  subtopics           ContentSubtopic[]
-  learningObjectives  ContentLearningObjective[]
-  userProgress        UserTopicProgress[]
-  questions           Question[]
+  subtopics          ContentSubtopic[]
+  learningObjectives ContentLearningObjective[]
+  userProgress       UserTopicProgress[]
+  questions          Question[]
 
   @@unique([unitId, slug])
   @@map("content_topics")
 }
 
 model ContentSubtopic {
-  id            String @id
-  topicId       String
-  topic         ContentTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
-  slug          String
-  order         Int    @default(0)
-  title         String
-  titleSi       String @default("")
-  description   String @default("")
-  descriptionSi String @default("")
-  content       String @default("") // markdown content
-  contentSi     String @default("")
-  difficulty    String @default("intermediate")
-  estimatedMinutes Int @default(0)
-  status        String @default("DEMO")
-  source        String @default("DEMO")
-  version       Int    @default(1)
-  publishedAt   DateTime?
-  archivedAt    DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id               String       @id
+  topicId          String
+  topic            ContentTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  slug             String
+  order            Int          @default(0)
+  title            String
+  titleSi          String       @default("")
+  description      String       @default("")
+  descriptionSi    String       @default("")
+  content          String       @default("") // markdown content
+  contentSi        String       @default("")
+  difficulty       String       @default("intermediate")
+  estimatedMinutes Int          @default(0)
+  status           String       @default("DEMO")
+  source           String       @default("DEMO")
+  version          Int          @default(1)
+  publishedAt      DateTime?
+  archivedAt       DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
-  learningObjectives  ContentLearningObjective[]
+  learningObjectives ContentLearningObjective[]
 
   @@unique([topicId, slug])
   @@map("content_subtopics")
 }
 
 model ContentLearningObjective {
-  id            String @id
+  id            String           @id
   topicId       String?
-  topic         ContentTopic? @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  topic         ContentTopic?    @relation(fields: [topicId], references: [id], onDelete: Cascade)
   subtopicId    String?
   subtopic      ContentSubtopic? @relation(fields: [subtopicId], references: [id], onDelete: Cascade)
   slug          String
-  order         Int    @default(0)
+  order         Int              @default(0)
   title         String
-  titleSi       String @default("")
-  description   String @default("")
-  descriptionSi String @default("")
-  difficulty    String @default("intermediate")
-  status        String @default("DEMO")
-  source        String @default("DEMO")
-  version       Int    @default(1)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  titleSi       String           @default("")
+  description   String           @default("")
+  descriptionSi String           @default("")
+  difficulty    String           @default("intermediate")
+  status        String           @default("DEMO")
+  source        String           @default("DEMO")
+  version       Int              @default(1)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
   @@unique([topicId, subtopicId, slug])
   @@map("content_learning_objectives")
@@ -343,12 +394,12 @@ model ContentLearningObjective {
 model ContentSource {
   id            String   @id @default(uuid())
   name          String
-  type          String   // TEXTBOOK, PAST_PAPER, TEACHER_NOTE, WEBSITE, VIDEO
+  type          String // TEXTBOOK, PAST_PAPER, TEACHER_NOTE, WEBSITE, VIDEO
   url           String?
   author        String?
   publishedYear Int?
-  description   String @default("")
-  verified      Boolean @default(false)
+  description   String   @default("")
+  verified      Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -360,23 +411,23 @@ model ContentSource {
 // ============================================================
 
 model UserTopicProgress {
-  id                String   @id @default(uuid())
-  userId            String
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  topicId           String
-  topic             ContentTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
-  subtopicId        String?
-  status            String   @default("NOT_STARTED") // NOT_STARTED, IN_PROGRESS, REVIEW, MASTERED
-  masteryScore      Float    @default(0) // 0-100
-  completionPercent Float    @default(0) // 0-100
-  questionsAttempted Int     @default(0)
-  questionsCorrect   Int     @default(0)
-  studyMinutes      Int      @default(0)
-  confidence        String   @default("low") // low, medium, high
-  lastStudiedAt     DateTime?
-  lastReviewedAt    DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                 String       @id @default(uuid())
+  userId             String
+  user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topicId            String
+  topic              ContentTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  subtopicId         String?
+  status             String       @default("NOT_STARTED") // NOT_STARTED, IN_PROGRESS, REVIEW, MASTERED
+  masteryScore       Float        @default(0) // 0-100
+  completionPercent  Float        @default(0) // 0-100
+  questionsAttempted Int          @default(0)
+  questionsCorrect   Int          @default(0)
+  studyMinutes       Int          @default(0)
+  confidence         String       @default("low") // low, medium, high
+  lastStudiedAt      DateTime?
+  lastReviewedAt     DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   @@unique([userId, topicId, subtopicId])
   @@index([userId, status])
@@ -394,35 +445,35 @@ model Subject {
   icon  String
   color String
 
-  alarms         Alarm[]
-  studySessions  StudySession[]
+  alarms        Alarm[]
+  studySessions StudySession[]
 
   @@map("subjects")
 }
 
 model Alarm {
-  id              String   @id @default(uuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  subjectId       String?
-  subject         Subject? @relation(fields: [subjectId], references: [id])
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId String?
+  subject   Subject? @relation(fields: [subjectId], references: [id])
 
-  kind            String   @default("fixed")
-  time            String?
-  fireAt          DateTime?
-  label           String
-  priority        String   @default("normal")
-  sound           String   @default("chime")
-  tts             Boolean  @default(true)
-  days            Int[]
-  enabled         Boolean  @default(true)
-  fired           Boolean  @default(false)
-  lastFired       DateTime?
-  snoozeCount     Int      @default(0)
-  reviewTopicId   String?
+  kind          String    @default("fixed")
+  time          String?
+  fireAt        DateTime?
+  label         String
+  priority      String    @default("normal")
+  sound         String    @default("chime")
+  tts           Boolean   @default(true)
+  days          Int[]
+  enabled       Boolean   @default(true)
+  fired         Boolean   @default(false)
+  lastFired     DateTime?
+  snoozeCount   Int       @default(0)
+  reviewTopicId String?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId, enabled])
   @@index([userId, fireAt])
@@ -459,14 +510,14 @@ model WorkLog {
 }
 
 model PomodoroSession {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   subjectId   String?
   phase       String
   durationMin Int
-  completed   Boolean  @default(true)
-  startedAt   DateTime @default(now())
+  completed   Boolean   @default(true)
+  startedAt   DateTime  @default(now())
   endedAt     DateTime?
 
   @@index([userId, startedAt])
@@ -489,19 +540,19 @@ model MarkRecord {
 }
 
 model NotificationPreference {
-  id               String @id @default(uuid())
-  userId           String @unique
-  user             User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  browserEnabled   Boolean @default(false)
-  telegramEnabled  Boolean @default(false)
-  telegramToken    String  @default("")
-  telegramChatId   String  @default("")
-  telegramAll      Boolean @default(false)
-  ntfyEnabled      Boolean @default(false)
-  ntfyTopic        String  @default("")
-  fcmToken         String  @default("")
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  browserEnabled  Boolean  @default(false)
+  telegramEnabled Boolean  @default(false)
+  telegramToken   String   @default("")
+  telegramChatId  String   @default("")
+  telegramAll     Boolean  @default(false)
+  ntfyEnabled     Boolean  @default(false)
+  ntfyTopic       String   @default("")
+  fcmToken        String   @default("")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@map("notification_preferences")
 }
@@ -518,7 +569,7 @@ model Conversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  messages  Message[]
+  messages Message[]
 
   @@index([userId, updatedAt])
   @@map("conversations")
@@ -528,7 +579,7 @@ model Message {
   id             String       @id @default(uuid())
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  role           String       // USER, ASSISTANT, SYSTEM
+  role           String // USER, ASSISTANT, SYSTEM
   content        String       @db.Text
   createdAt      DateTime     @default(now())
 
@@ -537,17 +588,17 @@ model Message {
 }
 
 model AIUsage {
-  id           String   @id @default(uuid())
-  userId       String
-  provider     String   // openai, etc.
-  model        String
-  promptTokens Int      @default(0)
-  completionTokens Int @default(0)
-  totalTokens  Int      @default(0)
-  durationMs   Int      @default(0)
-  success      Boolean  @default(true)
-  errorMessage String?
-  createdAt    DateTime @default(now())
+  id               String   @id @default(uuid())
+  userId           String
+  provider         String // openai, etc.
+  model            String
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  totalTokens      Int      @default(0)
+  durationMs       Int      @default(0)
+  success          Boolean  @default(true)
+  errorMessage     String?
+  createdAt        DateTime @default(now())
 
   @@index([userId, createdAt])
   @@index([provider, model])
@@ -559,30 +610,30 @@ model AIUsage {
 // ============================================================
 
 model Question {
-  id          String   @id @default(uuid())
-  subjectId   String
-  subject     ContentSubject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  unitId      String
-  unit        ContentUnit @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  topicId     String
-  topic       ContentTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
-  type        String   @default("MCQ") // MCQ, MULTIPLE_SELECT, TRUE_FALSE
-  difficulty  String   @default("medium") // easy, medium, hard
-  stem        String   @db.Text
-  stemSi      String   @default("") @db.Text
-  explanation String   @default("") @db.Text
-  explanationSi String @default("") @db.Text
-  marks       Int      @default(1)
-  tags        String[]
-  status      String   @default("PUBLISHED") // DRAFT, PUBLISHED, ARCHIVED
-  source      String   @default("DEMO")
-  createdBy   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String         @id @default(uuid())
+  subjectId     String
+  subject       ContentSubject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  unitId        String
+  unit          ContentUnit    @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  topicId       String
+  topic         ContentTopic   @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  type          String         @default("MCQ") // MCQ, MULTIPLE_SELECT, TRUE_FALSE
+  difficulty    String         @default("medium") // easy, medium, hard
+  stem          String         @db.Text
+  stemSi        String         @default("") @db.Text
+  explanation   String         @default("") @db.Text
+  explanationSi String         @default("") @db.Text
+  marks         Int            @default(1)
+  tags          String[]
+  status        String         @default("PUBLISHED") // DRAFT, PUBLISHED, ARCHIVED
+  source        String         @default("DEMO")
+  createdBy     String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
-  options      QuestionOption[]
+  options       QuestionOption[]
   quizQuestions QuizQuestion[]
-  attempts     QuestionAttempt[]
+  attempts      QuestionAttempt[]
 
   @@index([topicId, difficulty])
   @@index([subjectId, unitId])
@@ -625,16 +676,16 @@ model Quiz {
 }
 
 model QuizQuestion {
-  id               String   @id @default(uuid())
+  id               String    @id @default(uuid())
   quizId           String
-  quiz             Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  quiz             Quiz      @relation(fields: [quizId], references: [id], onDelete: Cascade)
   questionId       String
-  question         Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  question         Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
   order            Int
-  status           String   @default("PENDING") // PENDING, ANSWERED, SKIPPED
+  status           String    @default("PENDING") // PENDING, ANSWERED, SKIPPED
   selectedOptionId String?
   isCorrect        Boolean?
-  timeMs           Int      @default(0)
+  timeMs           Int       @default(0)
   answeredAt       DateTime?
 
   @@unique([quizId, order])
@@ -643,14 +694,14 @@ model QuizQuestion {
 }
 
 model QuestionAttempt {
-  id               String    @id @default(uuid())
+  id               String   @id @default(uuid())
   userId           String
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   questionId       String
-  question         Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  question         Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
   selectedOptionId String?
   isCorrect        Boolean
-  answeredAt       DateTime  @default(now())
+  answeredAt       DateTime @default(now())
 
   @@index([userId, questionId])
   @@index([userId, answeredAt])
@@ -690,14 +741,14 @@ model NotepadEntry {
 // ============================================================
 
 model FlashcardDeck {
-  id        String      @id @default(uuid())
+  id        String   @id @default(uuid())
   userId    String
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   title     String
-  language  String      @default("English") // English, Sinhala
-  source    String      @default("AI_GENERATED") // AI_GENERATED, REGENERATED, MANUAL
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  language  String   @default("English") // English, Sinhala
+  source    String   @default("AI_GENERATED") // AI_GENERATED, REGENERATED, MANUAL
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   cards Flashcard[]
 
@@ -724,16 +775,16 @@ model Flashcard {
 // ============================================================
 
 model TelegramGroup {
-  id          String   @id @default(uuid())
+  id          String        @id @default(uuid())
   name        String
-  username    String   @unique
-  inviteLink  String   @default("")
-  category    String   @default("group") // group, channel, supergroup
-  description String   @default("")
-  memberCount Int      @default(0)
-  isOfficial  Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  username    String        @unique
+  inviteLink  String        @default("")
+  category    String        @default("group") // group, channel, supergroup
+  description String        @default("")
+  memberCount Int           @default(0)
+  isOfficial  Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
   members     GroupMember[]
 
   @@index([category])
@@ -795,17 +846,17 @@ model GroupMember {
 // ============================================================
 
 model DirectMessage {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   senderId   String
-  sender     User     @relation("DirectMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  sender     User      @relation("DirectMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
   receiverId String
-  receiver   User     @relation("DirectMessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
-  text       String   @default("")
+  receiver   User      @relation("DirectMessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  text       String    @default("")
   mediaUrl   String?
   mediaType  String? // image, video, audio
   mediaName  String?
   readAt     DateTime?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
 
   @@index([senderId, createdAt])
   @@index([receiverId, createdAt])
