@@ -28,6 +28,7 @@ import {
   Plus,
   Trophy,
   Crown,
+  CalendarDays,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -320,6 +321,28 @@ export default function DashboardPage() {
               </svg>
             </div>
           </div>
+        </div>
+      </Card>
+
+      {/* Study Planner Card */}
+      <Card className="p-6 mb-6 border-primary/30 bg-gradient-to-r from-primary/10 to-primary/5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 rounded-xl bg-primary/15 flex items-center justify-center">
+              <CalendarDays className="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <p className="text-lg font-semibold">Study Planner</p>
+              <p className="text-sm text-muted-foreground">
+                Plan your week, generate a smart A/L timetable, and track sessions.
+              </p>
+            </div>
+          </div>
+          <Link href="/planner">
+            <Button className="gap-2">
+              <CalendarDays className="h-4 w-4" /> Open Planner
+            </Button>
+          </Link>
         </div>
       </Card>
 
