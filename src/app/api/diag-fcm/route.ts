@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getApps, initializeApp, cert, deleteApp } from "firebase-admin/app";
 import { getMessaging } from "firebase-admin/messaging";
@@ -115,6 +115,11 @@ export async function GET(req: Request) {
     if (action === "whclear") {
       await db.$executeRawUnsafe(`DELETE FROM "_webhook_logs"`);
       return NextResponse.json({ ok: true });
+    }
+
+    if (action === "cleartoken") {
+      await db.notificationPreference.updateMany({ data: { fcmToken: "" } });
+      return NextResponse.json({ ok: true, cleared: true });
     }
 
     return NextResponse.json({ error: "unknown action" }, { status: 400 });
