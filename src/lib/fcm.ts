@@ -35,16 +35,13 @@ export async function sendTelegramNotification(
   try {
     await getMessaging().send({
       token: deviceToken,
-      notification: {
+      data: {
         title: `Telegram · ${sender}`,
         body: text.length > 160 ? text.slice(0, 157) + "…" : text,
+        channelId: "telegram_messages",
       },
       android: {
         priority: "high",
-        notification: {
-          channelId: "telegram_messages",
-          priority: "high",
-        },
       },
     });
     return { ok: true };
