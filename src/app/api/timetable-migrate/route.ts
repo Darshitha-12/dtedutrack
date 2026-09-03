@@ -37,12 +37,27 @@ CREATE TABLE IF NOT EXISTS "timetable_slots" (
 
 const INDEXES = `
 CREATE INDEX IF NOT EXISTS "timetables_userId_idx" ON "timetables"("userId");
+`;
+
+const SLOT_INDEXES = `
 CREATE INDEX IF NOT EXISTS "timetable_slots_timetableId_date_idx" ON "timetable_slots"("timetableId", "date");
 CREATE INDEX IF NOT EXISTS "timetable_slots_timetableId_dayOfWeek_idx" ON "timetable_slots"("timetableId", "dayOfWeek");
+`;
+
+const FKS = `
 ALTER TABLE "timetables" DROP CONSTRAINT IF EXISTS "timetables_userId_fkey";
+`;
+
+const FK_USER_ADD = `
 ALTER TABLE "timetables" ADD CONSTRAINT "timetables_userId_fkey"
   FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+`;
+
+const FK_SLOT_DROP = `
 ALTER TABLE "timetable_slots" DROP CONSTRAINT IF EXISTS "timetable_slots_timetableId_fkey";
+`;
+
+const FK_SLOT_ADD = `
 ALTER TABLE "timetable_slots" ADD CONSTRAINT "timetable_slots_timetableId_fkey"
   FOREIGN KEY ("timetableId") REFERENCES "timetables"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 `;
@@ -67,9 +82,39 @@ export async function GET(req: Request) {
   }
   try {
     await db.$executeRawUnsafe(INDEXES);
-    results.indexes = "ok";
+    results.timetable_index = "ok";
   } catch (e) {
-    results.indexes = "ERR " + (e instanceof Error ? e.message : String(e)).slice(0, 200);
+    results.timetable_index = "ERR " + (e instanceof Error ? e.message : String(e)).slice(0, 200);
+  }
+  try {
+    await db.$executeRawUnsafe(SLOT_INDEXES);
+    results.slot_indexes = "ok";
+  } catch (e) {
+    results.slot_indexes = "ERR " + (e instanceof Error ? e.message : String(e)).slice(0, 200);
+  }
+  try {
+    await db.$executeRawUnsafe(FKS);
+    results.fk_drop = "ok";
+  } catch (e) {
+    results.fk_drop = "ERR " + (e instanceof Error ? e.message : String(e)).slice(0, 200);
+  }
+  try {
+    await db.$executeRawUnsafe(FK_USER_ADD);
+    results.fk_user = "ok";
+  } catch (e) {
+    results.fk_user = "ERR " + (e instanceof Error ? e.message : String(e)).slice(0, 200);
+  }
+  try {
+    await db.$executeRawUnsafe(FK_SLOT_DROP);
+    results.fk_slot_drop = "ok";
+  } catch (e) {
+    results.fk_slot_drop = "ERR " + (e instanceof Error ? e.message : String(e)).slice(0, 200);
+  }
+  try {
+    await db.$executeRawUnsafe(FK_SLOT_ADD);
+    results.fk_slot = "ok";
+  } catch (e) {
+    results.fk_slot = "ERR " + (e instanceof Error ? e.message : String(e)).slice(0, 200);
   }
   return NextResponse.json({ ok: true, results });
 }
