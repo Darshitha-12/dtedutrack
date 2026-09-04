@@ -102,9 +102,31 @@ export async function saveCustomSound(
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
+    // Also sync to Android native storage so FullScreenAlarmActivity can play it.
+    syncToNative(id, blob);
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Send the audio blob to the Android Bridge for native alarm playback.
+ * This is a fire-and-forget — the web alarm ringer always works regardless.
+ */
+function syncToNative(id: string, blob: Blob): void {
+  try {
+    const bridge = (window as any).BioPulseBridge;
+    if (!bridge || !bridge.saveCustomAudio) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(",")[1] || "";
+      if (base64) bridge.saveCustomAudio(id, base64);
+    };
+    reader.readAsDataURL(blob);
+  } catch {
+    // non-Android environment — ignore
   }
 }
 
