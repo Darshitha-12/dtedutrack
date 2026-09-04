@@ -103,12 +103,12 @@ export function AlarmForm({ editing, onSubmit, onCancel }: AlarmFormProps) {
   }, [customInfo]);
 
   const soundChoice = useMemo(
-    () => (isCustomSound(input.sound) ? "custom" : input.sound) as
+    () => (showCustomPicker || isCustomSound(input.sound) ? "custom" : input.sound) as
       | "chime"
       | "digital"
       | "bio"
       | "custom",
-    [input.sound],
+    [input.sound, showCustomPicker],
   );
 
   const handleSubmit = useCallback(
@@ -241,6 +241,7 @@ export function AlarmForm({ editing, onSubmit, onCancel }: AlarmFormProps) {
                     setInput((p) => ({ ...p, sound: `custom:${customInfo.id}` }));
                   }
                 } else {
+                  setShowCustomPicker(false);
                   setInput((p) => ({ ...p, sound: v as CreateAlarmInput["sound"] }));
                 }
               }}
@@ -254,7 +255,7 @@ export function AlarmForm({ editing, onSubmit, onCancel }: AlarmFormProps) {
           </div>
         </div>
 
-        {soundChoice === "custom" && (
+        {showCustomPicker && (
           <div className="rounded-md border border-dashed p-3">
             <div className="flex items-center gap-2">
               <Music2 className="h-4 w-4 text-muted-foreground" />
