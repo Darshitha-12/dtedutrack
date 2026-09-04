@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -41,6 +42,8 @@ export function PomodoroTimer() {
     updateConfig,
   } = usePomodoro();
 
+  const searchParams = useSearchParams();
+  const taskName = useMemo(() => searchParams?.get("task")?.trim() || "", [searchParams]);
   const [notifPerm, setNotifPerm] = useState<NotificationPermission>("default");
 
   const requestNotif = useCallback(async () => {
@@ -110,6 +113,12 @@ export function PomodoroTimer() {
             </span>
           </div>
         </div>
+
+        {taskName && (
+          <p className="-mt-4 mb-1 text-center text-sm text-muted-foreground">
+            Session: <span className="font-semibold text-foreground">{taskName}</span>
+          </p>
+        )}
 
         <div className="flex items-center justify-center gap-2">
           {live.running ? (

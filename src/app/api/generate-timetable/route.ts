@@ -24,6 +24,12 @@ const inputSchema = z.object({
     }),
   ).default([]),
   techniques: z.array(z.string()).default([]),
+  // Time boundaries & break inputs
+  mode: z.enum(["full_day", "weekly"]).default("weekly"),
+  startTime: z.string().default("05:00"), // e.g. "05:00"
+  bedtime: z.string().default("22:30"), // e.g. "22:30"
+  napTime: z.string().default("14:00"), // afternoon nap start, e.g. "14:00"
+  napEnd: z.string().default("15:00"), // afternoon nap end, e.g. "15:00"
 });
 
 type ValidatedInput = z.infer<typeof inputSchema>;
@@ -43,6 +49,7 @@ function buildPrompt(input: ValidatedInput, todayISO: string): string {
   const weak = input.weakSubjects.length ? input.weakSubjects.join(", ") : "None";
   const techs = input.techniques.length ? input.techniques.join(", ") : "Pomodoro (25/5)";
   const description = input.description?.trim();
+  const mode = input.mode === "full_day" ? "Full Day" : "Weekly Planner";
 
   const userWords = description
     ? `The student describes their situation in their OWN WORDS (this is the MOST important information — follow it closely): "${description}"`
@@ -50,6 +57,9 @@ function buildPrompt(input: ValidatedInput, todayISO: string): string {
 
   return `You are an expert A/L study timetable planner.
 Today's date is ${todayISO}. The user's target A/L exam date is ${input.examDate || "not set"}.
+Mode: ${mode}.
+Day boundaries: study is ONLY allowed between ${input.startTime} (start) and ${input.bedtime} (bedtime/sleep). NO study sessions before start or after bedtime.
+Fixed non-study blocks that ARE ALREADY reserved (do NOT overlap any study session with these): Breakfast 07:30-08:00, Lunch 13:00-13:30, Afternoon Nap ${input.napTime}-${input.napEnd}, Evening Tea & Snack 16:30-17:00, Dinner 20:00-20:30.
 Available subjects: ${subjects}.
 Available weekly study time: ~${input.weeklyHours} hours per week (${
     input.dailyHours ? input.dailyHours + " per day" : "flexible"
@@ -59,12 +69,13 @@ Weak subjects / priority topics: ${weak}.
 Preferred study techniques: ${techs}.
 ${userWords}
 
-Create a realistic, balanced weekly study plan. Balance all 3 main A/L science subjects, giving extra time to weak subjects. Mix Theory, Paper Practice (MCQ/Past Paper), and Revision.
+Create a realistic, balanced ${mode} study plan. Balance all 3 main A/L science subjects, giving extra time to weak subjects. Mix Theory, Paper Practice (MCQ/Past Paper), and Revision.
 
 IMPORTANT:
 - If the student's own description mentions specific subjects, hours, days, times, weak topics, or study techniques, honour those exactly over the generic defaults above.
 - If the description is in Sinhala (Singlish), understand it and plan accordingly; you may answer in plain English.
-- Always cover a sensible spread across the week and fit within any time slots the student gave.
+- A study session MUST fall entirely between the start time and bedtime. Only schedule study blocks in the free windows between the fixed break blocks listed above (e.g. 08:00-13:00 morning, 15:00-16:30 mid-afternoon, 17:00-20:00 evening, 18:30-20:00 evening).
+- For ${mode === "Full Day" ? "the day" : "each day"} output a sensible spread, and use type values only from: Theory, MCQ, Revision, Past Paper, AITutor, WeakTopic, or Break/Nap/Tea for the reserved blocks.
 
 Return ONLY valid JSON in exactly this shape (no markdown, no code fences):
 {
@@ -82,7 +93,7 @@ Return ONLY valid JSON in exactly this shape (no markdown, no code fences):
   ]
 }
 Where dayOfWeek: 0=Monday ... 6=Sunday, startMinute/endMinute are minutes from midnight (e.g. 5:00 AM=300, 8:00 PM=1200).
-Ensure sessions fit within the preferred time slots where given.`;
+Ensure sessions fit within start (${toMin(input.startTime)}) and bedtime (${toMin(input.bedtime)}). Do NOT include the fixed meal/nap/tea blocks here — the system adds them automatically.`;
 }
 
 function parseJson(content: string): any {
@@ -108,7 +119,7 @@ SUBJECT_LIST.forEach((s) => {
 
 function colorFor(subject: string): string {
   const s = (subject || "").toLowerCase();
-  if (s.includes("breakfast") || s.includes("lunch") || s.includes("dinner") || s.includes("break")) {
+  if (s.includes("breakfast") || s.includes("lunch") || s.includes("dinner") || s.includes("break") || s.includes("nap") || s.includes("tea")) {
     return "#94A3B8";
   }
   const match = Object.entries(COLOR_BY_SUBJECT).find(
@@ -153,8 +164,28 @@ export async function POST(req: Request) {
       planText = "AI generation unavailable (" + e + "). Showing a balanced default timetable.";
     }
 
-    // Auto-insert Breakfast / Lunch / Dinner breaks so the plan respects meals.
-    slots = attachMeals(slots);
+    // Auto-inject Breakfast / Lunch / Afternoon Nap / Tea / Dinner breaks, and
+    // clip every study session strictly between the user's start time and bedtime.
+    slots = injectBreaks(slots, input);
+    // Ensure breaks appear for every day in the plan scope.
+    const dayCount = input.mode === "full_day" ? 1 : 7;
+    const present = new Set(slots.map((s) => s.dayOfWeek));
+    if (present.size === 0) {
+      // no study produced — still give a skeleton with meals for the scope
+      for (let d = 0; d < dayCount; d++) {
+        buildDayBreaks(input).forEach((m) => {
+          slots.push({
+            dayOfWeek: d,
+            startMinute: m.start,
+            endMinute: m.end,
+            subjectName: m.type === "Nap" ? "Afternoon Nap" : m.type === "Tea" ? "Tea & Snack" : m.name,
+            type: m.type,
+            note: m.type === "Nap" ? "Rest & recharge" : "Rest & eat properly",
+          });
+        });
+      }
+      slots.sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.startMinute - b.startMinute);
+    }
 
     // Persist — if DB persistence fails, still return the generated plan so the
     // user never sees a blank/broken result.
@@ -270,23 +301,63 @@ function mapType(t: string): string {
   return "Learn";
 }
 
-// ---- Attach Breakfast / Lunch / Dinner breaks for each day ----
-const MEALS: Array<{ name: string; start: number; end: number }> = [
-  { name: "Breakfast", start: 420, end: 460 }, // 7:00-7:40
-  { name: "Lunch", start: 750, end: 800 }, // 12:30-13:20
-  { name: "Dinner", start: 1080, end: 1125 }, // 18:00-18:45
+// ---- Automatic Break & Meal Injection Engine ----
+// Fixed break blocks. Each has: name, type, start ("HH:MM"), end ("HH:MM").
+const NONSTUDY_BLOCKS = [
+  { name: "Breakfast", type: "Break", start: "07:30", end: "08:00" },
+  { name: "Lunch", type: "Break", start: "13:00", end: "13:30" },
+  { name: "Tea & Snack", type: "Tea", start: "16:30", end: "17:00" },
+  { name: "Dinner", type: "Break", start: "20:00", end: "20:30" },
 ];
 
 function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
   return aStart < bEnd && bStart < aEnd;
 }
 
-function attachMeals(slots: any[]): any[] {
-  if (!Array.isArray(slots)) return slots;
-  const days = Array.from(new Set((slots as any[]).map((s) => s.dayOfWeek)));
-  const out: any[] = [...slots];
+// Build the fixed break blocks for a given day, clipped to [dayStart, dayEnd].
+function buildDayBreaks(input: ValidatedInput): Array<{ name: string; type: string; start: number; end: number }> {
+  const dayStart = toMin(input.startTime);
+  const dayEnd = toMin(input.bedtime);
+  const blocks: Array<{ name: string; type: string; start: number; end: number }> = NONSTUDY_BLOCKS.map((b) => ({
+    name: b.name,
+    type: b.type,
+    start: toMin(b.start),
+    end: toMin(b.end),
+  }));
+  // Afternoon nap uses the user-specified slot (only include if inside day bounds)
+  const napStart = toMin(input.napTime);
+  const napEnd = toMin(input.napEnd);
+  if (napEnd > napStart) {
+    blocks.push({ name: "Afternoon Nap", type: "Nap", start: napStart, end: napEnd });
+  }
+  // Clip to day boundary and drop anything that falls fully outside.
+  return blocks
+    .map((b) => ({ ...b, start: Math.max(b.start, dayStart), end: Math.min(b.end, dayEnd) }))
+    .filter((b) => b.end > b.start);
+}
+
+function injectBreaks(slots: any[], input: ValidatedInput): any[] {
+  if (!Array.isArray(slots)) return [];
+  const dayStart = toMin(input.startTime);
+  const dayEnd = toMin(input.bedtime);
+
+  // Clip every study slot into [dayStart, dayEnd]; drop empty ones.
+  const clipped: any[] = [];
+  for (const s of slots) {
+    if (s.type === "Break" || s.type === "Nap" || s.type === "Tea") continue;
+    const a = Math.max(s.startMinute ?? 0, dayStart);
+    const b = Math.min(s.endMinute ?? 0, dayEnd);
+    if (b > a) {
+      clipped.push({ ...s, startMinute: a, endMinute: b });
+    }
+  }
+
+  const days = Array.from(new Set(clipped.map((s) => s.dayOfWeek)));
+  const out: any[] = [...clipped];
+
   days.forEach((d) => {
-    MEALS.forEach((m) => {
+    const dayBreaks = buildDayBreaks(input).map((b) => ({ ...b, dayOfWeek: d }));
+    dayBreaks.forEach((m) => {
       const clash = out.some(
         (s) => s.dayOfWeek === d && overlaps(s.startMinute, s.endMinute, m.start, m.end),
       );
@@ -295,13 +366,14 @@ function attachMeals(slots: any[]): any[] {
           dayOfWeek: d,
           startMinute: m.start,
           endMinute: m.end,
-          subjectName: m.name,
-          type: "Break",
-          note: "",
+          subjectName: m.type === "Nap" ? "Afternoon Nap" : m.type === "Tea" ? "Tea & Snack" : m.name,
+          type: m.type,
+          note: m.type === "Nap" ? "Rest & recharge" : "Rest & eat properly",
         });
       }
     });
   });
+
   out.sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.startMinute - b.startMinute);
   return out;
 }
@@ -309,10 +381,13 @@ function attachMeals(slots: any[]): any[] {
 // ---- Fallback deterministic balanced schedule (Monday..Sunday) ----
 function buildFallbackSchedule(input: ValidatedInput, todayDow: number) {
   const slots: any[] = [];
-  const preferred = input.timeSlots.length ? input.timeSlots : [];
+  const dayStart = toMin(input.startTime);
+  const dayEnd = toMin(input.bedtime);
+  const available = Math.max(60, dayEnd - dayStart - 210); // leave room for ~3.5h of breaks
   // daily durations approx from weeklyHours
   const weekly = Math.max(1, input.weeklyHours || 24);
   const perDay = Math.max(1, Math.round(weekly / 7));
+  const target = Math.min(perDay, Math.floor(available / 90) * 90 || available);
   // pick subjects mentioned in the free description, else standard A/L set
   const desc = (input.description || "").toLowerCase();
   const mentioned = SUBJECT_LIST.filter((s) =>
@@ -320,27 +395,35 @@ function buildFallbackSchedule(input: ValidatedInput, todayDow: number) {
   ).map((s) => s.name);
   const pool = mentioned.length >= 2 ? mentioned : ["Biology", "Chemistry", "Physics", "Revision"];
   const subjects = pool;
-  for (let d = 0; d < 7; d++) {
-    const daySlots = preferred.filter((t) => t.dayOfWeek === d);
-    let startMin = daySlots.length
-      ? toMin(daySlots[0].start)
-      : 300 + (d % 3) * 60; // 5:00-7:00 stagger
+  // 3 study windows within the day (morning / afternoon / evening)
+  const sections = [
+    { from: dayStart, to: dayStart + (dayEnd - dayStart) * 0.4 },
+    { from: dayStart + (dayEnd - dayStart) * 0.4, to: dayStart + (dayEnd - dayStart) * 0.72 },
+    { from: dayStart + (dayEnd - dayStart) * 0.72, to: dayEnd },
+  ];
+  const dayCount = input.mode === "full_day" ? 1 : 7;
+  for (let d = 0; d < dayCount; d++) {
     let used = 0;
     let i = 0;
-    while (used < perDay && i < 8) {
-      const dur = Math.min(90, perDay - used);
-      const subject = subjects[(d + i) % subjects.length];
-      slots.push({
-        dayOfWeek: d,
-        startMinute: startMin,
-        endMinute: startMin + dur,
-        subjectName: subject === "Revision" ? input.weakSubjects?.[i % Math.max(1, input.weakSubjects.length)] || "Revision" : subject,
-        type: subject === "Revision" ? "Revision" : i % 4 === 0 ? "Theory" : i % 4 === 1 ? "MCQ" : "Theory",
-        note: "",
-      });
-      startMin += dur + 10;
-      used += dur;
-      i++;
+    for (const sec of sections) {
+      if (used >= target) break;
+      let cursor = Math.round(sec.from);
+      while (cursor < sec.to - 20 && used < target && i < 12) {
+        const dur = Math.min(60, Math.round(sec.to - cursor), target - used);
+        if (dur < 20) break;
+        const subject = subjects[(d + i) % subjects.length];
+        slots.push({
+          dayOfWeek: d,
+          startMinute: cursor,
+          endMinute: cursor + dur,
+          subjectName: subject === "Revision" ? input.weakSubjects?.[i % Math.max(1, input.weakSubjects.length)] || "Revision" : subject,
+          type: subject === "Revision" ? "Revision" : i % 4 === 0 ? "Theory" : i % 4 === 1 ? "MCQ" : "Theory",
+          note: "",
+        });
+        cursor += dur + 15;
+        used += dur;
+        i++;
+      }
     }
   }
   return slots;

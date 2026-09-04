@@ -16,6 +16,8 @@ import {
   Sparkles,
   ChevronRight,
   ChevronLeft,
+  Play,
+  X,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -28,6 +30,9 @@ import {
   Legend,
   LineChart,
   Line,
+  PieChart,
+  Pie,
+  Cell,
 } from "recharts";
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -72,6 +77,33 @@ function fmtDur(min: number): string {
   return `${m}m`;
 }
 
+function slotSummary(s: Slot): string {
+  if (s.type === "Nap") {
+    return "Rest & recharge. Use this time to close your eyes, relax, or a light walk. Avoid screens — a short power nap boosts afternoon focus.";
+  }
+  if (s.type === "Tea") {
+    return "Tea & snack break. Step away from study, have a light snack and hydrate. Come back fresh for the evening session.";
+  }
+  if (s.type === "Break") {
+    return "Meal break — eat properly and rest. Good meals keep your energy steady through study blocks.";
+  }
+  if (s.type === "MCQ") {
+    return "Session: " + (s.subjectName || "Study") + ". Goal — practice MCQs & past paper questions. Aim for accuracy then speed. Review mistakes after.";
+  }
+  if (s.type === "Revision" || s.type === "Past Paper") {
+    return "Session: " + (s.subjectName || "Study") + ". Consolidate key points and test yourself with previous papers. Focus on weak topics covered here.";
+  }
+  return (
+    "Session: " +
+    (s.subjectName || "Study") +
+    " (" +
+    (s.type || "Theory") +
+    ")." +
+    (s.note ? " Topic: " + s.note + "." : " Focus on understanding and note the key points.") +
+    " Use Pomodoro (25/5) to stay sharp."
+  );
+}
+
 function DayBreakdown({
   slots,
   formatClock,
@@ -79,8 +111,9 @@ function DayBreakdown({
   slots: Slot[];
   formatClock: (min: number) => string;
 }) {
-  const study = slots.filter((s) => s.type !== "Break");
-  const breaks = slots.filter((s) => s.type === "Break");
+  const isStudy = (s: Slot) => s.type !== "Break" && s.type !== "Nap" && s.type !== "Tea";
+  const study = slots.filter(isStudy);
+  const breaks = slots.filter((s) => !isStudy(s));
   const studyMin = study.reduce((sum, s) => sum + (s.endMinute - s.startMinute), 0);
   const breakMin = breaks.reduce((sum, s) => sum + (s.endMinute - s.startMinute), 0);
 
@@ -104,7 +137,7 @@ function DayBreakdown({
         </div>
         <div className="rounded-md bg-muted/50 p-3">
           <p className="text-lg font-bold">{fmtDur(breakMin)}</p>
-          <p className="text-xs text-muted-foreground">Meals/Breaks</p>
+          <p className="text-xs text-muted-foreground">Rest &amp; Meals</p>
         </div>
       </div>
 
@@ -138,13 +171,19 @@ export default function AITimetablePage() {
   const [active, setActive] = useState<Timetable | null>(null);
   const [loadingList, setLoadingList] = useState(true);
 
-  // Form state — only a free-form description (everything else is inferred by AI)
+  // Form state — free-form description + time boundaries & break inputs
   const [description, setDescription] = useState("");
+  const [mode, setMode] = useState<"weekly" | "full_day">("weekly");
+  const [startTime, setStartTime] = useState("05:00");
+  const [bedtime, setBedtime] = useState("22:30");
+  const [napTime, setNapTime] = useState("14:00");
+  const [napEnd, setNapEnd] = useState("15:00");
   const [generating, setGenerating] = useState(false);
 
   const [view, setView] = useState<"lesson" | "graph">("lesson");
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
 
   async function load() {
     setLoadingList(true);
@@ -176,7 +215,7 @@ export default function AITimetablePage() {
     setGenerating(true);
     try {
       const body = {
-        title: "My AI Timetable",
+        title: mode === "full_day" ? "My Full Day Plan" : "My AI Timetable",
         description,
         weeklyHours: 28,
         examDate: undefined,
@@ -184,6 +223,11 @@ export default function AITimetablePage() {
         priorities: [],
         timeSlots: [],
         techniques: [],
+        mode,
+        startTime,
+        bedtime,
+        napTime,
+        napEnd,
       };
       const res = await fetch("/api/generate-timetable", {
         method: "POST",
@@ -222,7 +266,7 @@ export default function AITimetablePage() {
   const subjectAllocation = useMemo(() => {
     const map = new Map<string, number>();
     (active?.slots || [])
-      .filter((s) => s.type !== "Break")
+      .filter((s) => s.type !== "Break" && s.type !== "Nap" && s.type !== "Tea")
       .forEach((s) => {
         map.set(s.subjectName, (map.get(s.subjectName) || 0) + (s.endMinute - s.startMinute));
       });
@@ -230,6 +274,25 @@ export default function AITimetablePage() {
       name,
       hours: Math.round((mins / 60) * 10) / 10,
     }));
+  }, [active]);
+
+  // Balance between Study, Rest/Nap, and Meal/Tea breaks (whole plan)
+  const balanceBreakdown = useMemo(() => {
+    let study = 0,
+      rest = 0,
+      meals = 0;
+    (active?.slots || []).forEach((s) => {
+      const mins = s.endMinute - s.startMinute;
+      if (s.type === "Nap") rest += mins;
+      else if (s.type === "Break" || s.type === "Tea") meals += mins;
+      else study += mins;
+    });
+    const h = (mins: number) => Math.round((mins / 60) * 10) / 10;
+    return [
+      { name: "Study", value: h(study), color: "#10B981" },
+      { name: "Rest/Nap", value: h(rest), color: "#8B5CF6" },
+      { name: "Meals/Tea", value: h(meals), color: "#F59E0B" },
+    ].filter((d) => d.value > 0);
   }, [active]);
 
   const dailyIntensity = useMemo(() => {
@@ -281,21 +344,89 @@ export default function AITimetablePage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="px-0 space-y-4">
+            {/* Mode selector */}
+            <div>
+              <label className="text-xs text-muted-foreground">Plan Type</label>
+              <div className="mt-1 grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={mode === "weekly" ? "default" : "outline"}
+                  onClick={() => setMode("weekly")}
+                  className="gap-1"
+                >
+                  <Calendar className="h-4 w-4" /> Weekly Plan
+                </Button>
+                <Button
+                  type="button"
+                  variant={mode === "full_day" ? "default" : "outline"}
+                  onClick={() => setMode("full_day")}
+                  className="gap-1"
+                >
+                  <Clock className="h-4 w-4" /> Full Day
+                </Button>
+              </div>
+            </div>
+
+            {/* Time boundaries */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground">Study Start Time</label>
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">Bedtime / Sleep Time</label>
+                <input
+                  type="time"
+                  value={bedtime}
+                  onChange={(e) => setBedtime(e.target.value)}
+                  className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-sm"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground">Afternoon Nap Start</label>
+                <input
+                  type="time"
+                  value={napTime}
+                  onChange={(e) => setNapTime(e.target.value)}
+                  className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">Nap / Rest End</label>
+                <input
+                  type="time"
+                  value={napEnd}
+                  onChange={(e) => setNapEnd(e.target.value)}
+                  className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-sm"
+                />
+              </div>
+            </div>
+
             <div>
               <label className="text-xs text-muted-foreground">
-                Describe your study routine in your own words (Sinhala ok)
+                Describe subjects, priorities &amp; custom needs (Sinhala ok)
               </label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                rows={7}
-                placeholder={'e.g. "I take Biology, Chemistry and Physics. I am very weak in Organic Chemistry. A/L exam in December. I can study 6-7:30am and evening. I want paper practice on weekends."'}
+                rows={5}
+                placeholder={'e.g. "I take Biology, Chemistry and Physics. Very weak in Organic Chemistry. Want more paper practice on weekends."'}
                 className="mt-1 w-full rounded-md border bg-transparent p-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
               />
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                Just write anything — subjects, weak topics, free times, or your exam month. Even a little info is enough.
-              </p>
             </div>
+
+            <div className="rounded-md bg-muted/40 p-3 text-[11px] text-muted-foreground">
+              The AI builds study blocks only between your start time and bedtime, and
+              automatically adds Breakfast, Lunch, Afternoon Nap, Tea &amp; Snack, and Dinner.
+            </div>
+
             <Button className="w-full gap-2" onClick={generate} disabled={generating}>
               {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
               {generating ? "Generating…" : "Generate AI Timetable"}
@@ -403,7 +534,7 @@ export default function AITimetablePage() {
                       .slice()
                       .sort((a, b) => a.startMinute - b.startMinute);
                     const totalMin = daySlots
-                      .filter((s) => s.type !== "Break")
+                      .filter((s) => s.type !== "Break" && s.type !== "Nap" && s.type !== "Tea")
                       .reduce((sum, s) => sum + (s.endMinute - s.startMinute), 0);
                     const isSelected = selectedDay === di;
                     return (
@@ -429,9 +560,14 @@ export default function AITimetablePage() {
                           </div>
                         ) : (
                           daySlots.map((s, i) => (
-                            <div
+                            <button
+                              type="button"
                               key={i}
-                              className="rounded-md px-2 py-1.5 text-xs text-white shadow-sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedSlot(s);
+                              }}
+                              className="w-full rounded-md px-2 py-1.5 text-left text-xs text-white shadow-sm transition-transform hover:scale-[1.02]"
                               style={{ backgroundColor: s.color || "#10B981" }}
                             >
                               <p className="font-semibold">{s.subjectName}</p>
@@ -439,7 +575,7 @@ export default function AITimetablePage() {
                                 {fmtClock(s.startMinute)}–{fmtClock(s.endMinute)}
                               </p>
                               <p className="opacity-80 mt-0.5 truncate">{s.type}{s.note ? " · " + s.note : ""}</p>
-                            </div>
+                            </button>
                           ))
                         )}
                       </div>
@@ -464,6 +600,43 @@ export default function AITimetablePage() {
             </>
           ) : (
             <div className="grid gap-6 lg:grid-cols-2">
+              <Card className="p-4">
+                <CardTitle className="text-sm mb-3">Time Balance (Study vs Rest vs Meals)</CardTitle>
+                {balanceBreakdown.length ? (
+                  <>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <PieChart>
+                        <Pie
+                          data={balanceBreakdown}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={70}
+                          innerRadius={42}
+                          paddingAngle={2}
+                          label={(e) => `${e.name} ${e.value}h`}
+                        >
+                          {balanceBreakdown.map((d, i) => (
+                            <Cell key={i} fill={d.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="flex justify-center gap-4 text-xs">
+                      {balanceBreakdown.map((d) => (
+                        <span key={d.name} className="inline-flex items-center gap-1">
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: d.color }} />
+                          {d.name}
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <p className="py-8 text-center text-sm text-muted-foreground">Generate a plan to see the balance.</p>
+                )}
+              </Card>
               <Card className="p-4">
                 <CardTitle className="text-sm mb-3">Subject Allocation (planned hours)</CardTitle>
                 <ResponsiveContainer width="100%" height={220}>
@@ -505,6 +678,55 @@ export default function AITimetablePage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Click-to-summarize modal */}
+      {selectedSlot && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setSelectedSlot(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <span
+                  className="inline-block h-3 w-3 rounded-full align-middle"
+                  style={{ backgroundColor: selectedSlot.color || "#10B981" }}
+                />
+                <h3 className="mt-1 text-lg font-bold">{selectedSlot.subjectName}</h3>
+                <p className="text-xs text-muted-foreground">
+                  {DAY_NAMES[selectedSlot.dayOfWeek]} • {fmtClock(selectedSlot.startMinute)}–{fmtClock(selectedSlot.endMinute)} • {fmtDur(selectedSlot.endMinute - selectedSlot.startMinute)}
+                </p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setSelectedSlot(null)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="mt-4 rounded-md bg-muted/40 p-3 text-sm">
+              <p className="font-medium">{slotSummary(selectedSlot)}</p>
+            </div>
+
+            {selectedSlot.type !== "Break" && selectedSlot.type !== "Nap" && selectedSlot.type !== "Tea" && (
+              <a
+                href={`/focus?task=${encodeURIComponent(selectedSlot.subjectName + (selectedSlot.note ? " - " + selectedSlot.note : ""))}`}
+              >
+                <Button className="mt-4 w-full gap-2">
+                  <Play className="h-4 w-4" /> Start Session Timer
+                </Button>
+              </a>
+            )}
+
+            {selectedSlot.dayOfWeek !== undefined && (
+              <Button variant="ghost" className="mt-2 w-full" onClick={() => { setSelectedSlot(null); setSelectedDay(selectedSlot.dayOfWeek); }}>
+                View day summary
+              </Button>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
