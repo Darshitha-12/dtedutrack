@@ -171,7 +171,34 @@ export default function AITimetablePage() {
   const [active, setActive] = useState<Timetable | null>(null);
   const [loadingList, setLoadingList] = useState(true);
 
-  // Form state — free-form description + time boundaries & break inputs
+  const SAVE_KEY = "bp_ai_timetable_active";
+
+  // Persist the currently-viewed plan so it survives tab switches / page reloads.
+  // This matters most for "tmp-" plans that exist only in-memory (not server-saved).
+  useEffect(() => {
+    if (active) {
+      try {
+        localStorage.setItem(SAVE_KEY, JSON.stringify(active));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, [active]);
+
+  useEffect(() => {
+    // Restore the last-viewed plan immediately so the timetable never flashes blank.
+    try {
+      const saved = localStorage.getItem(SAVE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as Timetable;
+        if (parsed && parsed.slots) setActive(parsed);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [description, setDescription] = useState("");
   const [mode, setMode] = useState<"weekly" | "full_day">("weekly");
   const [startTime, setStartTime] = useState("05:00");
@@ -193,7 +220,18 @@ export default function AITimetablePage() {
         const data = await res.json();
         const list = data.timetables || [];
         setLoadTimetables(list);
-        if (!active && list.length > 0) setActive(list[0]);
+        if (!active) {
+          // Prefer the plan the user was last viewing (kept in localStorage).
+          let saved: Timetable | null = null;
+          try {
+            const raw = localStorage.getItem(SAVE_KEY);
+            if (raw) saved = JSON.parse(raw);
+          } catch (_) {}
+          const restored =
+            (saved && saved.slots && list.find((t: Timetable) => t.id === saved.id)) ||
+            saved;
+          setActive(restored || list[0] || null);
+        }
       }
     } catch (e) {
       console.error(e);
@@ -253,7 +291,12 @@ export default function AITimetablePage() {
     try {
       const res = await fetch("/api/generate-timetable?id=" + id, { method: "DELETE" });
       if (res.ok) {
-        if (active?.id === id) setActive(null);
+        if (active?.id === id) {
+          setActive(null);
+          try {
+            localStorage.removeItem(SAVE_KEY);
+          } catch (_) {}
+        }
         load();
         showToast("Timetable deleted.", "success");
       }
