@@ -3,7 +3,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
@@ -56,19 +55,6 @@ interface Timetable {
   slots: Slot[];
 }
 
-interface SlotInput {
-  dayOfWeek: number;
-  start: string;
-  end: string;
-}
-
-function toMin(t: string): number {
-  const p = t.split(":").map((n) => parseInt(n, 10));
-  const h = isNaN(p[0]) ? 0 : p[0];
-  const m = p.length > 1 && !isNaN(p[1]) ? p[1] : 0;
-  return h * 60 + m;
-}
-
 function fmtClock(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
@@ -92,16 +78,8 @@ export default function AITimetablePage() {
   const [active, setActive] = useState<Timetable | null>(null);
   const [loadingList, setLoadingList] = useState(true);
 
-  // Form state
+  // Form state — only a free-form description (everything else is inferred by AI)
   const [description, setDescription] = useState("");
-  const [weeklyHours, setWeeklyHours] = useState(30);
-  const [examDate, setExamDate] = useState("");
-  const [weakSubjects, setWeakSubjects] = useState("");
-  const [priorities, setPriorities] = useState("");
-  const [timeSlots, setTimeSlots] = useState<SlotInput[]>([
-    { dayOfWeek: 0, start: "05:00", end: "07:00" },
-  ]);
-  const [techniques, setTechniques] = useState("");
   const [generating, setGenerating] = useState(false);
 
   const [view, setView] = useState<"lesson" | "graph">("lesson");
@@ -130,17 +108,21 @@ export default function AITimetablePage() {
   }, []);
 
   async function generate() {
+    if (!description.trim()) {
+      showToast("Write a little about your routine first.", "error");
+      return;
+    }
     setGenerating(true);
     try {
       const body = {
         title: "My AI Timetable",
         description,
-        weeklyHours,
-        examDate: examDate || undefined,
-        weakSubjects: weakSubjects.split(",").map((s) => s.trim()).filter(Boolean),
-        priorities: priorities.split(",").map((s) => s.trim()).filter(Boolean),
-        timeSlots,
-        techniques: techniques.split(",").map((s) => s.trim()).filter(Boolean),
+        weeklyHours: 28,
+        examDate: undefined,
+        weakSubjects: [],
+        priorities: [],
+        timeSlots: [],
+        techniques: [],
       };
       const res = await fetch("/api/generate-timetable", {
         method: "POST",
@@ -173,10 +155,6 @@ export default function AITimetablePage() {
     } catch (e) {
       showToast("Could not delete.", "error");
     }
-  }
-
-  function addSlot() {
-    setTimeSlots((s) => [...s, { dayOfWeek: 0, start: "17:00", end: "19:00" }]);
   }
 
   // ---- derived charts ----
@@ -242,93 +220,18 @@ export default function AITimetablePage() {
           <CardContent className="px-0 space-y-4">
             <div>
               <label className="text-xs text-muted-foreground">
-                Describe your routine in your own words (Sinhala/Singlish ok)
+                Describe your study routine in your own words (Sinhala ok)
               </label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                rows={5}
-                placeholder={'e.g. "I take Biology, Chemistry and Physics. I am very weak in Organic Chemistry and MCQ speed. My A/L exam is in December. I can study 6:00-7:30am and 7:30-10:00pm. I want more paper practice on weekends."'}
+                rows={7}
+                placeholder={'e.g. "I take Biology, Chemistry and Physics. I am very weak in Organic Chemistry. A/L exam in December. I can study 6-7:30am and evening. I want paper practice on weekends."'}
                 className="mt-1 w-full rounded-md border bg-transparent p-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
               />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground">Weekly study hours</label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={168}
-                  value={weeklyHours}
-                  onChange={(e) => setWeeklyHours(Number(e.target.value) || 0)}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">A/L exam date</label>
-                <Input type="date" value={examDate} onChange={(e) => setExamDate(e.target.value)} />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">
-                Weak subjects / priority topics (comma separated)
-              </label>
-              <Input
-                placeholder="Biology Theory, Organic Chemistry"
-                value={weakSubjects}
-                onChange={(e) => setWeakSubjects(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Preferred techniques (comma separated)</label>
-              <Input
-                placeholder="Pomodoro 25/5, Active Recall"
-                value={techniques}
-                onChange={(e) => setTechniques(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Preferred time slots</label>
-              <div className="space-y-2">
-                {timeSlots.map((slot, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <select
-                      className="h-9 rounded-md border bg-transparent px-2 text-sm"
-                      value={slot.dayOfWeek}
-                      onChange={(e) =>
-                        setTimeSlots((s) =>
-                          s.map((x, j) => (j === i ? { ...x, dayOfWeek: Number(e.target.value) } : x)),
-                        )
-                      }
-                    >
-                      {DAY_NAMES.map((d, di) => (
-                        <option key={d} value={di} className="bg-background">
-                          {d.slice(0, 3)}
-                        </option>
-                      ))}
-                    </select>
-                    <Input
-                      type="time"
-                      value={slot.start}
-                      onChange={(e) =>
-                        setTimeSlots((s) => s.map((x, j) => (j === i ? { ...x, start: e.target.value } : x)))
-                      }
-                    />
-                    <Input
-                      type="time"
-                      value={slot.end}
-                      onChange={(e) =>
-                        setTimeSlots((s) => s.map((x, j) => (j === i ? { ...x, end: e.target.value } : x)))
-                      }
-                    />
-                    <Button variant="ghost" size="icon" onClick={() => setTimeSlots((s) => s.filter((_, j) => j !== i))}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-                <Button variant="outline" size="sm" onClick={addSlot}>
-                  + Add slot
-                </Button>
-              </div>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Just write anything — subjects, weak topics, free times, or your exam month. Even a little info is enough.
+              </p>
             </div>
             <Button className="w-full gap-2" onClick={generate} disabled={generating}>
               {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
