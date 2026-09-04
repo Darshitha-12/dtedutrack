@@ -61,6 +61,26 @@ export function useAlarmRinger() {
       }
       startVibration();
       requestWakeLock();
+      // Also fire the native Android alarm overlay (vibration + lock screen + notification).
+      // The Bridge handles skipAudio=true so the native side doesn't duplicate the sound.
+      try {
+        const bridge = (window as any).BioPulseBridge;
+        if (bridge && bridge.triggerNativeAlarm) {
+          const [hh, mm] = (alarm.time || "00:00").split(":").map(Number);
+          const soundId = alarm.sound.startsWith("custom:")
+            ? alarm.sound.slice("custom:".length)
+            : "";
+          bridge.triggerNativeAlarm(
+            alarm.id,
+            alarm.label || "Alarm",
+            hh || 0,
+            mm || 0,
+            soundId,
+          );
+        }
+      } catch {
+        // non-Android — ignore
+      }
     },
     [startVibration, requestWakeLock],
   );
