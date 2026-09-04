@@ -72,6 +72,66 @@ function fmtDur(min: number): string {
   return `${m}m`;
 }
 
+function DayBreakdown({
+  slots,
+  formatClock,
+}: {
+  slots: Slot[];
+  formatClock: (min: number) => string;
+}) {
+  const study = slots.filter((s) => s.type !== "Break");
+  const breaks = slots.filter((s) => s.type === "Break");
+  const studyMin = study.reduce((sum, s) => sum + (s.endMinute - s.startMinute), 0);
+  const breakMin = breaks.reduce((sum, s) => sum + (s.endMinute - s.startMinute), 0);
+
+  if (slots.length === 0) {
+    return <p className="text-sm text-muted-foreground">Rest day — no sessions planned.</p>;
+  }
+
+  const subjects = Array.from(new Set(study.map((s) => s.subjectName)));
+  const totalH = (studyMin / 60).toFixed(1);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-3 text-center">
+        <div className="rounded-md bg-muted/50 p-3">
+          <p className="text-lg font-bold">{totalH}h</p>
+          <p className="text-xs text-muted-foreground">Study</p>
+        </div>
+        <div className="rounded-md bg-muted/50 p-3">
+          <p className="text-lg font-bold">{subjects.length}</p>
+          <p className="text-xs text-muted-foreground">Subjects</p>
+        </div>
+        <div className="rounded-md bg-muted/50 p-3">
+          <p className="text-lg font-bold">{fmtDur(breakMin)}</p>
+          <p className="text-xs text-muted-foreground">Meals/Breaks</p>
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        {[...study, ...breaks]
+          .sort((a, b) => a.startMinute - b.startMinute)
+          .map((s, i) => (
+            <div key={i} className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
+              <span
+                className="h-3 w-3 shrink-0 rounded-full"
+                style={{ backgroundColor: s.color || "#10B981" }}
+              />
+              <span className="w-24 shrink-0 tabular-nums text-muted-foreground text-xs">
+                {formatClock(s.startMinute)}–{formatClock(s.endMinute)}
+              </span>
+              <span className="min-w-0 flex-1 truncate font-medium">
+                {s.subjectName}
+                {s.note ? <span className="text-xs text-muted-foreground"> — {s.note}</span> : null}
+              </span>
+              <span className="shrink-0 text-xs text-muted-foreground">{s.type}</span>
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+}
+
 export default function AITimetablePage() {
   const { showToast } = useToast();
   const [loadTimetables, setLoadTimetables] = useState<Timetable[]>([]);
@@ -84,6 +144,7 @@ export default function AITimetablePage() {
 
   const [view, setView] = useState<"lesson" | "graph">("lesson");
   const [weekOffset, setWeekOffset] = useState(0);
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
 
   async function load() {
     setLoadingList(true);
@@ -160,9 +221,11 @@ export default function AITimetablePage() {
   // ---- derived charts ----
   const subjectAllocation = useMemo(() => {
     const map = new Map<string, number>();
-    (active?.slots || []).forEach((s) => {
-      map.set(s.subjectName, (map.get(s.subjectName) || 0) + (s.endMinute - s.startMinute));
-    });
+    (active?.slots || [])
+      .filter((s) => s.type !== "Break")
+      .forEach((s) => {
+        map.set(s.subjectName, (map.get(s.subjectName) || 0) + (s.endMinute - s.startMinute));
+      });
     return Array.from(map.entries()).map(([name, mins]) => ({
       name,
       hours: Math.round((mins / 60) * 10) / 10,
@@ -331,40 +394,74 @@ export default function AITimetablePage() {
           </div>
 
           {view === "lesson" ? (
-            <Card className="p-4 overflow-x-auto">
-              <div className="grid grid-cols-7 min-w-[700px] gap-2">
-                {DAY_NAMES.map((day, di) => {
-                  const daySlots = (active.slots || [])
-                    .filter((s) => s.dayOfWeek === di)
-                    .slice()
-                    .sort((a, b) => a.startMinute - b.startMinute);
-                  return (
-                    <div key={day} className="space-y-2">
-                      <p className="text-center text-xs font-semibold text-muted-foreground">{day.slice(0, 3)}</p>
-                      {daySlots.length === 0 ? (
-                        <div className="rounded-md border border-dashed h-32 flex items-center justify-center text-[10px] text-muted-foreground">
-                          Free
-                        </div>
-                      ) : (
-                        daySlots.map((s, i) => (
-                          <div
-                            key={i}
-                            className="rounded-md px-2 py-1.5 text-xs text-white shadow-sm"
-                            style={{ backgroundColor: s.color || "#10B981" }}
-                          >
-                            <p className="font-semibold">{s.subjectName}</p>
-                            <p className="opacity-90">
-                              {fmtClock(s.startMinute)}–{fmtClock(s.endMinute)}
-                            </p>
-                            <p className="opacity-80 mt-0.5 truncate">{s.type}{s.note ? " · " + s.note : ""}</p>
+            <>
+              <Card className="p-4 overflow-x-auto">
+                <div className="grid grid-cols-7 min-w-[700px] gap-2">
+                  {DAY_NAMES.map((day, di) => {
+                    const daySlots = (active.slots || [])
+                      .filter((s) => s.dayOfWeek === di)
+                      .slice()
+                      .sort((a, b) => a.startMinute - b.startMinute);
+                    const totalMin = daySlots
+                      .filter((s) => s.type !== "Break")
+                      .reduce((sum, s) => sum + (s.endMinute - s.startMinute), 0);
+                    const isSelected = selectedDay === di;
+                    return (
+                      <div
+                        key={day}
+                        onClick={() => setSelectedDay(isSelected ? null : di)}
+                        className={`group space-y-2 rounded-lg p-1 transition-colors ${
+                          isSelected ? "ring-2 ring-primary bg-primary/5" : "cursor-pointer hover:bg-accent"
+                        }`}
+                      >
+                        <p className="text-center text-xs font-semibold text-muted-foreground">
+                          {day.slice(0, 3)}
+                          {totalMin > 0 && (
+                            <span className="ml-1 text-[10px] font-normal">
+                              • {Math.round((totalMin / 60) * 10) / 10}h
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-center text-[10px] text-primary/70">tap for summary</p>
+                        {daySlots.length === 0 ? (
+                          <div className="rounded-md border border-dashed h-32 flex items-center justify-center text-[10px] text-muted-foreground">
+                            Free
                           </div>
-                        ))
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
+                        ) : (
+                          daySlots.map((s, i) => (
+                            <div
+                              key={i}
+                              className="rounded-md px-2 py-1.5 text-xs text-white shadow-sm"
+                              style={{ backgroundColor: s.color || "#10B981" }}
+                            >
+                              <p className="font-semibold">{s.subjectName}</p>
+                              <p className="opacity-90">
+                                {fmtClock(s.startMinute)}–{fmtClock(s.endMinute)}
+                              </p>
+                              <p className="opacity-80 mt-0.5 truncate">{s.type}{s.note ? " · " + s.note : ""}</p>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+
+              {selectedDay !== null && (
+                <Card className="mt-4 p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Calendar className="h-4 w-4 text-primary" /> {DAY_NAMES[selectedDay]} — Day Summary
+                    </CardTitle>
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedDay(null)}>
+                      Close
+                    </Button>
+                  </div>
+                  <DayBreakdown slots={(active.slots || []).filter((s) => s.dayOfWeek === selectedDay)} formatClock={fmtClock} />
+                </Card>
+              )}
+            </>
           ) : (
             <div className="grid gap-6 lg:grid-cols-2">
               <Card className="p-4">

@@ -107,8 +107,12 @@ SUBJECT_LIST.forEach((s) => {
 });
 
 function colorFor(subject: string): string {
+  const s = (subject || "").toLowerCase();
+  if (s.includes("breakfast") || s.includes("lunch") || s.includes("dinner") || s.includes("break")) {
+    return "#94A3B8";
+  }
   const match = Object.entries(COLOR_BY_SUBJECT).find(
-    ([k]) => subject.toLowerCase().includes(k),
+    ([k]) => s.includes(k),
   );
   return match ? match[1] : "#10B981";
 }
@@ -148,6 +152,9 @@ export async function POST(req: Request) {
       slots = buildFallbackSchedule(input, todayDow);
       planText = "AI generation unavailable (" + e + "). Showing a balanced default timetable.";
     }
+
+    // Auto-insert Breakfast / Lunch / Dinner breaks so the plan respects meals.
+    slots = attachMeals(slots);
 
     // Persist — if DB persistence fails, still return the generated plan so the
     // user never sees a blank/broken result.
@@ -261,6 +268,42 @@ function mapType(t: string): string {
   if (tl.includes("ai") || tl.includes("tutor")) return "AITutor";
   if (tl.includes("review")) return "Review";
   return "Learn";
+}
+
+// ---- Attach Breakfast / Lunch / Dinner breaks for each day ----
+const MEALS: Array<{ name: string; start: number; end: number }> = [
+  { name: "Breakfast", start: 420, end: 460 }, // 7:00-7:40
+  { name: "Lunch", start: 750, end: 800 }, // 12:30-13:20
+  { name: "Dinner", start: 1080, end: 1125 }, // 18:00-18:45
+];
+
+function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
+  return aStart < bEnd && bStart < aEnd;
+}
+
+function attachMeals(slots: any[]): any[] {
+  if (!Array.isArray(slots)) return slots;
+  const days = Array.from(new Set((slots as any[]).map((s) => s.dayOfWeek)));
+  const out: any[] = [...slots];
+  days.forEach((d) => {
+    MEALS.forEach((m) => {
+      const clash = out.some(
+        (s) => s.dayOfWeek === d && overlaps(s.startMinute, s.endMinute, m.start, m.end),
+      );
+      if (!clash) {
+        out.push({
+          dayOfWeek: d,
+          startMinute: m.start,
+          endMinute: m.end,
+          subjectName: m.name,
+          type: "Break",
+          note: "",
+        });
+      }
+    });
+  });
+  out.sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.startMinute - b.startMinute);
+  return out;
 }
 
 // ---- Fallback deterministic balanced schedule (Monday..Sunday) ----
