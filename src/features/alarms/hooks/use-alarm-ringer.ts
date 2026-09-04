@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { AudioEngine } from "../lib/audio-engine";
+import { getCustomSound } from "../lib/custom-sounds";
 import type { Alarm } from "../lib/scheduler";
 
 export function useAlarmRinger() {
@@ -49,10 +50,15 @@ export function useAlarmRinger() {
   }, []);
 
   const triggerAlarm = useCallback(
-    (alarm: Alarm) => {
+    async (alarm: Alarm) => {
       setCurrentAlarm(alarm);
       setIsRinging(true);
-      AudioEngine.play(alarm.sound);
+      if (alarm.sound.startsWith("custom:")) {
+        const custom = await getCustomSound(alarm.sound.slice("custom:".length));
+        AudioEngine.playSound(alarm.sound, custom?.blob);
+      } else {
+        AudioEngine.playSound(alarm.sound);
+      }
       startVibration();
       requestWakeLock();
     },

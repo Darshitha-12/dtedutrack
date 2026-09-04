@@ -26,6 +26,19 @@ class AudioEngineClass {
     this.startLoop(name);
   }
 
+  playSound(sound: string, custom?: Blob | null): void {
+    if (sound.startsWith("custom:")) {
+      if (custom) {
+        this.playCustom(custom);
+      } else {
+        // Custom blob unavailable (e.g. not yet loaded) — fall back gracefully.
+        this.play("chime");
+      }
+      return;
+    }
+    this.play(sound as AlarmSoundName);
+  }
+
   playCustom(blob: Blob): void {
     this.stop();
     this.ensure();

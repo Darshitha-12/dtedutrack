@@ -4,7 +4,7 @@ export interface Alarm {
   label: string;
   priority: "normal" | "high";
   subject: "none" | "biology" | "chemistry" | "physics" | "agriculture";
-  sound: "chime" | "digital" | "bio";
+  sound: "chime" | "digital" | "bio" | `custom:${string}`;
   tts: boolean;
   repeatDays: number[];
   enabled: boolean;
@@ -16,7 +16,7 @@ export interface CreateAlarmInput {
   label: string;
   priority: "normal" | "high";
   subject: "none" | "biology" | "chemistry" | "physics" | "agriculture";
-  sound: "chime" | "digital" | "bio";
+  sound: "chime" | "digital" | "bio" | `custom:${string}`;
   tts: boolean;
   repeatDays: number[];
 }
