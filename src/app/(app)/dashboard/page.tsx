@@ -143,6 +143,7 @@ export default function DashboardPage() {
   });
   const [loading, setLoading] = useState(false);
   const [authTimeout, setAuthTimeout] = useState(false);
+  const [now, setNow] = useState(() => new Date());
 
   function persistCache(patch?: {
     profile?: ProfileData | null;
@@ -335,17 +336,26 @@ export default function DashboardPage() {
   }
 
   const examCountdown = useMemo(() => {
-    if (!profile?.examDate) return null;
-    const target = new Date(profile.examDate);
-    const now = new Date();
+    const target = new Date(
+      profile?.examDate && profile.examDate.trim() !== ""
+        ? profile.examDate
+        : "2027-08-16"
+    );
     const diff = target.getTime() - now.getTime();
-    if (diff <= 0) return { months: 0, days: 0, hours: 0, expired: true };
-    const totalDays = Math.floor(diff / (1000 * 60 * 60 * 24));
-    const months = Math.floor(totalDays / 30);
-    const days = totalDays % 30;
-    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    return { months, days, hours, expired: false };
-  }, [profile?.examDate]);
+    if (diff <= 0) {
+      return { days: 0, hours: 0, minutes: 0, expired: true, target };
+    }
+    const totalSeconds = Math.floor(diff / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    return { days, hours, minutes, expired: false, target };
+  }, [profile?.examDate, now]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   function getProfileCompleteness(): number {
     if (!profile) return 0;
@@ -415,88 +425,65 @@ export default function DashboardPage() {
       </Card>
 
       {/* Exam Countdown */}
-      {examCountdown ? (
-        <Card className={`p-5 mb-6 border ${
-          examCountdown.expired
-            ? "border-green-500/30 bg-gradient-to-r from-green-500/10 to-green-500/5"
-            : examCountdown.days <= 30
-              ? "border-red-500/30 bg-gradient-to-r from-red-500/10 to-red-500/5"
-              : "border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-amber-500/5"
-        }`}>
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className={`h-12 w-12 rounded-xl flex items-center justify-center ${
+      <Card className={`p-5 mb-6 border ${
+        examCountdown.expired
+          ? "border-green-500/30 bg-gradient-to-r from-green-500/10 to-green-500/5"
+          : examCountdown.days <= 30
+            ? "border-red-500/30 bg-gradient-to-r from-red-500/10 to-red-500/5"
+            : "border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-amber-500/5"
+      }`}>
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className={`h-12 w-12 rounded-xl flex items-center justify-center ${
+              examCountdown.expired
+                ? "bg-green-500/15"
+                : examCountdown.days <= 30
+                  ? "bg-red-500/15"
+                  : "bg-amber-500/15"
+            }`}>
+              <Timer className={`h-6 w-6 ${
                 examCountdown.expired
-                  ? "bg-green-500/15"
+                  ? "text-green-500"
                   : examCountdown.days <= 30
-                    ? "bg-red-500/15"
-                    : "bg-amber-500/15"
-              }`}>
-                <Timer className={`h-6 w-6 ${
-                  examCountdown.expired
-                    ? "text-green-500"
-                    : examCountdown.days <= 30
-                      ? "text-red-500"
-                      : "text-amber-500"
-                }`} />
-              </div>
-              <div>
-                <p className="text-lg font-semibold">
-                  {examCountdown.expired
-                    ? "Exam Complete! 🎉"
-                    : `Exam in ${examCountdown.months}M ${examCountdown.days}D ${examCountdown.hours}H`
-                  }
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {profile?.examYear
-                    ? `${profile.currentLevel || "A/L"} Exam ${profile.examYear}`
-                    : `Target: ${profile?.examDate ?? ""}`
-                  }
-                </p>
-              </div>
+                    ? "text-red-500"
+                    : "text-amber-500"
+              }`} />
             </div>
-            <div className="hidden md:flex items-center gap-3 text-center">
-              {!examCountdown.expired && (
-                <>
-                  <div className="rounded-md bg-muted/50 px-3 py-2">
-                    <p className="text-xl font-bold">{examCountdown.months}</p>
-                    <p className="text-[10px] text-muted-foreground">Months</p>
-                  </div>
-                  <div className="rounded-md bg-muted/50 px-3 py-2">
-                    <p className="text-xl font-bold">{examCountdown.days}</p>
-                    <p className="text-[10px] text-muted-foreground">Days</p>
-                  </div>
-                  <div className="rounded-md bg-muted/50 px-3 py-2">
-                    <p className="text-xl font-bold">{examCountdown.hours}</p>
-                    <p className="text-[10px] text-muted-foreground">Hours</p>
-                  </div>
-                </>
-              )}
+            <div>
+              <p className="text-lg font-semibold">
+                {examCountdown.expired
+                  ? "Exam Complete! 🎉"
+                  : `Exam in ${examCountdown.days}D ${examCountdown.hours}H ${examCountdown.minutes}M`
+                }
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {profile?.examYear
+                  ? `${profile.currentLevel || "A/L"} Exam ${profile.examYear}`
+                  : `Target: ${profile?.examDate && profile.examDate.trim() !== "" ? profile.examDate : "August 16, 2027"}`
+                }
+              </p>
             </div>
           </div>
-        </Card>
-      ) : (
-        <Card className="p-5 mb-6 border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-amber-500/5">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="h-12 w-12 rounded-xl bg-amber-500/15 flex items-center justify-center">
-                <Timer className="h-6 w-6 text-amber-500" />
-              </div>
-              <div>
-                <p className="text-lg font-semibold">No Exam Countdown Yet</p>
-                <p className="text-sm text-muted-foreground">
-                  Set your exam date to see the live countdown here.
-                </p>
-              </div>
-            </div>
-            <Link href="/profile">
-              <Button variant="outline" className="gap-2">
-                <CalendarDays className="h-4 w-4" /> Set Exam Date
-              </Button>
-            </Link>
+          <div className="hidden md:flex items-center gap-3 text-center">
+            {!examCountdown.expired && (
+              <>
+                <div className="rounded-md bg-muted/50 px-3 py-2">
+                  <p className="text-xl font-bold">{examCountdown.days}</p>
+                  <p className="text-[10px] text-muted-foreground">Days</p>
+                </div>
+                <div className="rounded-md bg-muted/50 px-3 py-2">
+                  <p className="text-xl font-bold">{examCountdown.hours}</p>
+                  <p className="text-[10px] text-muted-foreground">Hours</p>
+                </div>
+                <div className="rounded-md bg-muted/50 px-3 py-2">
+                  <p className="text-xl font-bold">{examCountdown.minutes}</p>
+                  <p className="text-[10px] text-muted-foreground">Minutes</p>
+                </div>
+              </>
+            )}
           </div>
-        </Card>
-      )}
+        </div>
+      </Card>
 
       {/* Feature Quick Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
