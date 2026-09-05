@@ -61,16 +61,23 @@ export function useAlarmRinger() {
     async (alarm: Alarm) => {
       setCurrentAlarm(alarm);
       setIsRinging(true);
-      const native = !!getBridge() && typeof getBridge()!.triggerNativeAlarm === "function";
-      if (native) {
-        // Inside the Android app the native scheduled alarm is the single,
-        // reliable sound source: it plays the exact tone for the selected
-        // sound (bundled chime/digital/bio WAV matched by soundId). The web
-        // must NOT play a second tone (that double/overlaps the audio) and
-        // must NOT suppress the native sound either. Only the (silent)
-        // in-app alarm popup + wake lock are handled here.
-        requestWakeLock();
-        return;
+      let native = false;
+      try {
+        const bridge = getBridge();
+        native = !!bridge && typeof bridge.triggerNativeAlarm === "function";
+        if (native) {
+          // Tell the native scheduled alarm to stay silent for this alarm —
+          // the web is the in-app ringer and plays the exact same tone the
+          // user picked in the Test Sound button. Only the (silent) native
+          // full-screen + vibration remain, so no double/overlapping audio.
+          // Note: this flag only survives ~60s and only while the app is open;
+          // when the app is closed the native alarm rings with its bundled tone.
+          if (typeof bridge.suppressAlarmSound === "function") {
+            bridge.suppressAlarmSound(alarm.id);
+          }
+        }
+      } catch {
+        native = false;
       }
       if (alarm.sound.startsWith("custom:")) {
         const custom = await getCustomSound(alarm.sound.slice("custom:".length));
@@ -78,7 +85,10 @@ export function useAlarmRinger() {
       } else {
         AudioEngine.playSound(alarm.sound);
       }
-      startVibration();
+      if (!native) {
+        // Native full-screen already vibrates when inside the Android app.
+        startVibration();
+      }
       requestWakeLock();
     },
     [getBridge, startVibration, requestWakeLock],

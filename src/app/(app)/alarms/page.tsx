@@ -58,6 +58,27 @@ export default function AlarmsPage() {
   useEffect(() => {
     const id = setInterval(() => {
       const due = checkAlarms(alarms, fired);
+      // Pre-arm the native "web already rang" flag just before the alarm's
+      // exact second. The native scheduled alarm (exact-time) would otherwise
+      // sometimes beat the 1s web tick and play its own tone too — the two
+      // similar-but-not-identical tones overlap and sound like the wrong sound.
+      try {
+        const bridge = (window as any).BioPulseBridge;
+        if (bridge && typeof bridge.suppressAlarmSound === "function") {
+          const now = Date.now();
+          for (const a of alarms) {
+            if (!a.enabled) continue;
+            const next = nextOccurrenceFor(a);
+            if (!next) continue;
+            const ms = next.getTime() - now;
+            if (ms > 0 && ms < 2500) {
+              bridge.suppressAlarmSound(a.id);
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
       due.forEach((alarm) => {
         markFired(getDedupKey(alarm, new Date()));
         triggerAlarm(alarm);
