@@ -18,7 +18,14 @@ export function useAlarms() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        setAlarms(parsed.alarms ?? []);
+        const list: Alarm[] = parsed.alarms ?? [];
+        // Older alarms could still carry a removed custom sound reference.
+        for (const a of list) {
+          if (typeof a.sound === "string" && a.sound.startsWith("custom:")) {
+            a.sound = "chime";
+          }
+        }
+        setAlarms(list);
         setFired(parsed.fired ?? {});
       }
     } catch {

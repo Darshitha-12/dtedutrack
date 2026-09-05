@@ -5,8 +5,6 @@ class AudioEngineClass {
   private masterGain: GainNode | null = null;
   private activeOscillators: OscillatorNode[] = [];
   private loopTimer: ReturnType<typeof setTimeout> | null = null;
-  private customSource: AudioBufferSourceNode | null = null;
-
   ensure(): void {
     if (!this.ctx) {
       this.ctx = new AudioContext();
@@ -26,40 +24,6 @@ class AudioEngineClass {
     this.startLoop(name);
   }
 
-  playSound(sound: string, custom?: Blob | null): void {
-    if (sound.startsWith("custom:")) {
-      if (custom) {
-        this.playCustom(custom);
-      } else {
-        // Custom blob unavailable (e.g. not yet loaded) — fall back gracefully.
-        this.play("chime");
-      }
-      return;
-    }
-    this.play(sound as AlarmSoundName);
-  }
-
-  playCustom(blob: Blob): void {
-    this.stop();
-    this.ensure();
-    const reader = new FileReader();
-    reader.onload = async () => {
-      if (!this.ctx || !this.masterGain) return;
-      try {
-        const buffer = await this.ctx.decodeAudioData(reader.result as ArrayBuffer);
-        const source = this.ctx.createBufferSource();
-        source.buffer = buffer;
-        source.loop = true;
-        source.connect(this.masterGain);
-        source.start();
-        this.customSource = source;
-      } catch {
-        // decode error — silently ignore
-      }
-    };
-    reader.readAsArrayBuffer(blob);
-  }
-
   stop(): void {
     if (this.loopTimer !== null) {
       clearTimeout(this.loopTimer);
@@ -73,14 +37,6 @@ class AudioEngineClass {
       }
     }
     this.activeOscillators = [];
-    if (this.customSource) {
-      try {
-        this.customSource.stop();
-      } catch {
-        /* already stopped */
-      }
-      this.customSource = null;
-    }
   }
 
   cue(_name: string): void {

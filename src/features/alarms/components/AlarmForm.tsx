@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useMemo, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,15 +9,8 @@ import {
   AudioEngine,
   type AlarmSoundName,
 } from "@/features/alarms/lib/audio-engine";
-import {
-  saveCustomSound,
-  deleteCustomSound,
-  listCustomSounds,
-  getCustomSound,
-  formatSize,
-} from "@/features/alarms/lib/custom-sounds";
 import type { Alarm, CreateAlarmInput } from "@/features/alarms/lib/scheduler";
-import { Bell, Play, X, Check, Upload, Music2 } from "lucide-react";
+import { Bell, Play, X, Check } from "lucide-react";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -52,65 +45,6 @@ export function AlarmForm({ editing, onSubmit, onCancel }: AlarmFormProps) {
       : { ...defaultInput },
   );
 
-  const isCustomSound = (s: string) =>
-    typeof s === "string" && s.startsWith("custom:");
-  const [customInfo, setCustomInfo] = useState<{
-    id: string;
-    name: string;
-    size: number;
-  } | null>(null);
-  const [showCustomPicker, setShowCustomPicker] = useState(
-    editing ? isCustomSound(editing.sound) : false,
-  );
-  const [customError, setCustomError] = useState("");
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  // If editing an alarm that uses a custom sound, load its name/size from the store.
-  useEffect(() => {
-    if (editing && isCustomSound(editing.sound)) {
-      const id = editing.sound.slice("custom:".length);
-      setCustomInfo({ id, name: "Custom audio", size: 0 });
-      listCustomSounds(true).then((items) => {
-        const hit = items.find((it) => it.id === id);
-        if (hit) setCustomInfo({ id, name: hit.name, size: hit.sizeBytes });
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing]);
-
-  const chooseCustom = useCallback(async (file: File) => {
-    const id =
-      Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    const ok = await saveCustomSound(id, file.name, file);
-    if (!ok) {
-      setCustomError("Could not store the audio on this device.");
-      return;
-    }
-    setCustomError("");
-    setCustomInfo({ id, name: file.name, size: file.size });
-    setShowCustomPicker(true);
-    setInput((p) => ({ ...p, sound: `custom:${id}` }));
-  }, []);
-
-  const clearCustom = useCallback(async () => {
-    if (customInfo) {
-      await deleteCustomSound(customInfo.id);
-    }
-    setCustomInfo(null);
-    setShowCustomPicker(false);
-    setInput((p) => ({ ...p, sound: "chime" }));
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }, [customInfo]);
-
-  const soundChoice = useMemo(
-    () => (showCustomPicker || isCustomSound(input.sound) ? "custom" : input.sound) as
-      | "chime"
-      | "digital"
-      | "bio"
-      | "custom",
-    [input.sound, showCustomPicker],
-  );
-
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
@@ -132,14 +66,8 @@ export function AlarmForm({ editing, onSubmit, onCancel }: AlarmFormProps) {
     }));
   }, []);
 
-  const testSound = useCallback(async () => {
-    if (isCustomSound(input.sound)) {
-      const id = input.sound.slice("custom:".length);
-      const custom = await getCustomSound(id);
-      AudioEngine.playSound(input.sound, custom?.blob);
-    } else {
-      AudioEngine.play(input.sound as AlarmSoundName);
-    }
+  const testSound = useCallback(() => {
+    AudioEngine.play(input.sound as AlarmSoundName);
     setTimeout(() => AudioEngine.stop(), 5000);
   }, [input.sound]);
 
@@ -232,81 +160,21 @@ export function AlarmForm({ editing, onSubmit, onCancel }: AlarmFormProps) {
               Sound
             </label>
             <select
-              value={soundChoice}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "custom") {
-                  setShowCustomPicker(true);
-                  if (customInfo) {
-                    setInput((p) => ({ ...p, sound: `custom:${customInfo.id}` }));
-                  }
-                } else {
-                  setShowCustomPicker(false);
-                  setInput((p) => ({ ...p, sound: v as CreateAlarmInput["sound"] }));
-                }
-              }}
+              value={input.sound}
+              onChange={(e) =>
+                setInput((p) => ({
+                  ...p,
+                  sound: e.target.value as CreateAlarmInput["sound"],
+                }))
+              }
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
             >
               <option value="chime">Crystal Chimes</option>
               <option value="digital">Digital Buzzer</option>
               <option value="bio">Bio-Alert Sweep</option>
-              <option value="custom">Custom Audio…</option>
             </select>
           </div>
         </div>
-
-        {showCustomPicker && (
-          <div className="rounded-md border border-dashed p-3">
-            <div className="flex items-center gap-2">
-              <Music2 className="h-4 w-4 text-muted-foreground" />
-              <p className="text-xs font-medium text-muted-foreground">
-                Custom alarm audio
-              </p>
-            </div>
-
-            {customInfo && (
-              <div className="mt-2 flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
-                <Check className="h-3.5 w-3.5 text-green-600" />
-                <span className="flex-1 min-w-0 truncate font-medium">
-                  {customInfo.name}
-                </span>
-                <span className="shrink-0 text-muted-foreground">
-                  {formatSize(customInfo.size)}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Remove custom sound"
-                  onClick={() => clearCustom()}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-
-            {!customInfo && (
-              <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="audio/*,.mp3,.wav,.m4a,.ogg,.aac"
-                  className="block w-full text-xs file:border file:rounded-md file:bg-transparent"
-                  onChange={(e) => {
-                    const file = e.target.files?.item(0);
-                    if (file) chooseCustom(file);
-                  }}
-                />
-                <p className="mt-1 text-[10px] text-muted-foreground">
-                  Any audio file — stored on this device (offline), no size limit.
-                </p>
-                {customError && (
-                  <p className="mt-1 text-[11px] text-destructive">{customError}</p>
-                )}
-              </>
-            )}
-          </div>
-        )}
 
         <div className="flex items-center gap-3">
           <button

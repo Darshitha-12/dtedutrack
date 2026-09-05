@@ -18,7 +18,7 @@ export interface Alarm {
   label: string;
   subjectId: SubjectId | null;
   priority: AlarmPriority;
-  sound: AlarmSound | `custom:${string}`;
+  sound: AlarmSound;
   tts: boolean;
   days: number[]; // 0=Sun..6=Sat, empty = one-time
   enabled: boolean;

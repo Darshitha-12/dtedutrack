@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { AudioEngine } from "../lib/audio-engine";
-import { getCustomSound } from "../lib/custom-sounds";
 import type { Alarm } from "../lib/scheduler";
 
 export function useAlarmRinger() {
@@ -79,12 +78,7 @@ export function useAlarmRinger() {
       } catch {
         native = false;
       }
-      if (alarm.sound.startsWith("custom:")) {
-        const custom = await getCustomSound(alarm.sound.slice("custom:".length));
-        AudioEngine.playSound(alarm.sound, custom?.blob);
-      } else {
-        AudioEngine.playSound(alarm.sound);
-      }
+      AudioEngine.play(alarm.sound);
       if (!native) {
         // Native full-screen already vibrates when inside the Android app.
         startVibration();
