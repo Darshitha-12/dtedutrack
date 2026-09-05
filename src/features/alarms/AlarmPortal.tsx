@@ -47,7 +47,7 @@ function preArmNative(alarms: Alarm[]) {
       const next = nextOccurrenceFor(a);
       if (!next) continue;
       const ms = next.getTime() - now;
-      if (ms > 0 && ms < 2500) {
+      if (ms > 0 && ms < 6000) {
         bridge.suppressAlarmSound(a.id);
       }
     }
