@@ -61,38 +61,24 @@ export function useAlarmRinger() {
     async (alarm: Alarm) => {
       setCurrentAlarm(alarm);
       setIsRinging(true);
-      // Web is the primary in-app ringer. The native side is told to
-      // suppress its own scheduled-alarm sound when the web already fired,
-      // so the alarm never plays twice (or from a "background" source).
-      try {
-        const bridge = getBridge();
-        if (bridge && bridge.triggerNativeAlarm) {
-          const [hh, mm] = (alarm.time || "00:00").split(":").map(Number);
-          const soundId = alarm.sound.startsWith("custom:")
-            ? alarm.sound.slice("custom:".length)
-            : alarm.sound;
-          bridge.triggerNativeAlarm(
-            alarm.id,
-            alarm.label || "Alarm",
-            hh || 0,
-            mm || 0,
-            soundId,
-          );
-        }
-      } catch {
-        // non-Android — ignore
-      }
       const native = !!getBridge() && typeof getBridge()!.triggerNativeAlarm === "function";
+      if (native) {
+        // Inside the Android app the native scheduled alarm is the single,
+        // reliable sound source: it plays the exact tone for the selected
+        // sound (bundled chime/digital/bio WAV matched by soundId). The web
+        // must NOT play a second tone (that double/overlaps the audio) and
+        // must NOT suppress the native sound either. Only the (silent)
+        // in-app alarm popup + wake lock are handled here.
+        requestWakeLock();
+        return;
+      }
       if (alarm.sound.startsWith("custom:")) {
         const custom = await getCustomSound(alarm.sound.slice("custom:".length));
         AudioEngine.playSound(alarm.sound, custom?.blob);
       } else {
         AudioEngine.playSound(alarm.sound);
       }
-      if (!native) {
-        // Native full-screen already vibrates when inside the Android app.
-        startVibration();
-      }
+      startVibration();
       requestWakeLock();
     },
     [getBridge, startVibration, requestWakeLock],
