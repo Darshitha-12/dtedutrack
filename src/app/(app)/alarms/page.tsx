@@ -5,14 +5,8 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { AlarmForm } from "@/features/alarms/components/AlarmForm";
 import { AlarmList } from "@/features/alarms/components/AlarmList";
-import { AlarmPopup } from "@/features/alarms/components/AlarmPopup";
 import { useAlarms } from "@/features/alarms/hooks/use-alarms";
-import { useAlarmRinger } from "@/features/alarms/hooks/use-alarm-ringer";
-import {
-  checkAlarms,
-  getDedupKey,
-  nextOccurrenceFor,
-} from "@/features/alarms/lib/scheduler";
+import { nextOccurrenceFor } from "@/features/alarms/lib/scheduler";
 import type { Alarm, CreateAlarmInput } from "@/features/alarms/lib/scheduler";
 import { notificationService } from "@/services/notification";
 import { BellOff } from "lucide-react";
@@ -22,21 +16,11 @@ const ALARM_STATUS_TAG = "biopulse-alarm-status";
 export default function AlarmsPage() {
   const {
     alarms,
-    fired,
     addAlarm,
     updateAlarm,
     deleteAlarm,
     toggleAlarm,
-    markFired,
   } = useAlarms();
-
-  const {
-    currentAlarm,
-    isRinging,
-    triggerAlarm,
-    dismiss,
-    snooze,
-  } = useAlarmRinger();
 
   const [editingAlarm, setEditingAlarm] = useState<Alarm | null>(null);
   const [notifPerm, setNotifPerm] = useState<NotificationPermission>("default");
@@ -53,39 +37,6 @@ export default function AlarmsPage() {
       setNotifPerm(result);
     }
   }, []);
-
-  // alarm tick — check every second
-  useEffect(() => {
-    const id = setInterval(() => {
-      const due = checkAlarms(alarms, fired);
-      // Pre-arm the native "web already rang" flag just before the alarm's
-      // exact second. The native scheduled alarm (exact-time) would otherwise
-      // sometimes beat the 1s web tick and play its own tone too — the two
-      // similar-but-not-identical tones overlap and sound like the wrong sound.
-      try {
-        const bridge = (window as any).BioPulseBridge;
-        if (bridge && typeof bridge.suppressAlarmSound === "function") {
-          const now = Date.now();
-          for (const a of alarms) {
-            if (!a.enabled) continue;
-            const next = nextOccurrenceFor(a);
-            if (!next) continue;
-            const ms = next.getTime() - now;
-            if (ms > 0 && ms < 2500) {
-              bridge.suppressAlarmSound(a.id);
-            }
-          }
-        }
-      } catch {
-        // ignore
-      }
-      due.forEach((alarm) => {
-        markFired(getDedupKey(alarm, new Date()));
-        triggerAlarm(alarm);
-      });
-    }, 1000);
-    return () => clearInterval(id);
-  }, [alarms, fired, markFired, triggerAlarm]);
 
   // persistent status notification — shows next upcoming alarm
   const lastAlarmStatusRef = useRef("");
@@ -148,7 +99,7 @@ export default function AlarmsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Smart Alarms"
-        description="Set study reminders with custom sounds, priorities, and repeat schedules"
+        description="Set study reminders with built-in sounds, priorities, and repeat schedules"
       />
 
       {notifPerm !== "granted" && (
@@ -176,14 +127,6 @@ export default function AlarmsPage() {
         onEdit={setEditingAlarm}
         onDelete={deleteAlarm}
       />
-
-      {isRinging && currentAlarm && (
-        <AlarmPopup
-          alarm={currentAlarm}
-          onDismiss={dismiss}
-          onSnooze={snooze}
-        />
-      )}
     </div>
   );
 }

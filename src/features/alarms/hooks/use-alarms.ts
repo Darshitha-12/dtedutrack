@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from "react";
 import type { Alarm, CreateAlarmInput } from "../lib/scheduler";
 
-const STORAGE_KEY = "biopulse_alarms_v1";
+export const STORAGE_KEY = "biopulse_alarms_v1";
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
