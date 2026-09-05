@@ -144,10 +144,20 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(false);
   const [authTimeout, setAuthTimeout] = useState(false);
 
-  function persistCache() {
+  function persistCache(patch?: {
+    profile?: ProfileData | null;
+    stats?: Partial<DashboardStats>;
+    marks?: Mark[];
+    studyWeek?: { date: string; minutes: number }[];
+    leaderboard?: LeaderboardEntry[];
+  }) {
     try {
       localStorage.setItem(DASH_CACHE, JSON.stringify({
-        profile, stats, marks, studyWeek, leaderboard,
+        profile: patch?.profile !== undefined ? patch.profile : profile,
+        stats: { ...stats, ...(patch?.stats ?? {}) },
+        marks: patch?.marks !== undefined ? patch.marks : marks,
+        studyWeek: patch?.studyWeek !== undefined ? patch.studyWeek : studyWeek,
+        leaderboard: patch?.leaderboard !== undefined ? patch.leaderboard : leaderboard,
       }));
     } catch {}
   }
@@ -206,7 +216,7 @@ export default function DashboardPage() {
       const res = await fetch("/api/profile");
       if (res.ok) {
         const data = await res.json();
-        setProfile({
+        const nextProfile: ProfileData = {
           name: data.name || "",
           email: data.email || "",
           onboarded: data.onboarded || false,
@@ -215,13 +225,14 @@ export default function DashboardPage() {
           examYear: data.examYear || "",
           examDate: data.examDate || "",
           currentLevel: data.currentLevel || "",
-        });
+        };
+        setProfile(nextProfile);
+        persistCache({ profile: nextProfile });
       }
     } catch (error) {
       console.error("Failed to fetch profile:", error);
     } finally {
       setLoading(false);
-      persistCache();
     }
   }
 
@@ -279,15 +290,16 @@ export default function DashboardPage() {
         const weekly = last7.reduce((s: number, d: { minutes: number }) => s + d.minutes, 0);
         const activeDays = study.filter((d: { minutes: number }) => d.minutes > 0).length;
         const totalMinutes = body.stats?.totalStudyMinutes || 0;
-        setStats((prev) => ({
-          ...prev,
+        const nextStats: Partial<DashboardStats> = {
           weeklyHours: Math.round((weekly / 60) * 10) / 10,
           dayStreak: activeDays,
           studyMinutes: totalMinutes,
           weeklyMinutes: weekly,
-        }));
+        };
+        setStats((prev) => ({ ...prev, ...nextStats }));
         setStudyWeek(last7);
         const community = body.community;
+        const nextLeaderboard = community?.leaderboard;
         if (community) {
           setStats((prev) => ({
             ...prev,
@@ -298,7 +310,17 @@ export default function DashboardPage() {
             setLeaderboard(community.leaderboard);
           }
         }
-        persistCache();
+        persistCache({
+          stats: community
+            ? {
+                ...nextStats,
+                communityMinutes: community.totalMinutes || 0,
+                communityActiveUsers: community.activeUsers || 0,
+              }
+            : nextStats,
+          studyWeek: last7,
+          leaderboard: Array.isArray(nextLeaderboard) ? nextLeaderboard : undefined,
+        });
       }
     } catch (error) {
       console.error("Failed to fetch analytics:", error);
@@ -393,7 +415,7 @@ export default function DashboardPage() {
       </Card>
 
       {/* Exam Countdown */}
-      {examCountdown && profile?.examDate && (
+      {examCountdown ? (
         <Card className={`p-5 mb-6 border ${
           examCountdown.expired
             ? "border-green-500/30 bg-gradient-to-r from-green-500/10 to-green-500/5"
@@ -426,9 +448,9 @@ export default function DashboardPage() {
                   }
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  {profile.examYear
+                  {profile?.examYear
                     ? `${profile.currentLevel || "A/L"} Exam ${profile.examYear}`
-                    : `Target: ${profile.examDate}`
+                    : `Target: ${profile?.examDate ?? ""}`
                   }
                 </p>
               </div>
@@ -453,73 +475,97 @@ export default function DashboardPage() {
             </div>
           </div>
         </Card>
+      ) : (
+        <Card className="p-5 mb-6 border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-amber-500/5">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 rounded-xl bg-amber-500/15 flex items-center justify-center">
+                <Timer className="h-6 w-6 text-amber-500" />
+              </div>
+              <div>
+                <p className="text-lg font-semibold">No Exam Countdown Yet</p>
+                <p className="text-sm text-muted-foreground">
+                  Set your exam date to see the live countdown here.
+                </p>
+              </div>
+            </div>
+            <Link href="/profile">
+              <Button variant="outline" className="gap-2">
+                <CalendarDays className="h-4 w-4" /> Set Exam Date
+              </Button>
+            </Link>
+          </div>
+        </Card>
       )}
 
-      {/* Study Planner Card */}
-      <Card className="p-6 mb-6 border-primary/30 bg-gradient-to-r from-primary/10 to-primary/5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="h-12 w-12 rounded-xl bg-primary/15 flex items-center justify-center">
-              <CalendarDays className="h-6 w-6 text-primary" />
+      {/* Feature Quick Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {/* Study Planner Card */}
+        <Card className="p-6 border-primary/30 bg-gradient-to-r from-primary/10 to-primary/5">
+          <div className="flex flex-col h-full gap-3 items-start justify-between">
+            <div className="flex flex-col gap-3">
+              <div className="h-12 w-12 rounded-xl bg-primary/15 flex items-center justify-center">
+                <CalendarDays className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <p className="text-lg font-semibold">Study Planner</p>
+                <p className="text-sm text-muted-foreground">
+                  Plan your week, generate a smart A/L timetable, and track sessions.
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-lg font-semibold">Study Planner</p>
-              <p className="text-sm text-muted-foreground">
-                Plan your week, generate a smart A/L timetable, and track sessions.
-              </p>
-            </div>
+            <Link href="/planner">
+              <Button className="gap-2">
+                <CalendarDays className="h-4 w-4" /> Open Planner
+              </Button>
+            </Link>
           </div>
-          <Link href="/planner">
-            <Button className="gap-2">
-              <CalendarDays className="h-4 w-4" /> Open Planner
-            </Button>
-          </Link>
-        </div>
-      </Card>
+        </Card>
 
-      {/* AI Timetable Card */}
-      <Card className="p-6 mb-6 border-violet-500/30 bg-gradient-to-r from-violet-500/10 to-violet-500/5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="h-12 w-12 rounded-xl bg-violet-500/15 flex items-center justify-center">
-              <Sparkles className="h-6 w-6 text-violet-500" />
+        {/* AI Timetable Card */}
+        <Card className="p-6 border-violet-500/30 bg-gradient-to-r from-violet-500/10 to-violet-500/5">
+          <div className="flex flex-col h-full gap-3 items-start justify-between">
+            <div className="flex flex-col gap-3">
+              <div className="h-12 w-12 rounded-xl bg-violet-500/15 flex items-center justify-center">
+                <Sparkles className="h-6 w-6 text-violet-500" />
+              </div>
+              <div>
+                <p className="text-lg font-semibold">AI Study Timetable</p>
+                <p className="text-sm text-muted-foreground">
+                  AI-generated visual weekly timetable with calendar &amp; analytics graphs.
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-lg font-semibold">AI Study Timetable</p>
-              <p className="text-sm text-muted-foreground">
-                AI-generated visual weekly timetable with calendar &amp; analytics graphs.
-              </p>
-            </div>
+            <Link href="/ai-timetable">
+              <Button variant="outline" className="gap-2">
+                <Sparkles className="h-4 w-4" /> Open AI Timetable
+              </Button>
+            </Link>
           </div>
-          <Link href="/ai-timetable">
-            <Button variant="outline" className="gap-2">
-              <Sparkles className="h-4 w-4" /> Open AI Timetable
-            </Button>
-          </Link>
-        </div>
-      </Card>
+        </Card>
 
-      {/* Work Log Card */}
-      <Card className="p-6 mb-6 border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 to-emerald-500/5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="h-12 w-12 rounded-xl bg-emerald-500/15 flex items-center justify-center">
-              <Clock className="h-6 w-6 text-emerald-500" />
+        {/* Work Log Card */}
+        <Card className="p-6 border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 to-emerald-500/5">
+          <div className="flex flex-col h-full gap-3 items-start justify-between">
+            <div className="flex flex-col gap-3">
+              <div className="h-12 w-12 rounded-xl bg-emerald-500/15 flex items-center justify-center">
+                <Clock className="h-6 w-6 text-emerald-500" />
+              </div>
+              <div>
+                <p className="text-lg font-semibold">Daily Work Log</p>
+                <p className="text-sm text-muted-foreground">
+                  Log today&apos;s study &amp; extra work hours and see the community total.
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-lg font-semibold">Daily Work Log</p>
-              <p className="text-sm text-muted-foreground">
-                Log today&apos;s study &amp; extra work hours and see the community total.
-              </p>
-            </div>
+            <Link href="/work-log">
+              <Button variant="outline" className="gap-2">
+                <Clock className="h-4 w-4" /> Open Work Log
+              </Button>
+            </Link>
           </div>
-          <Link href="/work-log">
-            <Button variant="outline" className="gap-2">
-              <Clock className="h-4 w-4" /> Open Work Log
-            </Button>
-          </Link>
-        </div>
-      </Card>
+        </Card>
+      </div>
 
       {/* Profile Incomplete Banner */}
       {getProfileCompleteness() < 100 && (
