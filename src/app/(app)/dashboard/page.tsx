@@ -25,6 +25,7 @@ import {
   Trophy,
   Crown,
   CalendarDays,
+  Sparkles,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -460,7 +461,7 @@ export default function DashboardPage() {
               )}
             </p>
           </div>
-          <div className="hidden md:flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-3 shrink-0">
             <div className="text-right">
               <p className="text-sm font-medium">Profile Complete</p>
               {ready ? (
@@ -591,6 +592,28 @@ export default function DashboardPage() {
           <Link href="/planner" className="shrink-0">
             <Button className="gap-2">
               <CalendarDays className="h-4 w-4" /> Open Planner
+            </Button>
+          </Link>
+        </div>
+      </Card>
+
+      {/* 3b. AI Study Timetable Card */}
+      <Card className="p-6 border-purple-500/30 bg-gradient-to-r from-purple-500/10 to-purple-500/5">
+        <div className="flex flex-col sm:flex-row h-full gap-3 items-start sm:items-center justify-between">
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center min-w-0">
+            <div className="h-12 w-12 rounded-xl bg-purple-500/15 flex items-center justify-center shrink-0">
+              <Sparkles className="h-6 w-6 text-purple-500" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-lg font-semibold">AI Study Planner</p>
+              <p className="text-sm text-muted-foreground">
+                Generate a smart personalized timetable with AI recommendations.
+              </p>
+            </div>
+          </div>
+          <Link href="/planner" className="shrink-0">
+            <Button variant="outline" className="gap-2 border-purple-500/30 text-purple-600 hover:bg-purple-500/10">
+              <Sparkles className="h-4 w-4" /> AI Timetable
             </Button>
           </Link>
         </div>
