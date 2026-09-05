@@ -343,17 +343,20 @@ export default function DashboardPage() {
     );
     const diff = target.getTime() - now.getTime();
     if (diff <= 0) {
-      return { days: 0, hours: 0, minutes: 0, expired: true, target };
+      return { months: 0, days: 0, hours: 0, minutes: 0, seconds: 0, expired: true, target };
     }
     const totalSeconds = Math.floor(diff / 1000);
-    const days = Math.floor(totalSeconds / 86400);
+    const totalDays = Math.floor(totalSeconds / 86400);
+    const months = Math.floor(totalDays / 30);
+    const days = totalDays % 30;
     const hours = Math.floor((totalSeconds % 86400) / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
-    return { days, hours, minutes, expired: false, target };
+    const seconds = totalSeconds % 60;
+    return { months, days, hours, minutes, seconds, expired: false, target };
   }, [profile?.examDate, now]);
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 60000);
+    const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -453,7 +456,7 @@ export default function DashboardPage() {
               <p className="text-lg font-semibold">
                 {examCountdown.expired
                   ? "Exam Complete! 🎉"
-                  : `Exam in ${examCountdown.days}D ${examCountdown.hours}H ${examCountdown.minutes}M`
+                  : `Exam in ${examCountdown.months}M ${examCountdown.days}D ${examCountdown.hours}H ${examCountdown.minutes}M ${examCountdown.seconds}S`
                 }
               </p>
               <p className="text-sm text-muted-foreground">
@@ -468,6 +471,10 @@ export default function DashboardPage() {
             {!examCountdown.expired && (
               <>
                 <div className="rounded-md bg-muted/50 px-3 py-2">
+                  <p className="text-xl font-bold">{examCountdown.months}</p>
+                  <p className="text-[10px] text-muted-foreground">Months</p>
+                </div>
+                <div className="rounded-md bg-muted/50 px-3 py-2">
                   <p className="text-xl font-bold">{examCountdown.days}</p>
                   <p className="text-[10px] text-muted-foreground">Days</p>
                 </div>
@@ -478,6 +485,10 @@ export default function DashboardPage() {
                 <div className="rounded-md bg-muted/50 px-3 py-2">
                   <p className="text-xl font-bold">{examCountdown.minutes}</p>
                   <p className="text-[10px] text-muted-foreground">Minutes</p>
+                </div>
+                <div className="rounded-md bg-muted/50 px-3 py-2">
+                  <p className="text-xl font-bold">{examCountdown.seconds}</p>
+                  <p className="text-[10px] text-muted-foreground">Seconds</p>
                 </div>
               </>
             )}
