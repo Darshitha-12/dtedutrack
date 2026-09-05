@@ -79,10 +79,9 @@ export function useAlarmRinger() {
         native = false;
       }
       AudioEngine.play(alarm.sound);
-      if (!native) {
-        // Native full-screen already vibrates when inside the Android app.
-        startVibration();
-      }
+      // The native full-screen skips launching when the web is the active
+      // ringer, so the web is responsible for vibration in-app.
+      startVibration();
       requestWakeLock();
     },
     [getBridge, startVibration, requestWakeLock],
