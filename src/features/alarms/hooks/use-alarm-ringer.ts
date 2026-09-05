@@ -70,7 +70,7 @@ export function useAlarmRinger() {
           const [hh, mm] = (alarm.time || "00:00").split(":").map(Number);
           const soundId = alarm.sound.startsWith("custom:")
             ? alarm.sound.slice("custom:".length)
-            : "";
+            : alarm.sound;
           bridge.triggerNativeAlarm(
             alarm.id,
             alarm.label || "Alarm",
