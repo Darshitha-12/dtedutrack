@@ -106,6 +106,7 @@ function SkeletonBox({ className }: { className?: string }) {
 
 export default function DashboardPage() {
   const { data: session, status } = useSession();
+  const [hydrated, setHydrated] = useState(status === "authenticated");
   const [profile, setProfile] = useState<ProfileData | null>(() => {
     try {
       const raw = localStorage.getItem(DASH_CACHE);
@@ -161,6 +162,13 @@ export default function DashboardPage() {
   const [ready, setReady] = useState(false);
   const [now, setNow] = useState(() => new Date());
 
+  const dataLoaded =
+    (profile && profile.name) ||
+    stats.weeklyMinutes > 0 ||
+    stats.dayStreak > 0 ||
+    marks.length > 0 ||
+    studyWeek.length > 0;
+
   function persistCache(patch?: {
     profile?: ProfileData | null;
     stats?: Partial<DashboardStats>;
@@ -185,6 +193,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (status === "authenticated") {
+      setHydrated(true);
       fetchProfile();
       fetchStudyStats();
       fetchAlarms();
@@ -197,20 +206,25 @@ export default function DashboardPage() {
   useEffect(() => {
     // First paint completes → mark ready so inner values replace skeletons in
     // place. The card structure is identical in both states, so nothing shifts.
-    const raf = requestAnimationFrame(() => setReady(true));
+    const raf = requestAnimationFrame(() => {
+      if (hydrated || dataLoaded) setReady(true);
+    });
     const timer = setTimeout(() => {
-      fetchProfile();
-      fetchStudyStats();
-      fetchAlarms();
-      fetchExamMarks();
-      fetchAnalytics();
-    }, 8000);
+      if (hydrated || dataLoaded) setReady(true);
+      if (status === "authenticated") {
+        fetchProfile();
+        fetchStudyStats();
+        fetchAlarms();
+        fetchExamMarks();
+        fetchAnalytics();
+      }
+    }, 6000);
     return () => {
       cancelAnimationFrame(raf);
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hydrated, dataLoaded, status]);
 
   useEffect(() => {
     function onFocus() {
