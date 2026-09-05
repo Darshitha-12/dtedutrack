@@ -18,18 +18,13 @@ import {
   Play,
   AlarmClock,
   Timer,
-  AlertTriangle,
-  Loader2,
   Award,
-  Target,
   TrendingUp,
-  Brain,
   Users,
   Plus,
   Trophy,
   Crown,
   CalendarDays,
-  Sparkles,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -80,6 +75,34 @@ interface LeaderboardEntry {
 
 const DASH_CACHE = "bp_dashboard_cache_v1";
 
+const EMPTY_STATS: DashboardStats = {
+  activeAlarms: 0,
+  weeklyHours: 0,
+  dayStreak: 0,
+  topicsCovered: 0,
+  studyMinutes: 0,
+  weeklyMinutes: 0,
+  communityMinutes: 0,
+  communityActiveUsers: 0,
+};
+
+/* Skeleton placeholder — mirrors real value dimensions to prevent shifts. */
+function SkeletonText({ className }: { className?: string }) {
+  return (
+    <div
+      className={`animate-pulse rounded-md bg-muted/60 ${className ?? "h-4 w-20"}`}
+    />
+  );
+}
+
+function SkeletonBox({ className }: { className?: string }) {
+  return (
+    <div
+      className={`animate-pulse rounded-lg bg-muted/60 ${className ?? "h-10 w-10"}`}
+    />
+  );
+}
+
 export default function DashboardPage() {
   const { data: session, status } = useSession();
   const [profile, setProfile] = useState<ProfileData | null>(() => {
@@ -97,19 +120,12 @@ export default function DashboardPage() {
       const raw = localStorage.getItem(DASH_CACHE);
       if (raw) {
         const c = JSON.parse(raw);
-        if (c.stats) return c.stats;
+        if (c.stats) {
+          return { ...EMPTY_STATS, ...c.stats };
+        }
       }
     } catch {}
-    return {
-      activeAlarms: 0,
-      weeklyHours: 0,
-      dayStreak: 0,
-      topicsCovered: 0,
-      studyMinutes: 0,
-      weeklyMinutes: 0,
-      communityMinutes: 0,
-      communityActiveUsers: 0,
-    };
+    return { ...EMPTY_STATS };
   });
   const [marks, setMarks] = useState<Mark[]>(() => {
     try {
@@ -141,8 +157,7 @@ export default function DashboardPage() {
     } catch {}
     return [];
   });
-  const [loading, setLoading] = useState(false);
-  const [authTimeout, setAuthTimeout] = useState(false);
+  const [ready, setReady] = useState(false);
   const [now, setNow] = useState(() => new Date());
 
   function persistCache(patch?: {
@@ -174,22 +189,25 @@ export default function DashboardPage() {
       fetchAlarms();
       fetchExamMarks();
       fetchAnalytics();
-    } else if (status === "unauthenticated") {
-      setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
   useEffect(() => {
+    // First paint completes → mark ready so inner values replace skeletons in
+    // place. The card structure is identical in both states, so nothing shifts.
+    const raf = requestAnimationFrame(() => setReady(true));
     const timer = setTimeout(() => {
-      setAuthTimeout(true);
       fetchProfile();
       fetchStudyStats();
       fetchAlarms();
       fetchExamMarks();
       fetchAnalytics();
     }, 8000);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -232,8 +250,6 @@ export default function DashboardPage() {
       }
     } catch (error) {
       console.error("Failed to fetch profile:", error);
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -376,283 +392,255 @@ export default function DashboardPage() {
     return completeness;
   }
 
-  return (
-    <div className="container mx-auto px-4 py-8">
-      {loading && (
-        <div className="mb-6 flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Refreshing data…
-        </div>
-      )}
+  /* ---- Countdown segment boxes — always visible, fixed height/width. ---- */
+  const cdSegments = [
+    { label: "Months", value: examCountdown.months },
+    { label: "Days", value: examCountdown.days },
+    { label: "Hours", value: examCountdown.hours },
+    { label: "Minutes", value: examCountdown.minutes },
+    { label: "Seconds", value: examCountdown.seconds },
+  ];
 
-      {/* Welcome Banner */}
-      <Card className="p-6 mb-6 bg-gradient-to-r from-primary/10 to-primary/5">
+  const topSubjectTotal = marks.length
+    ? SUBJECT_LIST.reduce((best, s) => {
+        const t = marks
+          .filter((m) => m.subjectId === s.id)
+          .reduce((sum, m) => sum + m.total, 0);
+        return t > best ? t : best;
+      }, -1)
+    : 0;
+
+  const statCards = [
+    {
+      icon: <Bell className="h-5 w-5 text-blue-500" />,
+      iconBg: "bg-blue-500/10",
+      label: "Active Alarms",
+      value: String(stats.activeAlarms),
+    },
+    {
+      icon: <Clock className="h-5 w-5 text-green-500" />,
+      iconBg: "bg-green-500/10",
+      label: "Study This Week",
+      value: fmtWork(stats.weeklyMinutes),
+    },
+    {
+      icon: <Flame className="h-5 w-5 text-orange-500" />,
+      iconBg: "bg-orange-500/10",
+      label: "Day Streak",
+      value: String(stats.dayStreak),
+    },
+    {
+      icon: <BookOpen className="h-5 w-5 text-purple-500" />,
+      iconBg: "bg-purple-500/10",
+      label: "Topics Covered",
+      value: String(stats.topicsCovered),
+    },
+  ];
+
+  return (
+    <div className="container mx-auto px-4 py-8 space-y-6">
+      {/* 1. Welcome Header Card */}
+      <Card className="p-6 bg-gradient-to-r from-primary/10 to-primary/5">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Welcome back, {getDisplayName()}! 👋</h1>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold">
+              {ready ? (
+                `Welcome back, ${getDisplayName()}! 👋`
+              ) : (
+                <SkeletonText className="h-7 w-64" />
+              )}
+            </h1>
             <p className="text-muted-foreground mt-1">
-              {profile?.examYear
-                ? `${profile.currentLevel} • Exam ${profile.examYear}`
-                : "Ready to study?"}
+              {ready ? (
+                profile?.examYear
+                  ? `${profile.currentLevel} • Exam ${profile.examYear}`
+                  : "Ready to study?"
+              ) : (
+                <SkeletonText className="h-4 w-40 mt-1" />
+              )}
             </p>
           </div>
-          <div className="hidden md:flex items-center gap-3">
+          <div className="hidden md:flex items-center gap-3 shrink-0">
             <div className="text-right">
               <p className="text-sm font-medium">Profile Complete</p>
-              <p className="text-2xl font-bold text-primary">{getProfileCompleteness()}%</p>
+              {ready ? (
+                <p className="text-2xl font-bold text-primary">
+                  {getProfileCompleteness()}%
+                </p>
+              ) : (
+                <SkeletonText className="h-7 w-14 ml-auto mt-1" />
+              )}
             </div>
-            <div className="relative h-16 w-16">
-              <svg className="h-16 w-16 -rotate-90" viewBox="0 0 64 64">
-                <circle
-                  cx="32"
-                  cy="32"
-                  r="28"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                  fill="none"
-                  className="text-muted"
-                />
-                <circle
-                  cx="32"
-                  cy="32"
-                  r="28"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                  fill="none"
-                  strokeDasharray={`${(getProfileCompleteness() / 100) * 176} 176`}
-                  className="text-primary"
-                />
-              </svg>
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      {/* Exam Countdown */}
-      <Card className={`p-5 mb-6 border ${
-        examCountdown.expired
-          ? "border-green-500/30 bg-gradient-to-r from-green-500/10 to-green-500/5"
-          : examCountdown.days <= 30
-            ? "border-red-500/30 bg-gradient-to-r from-red-500/10 to-red-500/5"
-            : "border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-amber-500/5"
-      }`}>
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className={`h-12 w-12 rounded-xl flex items-center justify-center ${
-              examCountdown.expired
-                ? "bg-green-500/15"
-                : examCountdown.days <= 30
-                  ? "bg-red-500/15"
-                  : "bg-amber-500/15"
-            }`}>
-              <Timer className={`h-6 w-6 ${
-                examCountdown.expired
-                  ? "text-green-500"
-                  : examCountdown.days <= 30
-                    ? "text-red-500"
-                    : "text-amber-500"
-              }`} />
-            </div>
-            <div>
-              <p className="text-lg font-semibold">
-                {examCountdown.expired
-                  ? "Exam Complete! 🎉"
-                  : `Exam in ${examCountdown.months}M ${examCountdown.days}D ${examCountdown.hours}H ${examCountdown.minutes}M ${examCountdown.seconds}S`
-                }
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {profile?.examYear
-                  ? `${profile.currentLevel || "A/L"} Exam ${profile.examYear}`
-                  : `Target: ${profile?.examDate && profile.examDate.trim() !== "" ? profile.examDate : "August 16, 2027"}`
-                }
-              </p>
-            </div>
-          </div>
-          <div className="hidden md:flex items-center gap-3 text-center">
-            {!examCountdown.expired && (
-              <>
-                <div className="rounded-md bg-muted/50 px-3 py-2">
-                  <p className="text-xl font-bold">{examCountdown.months}</p>
-                  <p className="text-[10px] text-muted-foreground">Months</p>
-                </div>
-                <div className="rounded-md bg-muted/50 px-3 py-2">
-                  <p className="text-xl font-bold">{examCountdown.days}</p>
-                  <p className="text-[10px] text-muted-foreground">Days</p>
-                </div>
-                <div className="rounded-md bg-muted/50 px-3 py-2">
-                  <p className="text-xl font-bold">{examCountdown.hours}</p>
-                  <p className="text-[10px] text-muted-foreground">Hours</p>
-                </div>
-                <div className="rounded-md bg-muted/50 px-3 py-2">
-                  <p className="text-xl font-bold">{examCountdown.minutes}</p>
-                  <p className="text-[10px] text-muted-foreground">Minutes</p>
-                </div>
-                <div className="rounded-md bg-muted/50 px-3 py-2">
-                  <p className="text-xl font-bold">{examCountdown.seconds}</p>
-                  <p className="text-[10px] text-muted-foreground">Seconds</p>
-                </div>
-              </>
+            {ready ? (
+              <div className="relative h-16 w-16">
+                <svg className="h-16 w-16 -rotate-90" viewBox="0 0 64 64">
+                  <circle
+                    cx="32"
+                    cy="32"
+                    r="28"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    fill="none"
+                    className="text-muted"
+                  />
+                  <circle
+                    cx="32"
+                    cy="32"
+                    r="28"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    fill="none"
+                    strokeDasharray={`${(getProfileCompleteness() / 100) * 176} 176`}
+                    className="text-primary"
+                  />
+                </svg>
+              </div>
+            ) : (
+              <SkeletonBox className="h-16 w-16 rounded-full" />
             )}
           </div>
         </div>
       </Card>
 
-      {/* Feature Quick Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        {/* Study Planner Card */}
-        <Card className="p-6 border-primary/30 bg-gradient-to-r from-primary/10 to-primary/5">
-          <div className="flex flex-col h-full gap-3 items-start justify-between">
-            <div className="flex flex-col gap-3">
-              <div className="h-12 w-12 rounded-xl bg-primary/15 flex items-center justify-center">
-                <CalendarDays className="h-6 w-6 text-primary" />
-              </div>
-              <div>
-                <p className="text-lg font-semibold">Study Planner</p>
-                <p className="text-sm text-muted-foreground">
-                  Plan your week, generate a smart A/L timetable, and track sessions.
-                </p>
-              </div>
+      {/* 2. Live Exam Countdown Card — fixed-height segments, always visible */}
+      <Card
+        className={`p-5 border ${
+          examCountdown.expired
+            ? "border-green-500/30 bg-gradient-to-r from-green-500/10 to-green-500/5"
+            : examCountdown.days <= 30
+              ? "border-red-500/30 bg-gradient-to-r from-red-500/10 to-red-500/5"
+              : "border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-amber-500/5"
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div
+              className={`h-12 w-12 rounded-xl flex items-center justify-center shrink-0 ${
+                examCountdown.expired
+                  ? "bg-green-500/15"
+                  : examCountdown.days <= 30
+                    ? "bg-red-500/15"
+                    : "bg-amber-500/15"
+              }`}
+            >
+              <Timer
+                className={`h-6 w-6 ${
+                  examCountdown.expired
+                    ? "text-green-500"
+                    : examCountdown.days <= 30
+                      ? "text-red-500"
+                      : "text-amber-500"
+                }`}
+              />
             </div>
-            <Link href="/planner">
-              <Button className="gap-2">
-                <CalendarDays className="h-4 w-4" /> Open Planner
-              </Button>
-            </Link>
-          </div>
-        </Card>
-
-        {/* AI Timetable Card */}
-        <Card className="p-6 border-violet-500/30 bg-gradient-to-r from-violet-500/10 to-violet-500/5">
-          <div className="flex flex-col h-full gap-3 items-start justify-between">
-            <div className="flex flex-col gap-3">
-              <div className="h-12 w-12 rounded-xl bg-violet-500/15 flex items-center justify-center">
-                <Sparkles className="h-6 w-6 text-violet-500" />
-              </div>
-              <div>
-                <p className="text-lg font-semibold">AI Study Timetable</p>
-                <p className="text-sm text-muted-foreground">
-                  AI-generated visual weekly timetable with calendar &amp; analytics graphs.
-                </p>
-              </div>
-            </div>
-            <Link href="/ai-timetable">
-              <Button variant="outline" className="gap-2">
-                <Sparkles className="h-4 w-4" /> Open AI Timetable
-              </Button>
-            </Link>
-          </div>
-        </Card>
-
-        {/* Work Log Card */}
-        <Card className="p-6 border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 to-emerald-500/5">
-          <div className="flex flex-col h-full gap-3 items-start justify-between">
-            <div className="flex flex-col gap-3">
-              <div className="h-12 w-12 rounded-xl bg-emerald-500/15 flex items-center justify-center">
-                <Clock className="h-6 w-6 text-emerald-500" />
-              </div>
-              <div>
-                <p className="text-lg font-semibold">Daily Work Log</p>
-                <p className="text-sm text-muted-foreground">
-                  Log today&apos;s study &amp; extra work hours and see the community total.
-                </p>
-              </div>
-            </div>
-            <Link href="/work-log">
-              <Button variant="outline" className="gap-2">
-                <Clock className="h-4 w-4" /> Open Work Log
-              </Button>
-            </Link>
-          </div>
-        </Card>
-      </div>
-
-      {/* Profile Incomplete Banner */}
-      {getProfileCompleteness() < 100 && (
-        <Card className="p-4 mb-6 border-yellow-500/50 bg-yellow-500/5">
-          <div className="flex items-center gap-3">
-            <AlertTriangle className="h-5 w-5 text-yellow-500" />
-            <div className="flex-1">
-              <p className="text-sm font-medium">Complete your profile</p>
-              <p className="text-xs text-muted-foreground">
-                Add more details to get personalized study recommendations.
+            <div className="min-w-0">
+              <p className="text-lg font-semibold">
+                {ready ? (
+                  examCountdown.expired ? "Exam Complete! 🎉" : "Live Exam Countdown"
+                ) : (
+                  <SkeletonText className="h-6 w-44" />
+                )}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {ready ? (
+                  profile?.examYear
+                    ? `${profile.currentLevel || "A/L"} Exam ${profile.examYear}`
+                    : `Target: ${
+                        profile?.examDate && profile.examDate.trim() !== ""
+                          ? profile.examDate
+                          : "August 16, 2027"
+                      }`
+                ) : (
+                  <SkeletonText className="h-4 w-36 mt-1" />
+                )}
               </p>
             </div>
-            <Link href="/profile">
-              <Button variant="outline" size="sm">
-                Complete Profile
-              </Button>
-            </Link>
           </div>
-        </Card>
-      )}
-
-      {/* Stat Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <Card className="p-4">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-              <Bell className="h-5 w-5 text-blue-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.activeAlarms}</p>
-              <p className="text-xs text-muted-foreground">Active Alarms</p>
-            </div>
+          <div className="flex items-center gap-2">
+            {cdSegments.map((s) => (
+              <div
+                key={s.label}
+                className="w-16 rounded-md bg-muted/50 px-1 py-2 text-center"
+              >
+                {ready ? (
+                  <p className="text-xl font-bold tabular-nums">{s.value}</p>
+                ) : (
+                  <SkeletonText className="h-6 w-10 mx-auto" />
+                )}
+                <p className="text-[10px] text-muted-foreground">{s.label}</p>
+              </div>
+            ))}
           </div>
-        </Card>
+        </div>
+      </Card>
 
-        <Card className="p-4">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-green-500/10 flex items-center justify-center">
-              <Clock className="h-5 w-5 text-green-500" />
+      {/* 3. Study Planner Action Card */}
+      <Card className="p-6 border-primary/30 bg-gradient-to-r from-primary/10 to-primary/5">
+        <div className="flex flex-col sm:flex-row h-full gap-3 items-start sm:items-center justify-between">
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center min-w-0">
+            <div className="h-12 w-12 rounded-xl bg-primary/15 flex items-center justify-center shrink-0">
+              <CalendarDays className="h-6 w-6 text-primary" />
             </div>
-            <div>
-              <p className="text-2xl font-bold">
-                {fmtWork(stats.weeklyMinutes)}
+            <div className="min-w-0">
+              <p className="text-lg font-semibold">Study Planner</p>
+              <p className="text-sm text-muted-foreground">
+                Plan your week, generate a smart A/L timetable, and track sessions.
               </p>
-              <p className="text-xs text-muted-foreground">Study This Week</p>
             </div>
           </div>
-        </Card>
+          <Link href="/planner" className="shrink-0">
+            <Button className="gap-2">
+              <CalendarDays className="h-4 w-4" /> Open Planner
+            </Button>
+          </Link>
+        </div>
+      </Card>
 
-        <Card className="p-4">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-orange-500/10 flex items-center justify-center">
-              <Flame className="h-5 w-5 text-orange-500" />
+      {/* 4–7. Stat cards — fixed grid, fixed order, always rendered */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {statCards.map((sc) => (
+          <Card key={sc.label} className="p-4 min-h-[4.5rem]">
+            <div className="flex items-center gap-3">
+              <div
+                className={`h-10 w-10 rounded-lg flex items-center justify-center shrink-0 ${sc.iconBg}`}
+              >
+                {sc.icon}
+              </div>
+              <div className="min-w-0">
+                {ready ? (
+                  <p className="text-2xl font-bold tabular-nums truncate">
+                    {sc.value}
+                  </p>
+                ) : (
+                  <SkeletonText className="h-7 w-16" />
+                )}
+                <p className="text-xs text-muted-foreground">{sc.label}</p>
+              </div>
             </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.dayStreak}</p>
-              <p className="text-xs text-muted-foreground">Day Streak</p>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="p-4">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
-              <BookOpen className="h-5 w-5 text-purple-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.topicsCovered}</p>
-              <p className="text-xs text-muted-foreground">Topics Covered</p>
-            </div>
-          </div>
-        </Card>
+          </Card>
+        ))}
       </div>
 
-      {/* Community Work Banner */}
-      <Card className="p-4 mb-6 border-primary/30 bg-gradient-to-r from-primary/10 to-primary/5">
+      {/* 8. Community Total Work Card */}
+      <Card className="p-4 border-primary/30 bg-gradient-to-r from-primary/10 to-primary/5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
               <Users className="h-5 w-5 text-primary" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-medium">Community Total Work</p>
-              <p className="text-2xl font-bold">
-                {fmtWork(stats.communityMinutes)}{" "}
-                <span className="text-sm font-normal text-muted-foreground">
-                  across {stats.communityActiveUsers} student{stats.communityActiveUsers === 1 ? "" : "s"}
-                </span>
-              </p>
+              {ready ? (
+                <p className="text-2xl font-bold tabular-nums">
+                  {fmtWork(stats.communityMinutes)}{" "}
+                  <span className="text-sm font-normal text-muted-foreground">
+                    across {stats.communityActiveUsers} student
+                    {stats.communityActiveUsers === 1 ? "" : "s"}
+                  </span>
+                </p>
+              ) : (
+                <SkeletonText className="h-7 w-44 mt-1" />
+              )}
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
@@ -662,7 +650,7 @@ export default function DashboardPage() {
       </Card>
 
       {/* Community Leaderboard */}
-      <Card className="p-4 mb-6">
+      <Card className="p-4">
         <div className="flex items-center gap-2 mb-3">
           <Trophy className="h-4 w-4 text-amber-500" />
           <h2 className="text-base font-semibold">Daily Work Leaderboard</h2>
@@ -689,7 +677,7 @@ export default function DashboardPage() {
                       </span>
                     )}
                   </div>
-                  <span className="shrink-0 font-medium">
+                  <span className="shrink-0 font-medium tabular-nums">
                     {fmtWork(entry.todayMinutes)}
                   </span>
                 </div>
@@ -703,8 +691,8 @@ export default function DashboardPage() {
         )}
       </Card>
 
-      {/* Exam Marks + Study Activity */}
-      <div className="grid gap-6 lg:grid-cols-2 mb-6">
+      {/* 9. Exam Marks Section Card — fixed stat boxes even when empty */}
+      <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -713,50 +701,50 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {marks.length === 0 ? (
-              <p className="py-4 text-center text-sm text-muted-foreground">
+            <div className="grid grid-cols-3 gap-3 text-center min-h-[5.5rem]">
+              <div className="rounded-md bg-muted/50 p-3">
+                {ready ? (
+                  <p className="text-xl font-bold tabular-nums">{marks.length}</p>
+                ) : (
+                  <SkeletonText className="h-6 w-10 mx-auto" />
+                )}
+                <p className="text-xs text-muted-foreground">Exams</p>
+              </div>
+              <div className="rounded-md bg-muted/50 p-3">
+                {ready ? (
+                  <p className="text-xl font-bold tabular-nums">
+                    {marks.reduce((s, m) => s + m.total, 0)}
+                  </p>
+                ) : (
+                  <SkeletonText className="h-6 w-10 mx-auto" />
+                )}
+                <p className="text-xs text-muted-foreground">Full Marks</p>
+              </div>
+              <div className="rounded-md bg-muted/50 p-3">
+                {ready ? (
+                  <p className="text-xl font-bold tabular-nums">
+                    {topSubjectTotal}
+                  </p>
+                ) : (
+                  <SkeletonText className="h-6 w-10 mx-auto" />
+                )}
+                <p className="text-xs text-muted-foreground">Top Subject</p>
+              </div>
+            </div>
+            {ready && marks.length === 0 && (
+              <p className="py-2 text-center text-sm text-muted-foreground">
                 No exam marks yet.{" "}
                 <Link href="/exam-marks" className="text-primary underline">
                   Add your first mark
                 </Link>
                 .
               </p>
-            ) : (
-              <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-3 text-center">
-                  <div className="rounded-md bg-muted/50 p-3">
-                    <p className="text-xl font-bold">{marks.length}</p>
-                    <p className="text-xs text-muted-foreground">Exams</p>
-                  </div>
-                  <div className="rounded-md bg-muted/50 p-3">
-                    <p className="text-xl font-bold">
-                      {marks.reduce((s, m) => s + m.total, 0)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">Full Marks</p>
-                  </div>
-                  <div className="rounded-md bg-muted/50 p-3">
-                    <p className="text-xl font-bold">
-                      {(() => {
-                        let best = -1;
-                        for (const s of SUBJECT_LIST) {
-                          const t = marks
-                            .filter((m) => m.subjectId === s.id)
-                            .reduce((sum, m) => sum + m.total, 0);
-                          if (t > best) best = t;
-                        }
-                        return best > -1 ? best : 0;
-                      })()}
-                    </p>
-                    <p className="text-xs text-muted-foreground">Top Subject</p>
-                  </div>
-                </div>
-                <Link href="/exam-marks">
-                  <Button variant="outline" size="sm" className="w-full gap-2">
-                    <TrendingUp className="h-4 w-4" /> View Exam Analytics
-                  </Button>
-                </Link>
-              </div>
             )}
+            <Link href="/exam-marks">
+              <Button variant="outline" size="sm" className="w-full gap-2">
+                <TrendingUp className="h-4 w-4" /> View Exam Analytics
+              </Button>
+            </Link>
           </CardContent>
         </Card>
 
@@ -792,7 +780,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Daily Work Log */}
-      <Card className="p-6 mb-6">
+      <Card className="p-6">
         <h2 className="text-lg font-semibold mb-1">Log Today&apos;s Work</h2>
         <p className="text-sm text-muted-foreground mb-4">
           Track the time you worked today (study + extra). Shows on the community total.
@@ -806,7 +794,7 @@ export default function DashboardPage() {
       </Card>
 
       {/* Quick Actions */}
-      <Card className="p-6 mb-6">
+      <Card className="p-6">
         <h2 className="text-lg font-semibold mb-4">Quick Actions</h2>
         <div className="flex flex-wrap gap-3">
           <Link href="/syllabus">
