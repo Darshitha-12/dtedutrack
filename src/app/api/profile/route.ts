@@ -84,6 +84,22 @@ export async function PATCH(req: Request) {
 
     const { ...profileData } = parsed.data as Record<string, unknown>;
 
+    if (profileData.examDate !== undefined && profileData.examDate !== null) {
+      const rawExamDate = profileData.examDate as string;
+      if (rawExamDate.trim() === "") {
+        profileData.examDate = null;
+      } else {
+        const examDate = new Date(rawExamDate);
+        if (isNaN(examDate.getTime())) {
+          return NextResponse.json(
+            { error: { examDate: ["Invalid exam date"] } },
+            { status: 400 }
+          );
+        }
+        profileData.examDate = examDate;
+      }
+    }
+
     if (name) {
       await db.user.update({
         where: { id: userId },
