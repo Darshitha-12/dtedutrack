@@ -49,22 +49,23 @@ export function useAlarmRinger() {
     }
   }, []);
 
+  const getBridge = useCallback((): any => {
+    try {
+      return (window as any).BioPulseBridge;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const triggerAlarm = useCallback(
     async (alarm: Alarm) => {
       setCurrentAlarm(alarm);
       setIsRinging(true);
-      if (alarm.sound.startsWith("custom:")) {
-        const custom = await getCustomSound(alarm.sound.slice("custom:".length));
-        AudioEngine.playSound(alarm.sound, custom?.blob);
-      } else {
-        AudioEngine.playSound(alarm.sound);
-      }
-      startVibration();
-      requestWakeLock();
-      // Also fire the native Android alarm overlay (vibration + lock screen + notification).
-      // The Bridge handles skipAudio=true so the native side doesn't duplicate the sound.
+      // Web is the primary in-app ringer. The native side is told to
+      // suppress its own scheduled-alarm sound when the web already fired,
+      // so the alarm never plays twice (or from a "background" source).
       try {
-        const bridge = (window as any).BioPulseBridge;
+        const bridge = getBridge();
         if (bridge && bridge.triggerNativeAlarm) {
           const [hh, mm] = (alarm.time || "00:00").split(":").map(Number);
           const soundId = alarm.sound.startsWith("custom:")
@@ -81,8 +82,20 @@ export function useAlarmRinger() {
       } catch {
         // non-Android — ignore
       }
+      const native = !!getBridge() && typeof getBridge()!.triggerNativeAlarm === "function";
+      if (alarm.sound.startsWith("custom:")) {
+        const custom = await getCustomSound(alarm.sound.slice("custom:".length));
+        AudioEngine.playSound(alarm.sound, custom?.blob);
+      } else {
+        AudioEngine.playSound(alarm.sound);
+      }
+      if (!native) {
+        // Native full-screen already vibrates when inside the Android app.
+        startVibration();
+      }
+      requestWakeLock();
     },
-    [startVibration, requestWakeLock],
+    [getBridge, startVibration, requestWakeLock],
   );
 
   const dismiss = useCallback(() => {

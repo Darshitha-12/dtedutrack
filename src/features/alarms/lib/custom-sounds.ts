@@ -112,19 +112,52 @@ export async function saveCustomSound(
 
 /**
  * Send the audio blob to the Android Bridge for native alarm playback.
- * This is a fire-and-forget — the web alarm ringer always works regardless.
+ * The file is transferred in small chunks (256 KB) so a multi-MB MP3 never
+ * crosses the JS→native bridge as one huge string (which caused a crash on
+ * Android). This is a fire-and-forget — the web alarm ringer always works
+ * regardless of native sync.
  */
 function syncToNative(id: string, blob: Blob): void {
   try {
     const bridge = (window as any).BioPulseBridge;
-    if (!bridge || !bridge.saveCustomAudio) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      const base64 = dataUrl.split(",")[1] || "";
-      if (base64) bridge.saveCustomAudio(id, base64);
-    };
-    reader.readAsDataURL(blob);
+    if (
+      !bridge ||
+      typeof bridge.saveCustomAudioStart !== "function" ||
+      typeof bridge.saveCustomAudioChunk !== "function" ||
+      typeof bridge.saveCustomAudioEnd !== "function"
+    ) {
+      return;
+    }
+    blob
+      .arrayBuffer()
+      .then((buf) => {
+        const bytes = new Uint8Array(buf);
+        const CHUNK = 256 * 1024;
+        bridge.saveCustomAudioStart(id);
+        let binary = "";
+        const flush = () => {
+          if (!binary) return;
+          try {
+            bridge.saveCustomAudioChunk(id, binary);
+          } catch {
+            /* one chunk failing shouldn't break the rest */
+          }
+          binary = "";
+        };
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+          if (binary.length >= CHUNK) flush();
+        }
+        flush();
+        try {
+          bridge.saveCustomAudioEnd(id);
+        } catch {
+          /* ignore */
+        }
+      })
+      .catch(() => {
+        /* binary read failed — native alarm falls back to default tone */
+      });
   } catch {
     // non-Android environment — ignore
   }
