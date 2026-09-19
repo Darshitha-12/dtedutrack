@@ -21,12 +21,16 @@ import {
   Clock,
   Star,
   AlertTriangle,
+  Camera,
+  Info,
 } from "lucide-react";
 
 interface ProfileData {
   name: string;
+  displayName: string;
   email: string;
   avatarUrl?: string;
+  about: string;
   dailyTargetHours: number;
   weeklyTargetHours: number;
   preferredStudyTime: string;
@@ -47,8 +51,10 @@ export default function ProfilePage() {
   const { showToast } = useToast();
   const [profile, setProfile] = useState<ProfileData>({
     name: "",
+    displayName: "",
     email: "",
     avatarUrl: undefined,
+    about: "",
     dailyTargetHours: 4,
     weeklyTargetHours: 28,
     preferredStudyTime: "morning",
@@ -64,6 +70,7 @@ export default function ProfilePage() {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [weakTopicsInput, setWeakTopicsInput] = useState("");
   const [loading, setLoading] = useState(true);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   useEffect(() => {
     fetchProfile();
@@ -89,8 +96,10 @@ export default function ProfilePage() {
         const data = await res.json();
         setProfile({
           name: data.name || "",
+          displayName: data.displayName || data.name || "",
           email: data.email || session?.user?.email || "",
           avatarUrl: data.avatarUrl || undefined,
+          about: data.about || "",
           dailyTargetHours: data.dailyTargetHours || 4,
           weeklyTargetHours: data.weeklyTargetHours || 28,
           preferredStudyTime: data.preferredStudyTime || "morning",
@@ -109,6 +118,34 @@ export default function ProfilePage() {
       console.error("Failed to fetch profile:", error);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function uploadAvatar(file: File) {
+    if (!file.type.startsWith("image/")) {
+      showToast("Please choose an image file.", "error");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      showToast("Image too large (max 5MB).", "error");
+      return;
+    }
+    setUploadingAvatar(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/profile/avatar", { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setProfile((prev) => ({ ...prev, avatarUrl: data.avatarUrl }));
+        showToast("Profile photo updated!", "success");
+      } else {
+        showToast(data.error || "Upload failed. Please try again.", "error");
+      }
+    } catch {
+      showToast("Upload failed. Please try again.", "error");
+    } finally {
+      setUploadingAvatar(false);
     }
   }
 
@@ -146,6 +183,9 @@ export default function ProfilePage() {
 
       const payload = {
         name: profile.name,
+        displayName: profile.displayName || profile.name,
+        about: profile.about,
+        avatarUrl: profile.avatarUrl,
         fullName: profile.name,
         language: profile.language,
         examYear: profile.examYear ? Number(profile.examYear) : undefined,
@@ -249,22 +289,50 @@ export default function ProfilePage() {
 
           <div className="flex items-start gap-6">
             <div className="flex-shrink-0">
-              {profile.avatarUrl ? (
-                <img
-                  src={profile.avatarUrl}
-                  alt="Profile"
-                  className="h-20 w-20 rounded-full object-cover"
-                />
-              ) : (
-                <div className="h-20 w-20 rounded-full bg-primary/10 flex items-center justify-center">
-                  <span className="text-2xl font-bold text-primary">
-                    {profile.name ? getInitials(profile.name) : "U"}
-                  </span>
-                </div>
-              )}
+              <div className="relative">
+                {profile.avatarUrl ? (
+                  <img
+                    src={profile.avatarUrl}
+                    alt="Profile"
+                    className="h-20 w-20 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="h-20 w-20 rounded-full bg-primary/10 flex items-center justify-center">
+                    <span className="text-2xl font-bold text-primary">
+                      {profile.name ? getInitials(profile.name) : "U"}
+                    </span>
+                  </div>
+                )}
+                <label className="absolute -bottom-1 -right-1 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md hover:bg-primary/90 transition-colors">
+                  {uploadingAvatar ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Camera className="h-3.5 w-3.5" />
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    disabled={uploadingAvatar}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) uploadAvatar(f);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
             </div>
 
             <div className="flex-1 space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Display name</label>
+                <Input
+                  value={profile.displayName}
+                  onChange={(e) => updateProfile("displayName", e.target.value)}
+                  placeholder="How you appear to others"
+                />
+              </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Name</label>
                 <Input
@@ -272,6 +340,21 @@ export default function ProfilePage() {
                   onChange={(e) => updateProfile("name", e.target.value)}
                   placeholder="Your full name"
                 />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-1.5">
+                  <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                  About
+                </label>
+                <textarea
+                  value={profile.about}
+                  onChange={(e) => updateProfile("about", e.target.value)}
+                  placeholder="Tell others a little about yourself"
+                  rows={3}
+                  maxLength={500}
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+                />
+                <p className="text-xs text-muted-foreground text-right">{profile.about.length}/500</p>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Email</label>

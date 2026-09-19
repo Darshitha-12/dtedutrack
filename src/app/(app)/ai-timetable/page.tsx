@@ -18,6 +18,8 @@ import {
   ChevronLeft,
   Play,
   X,
+  Plus,
+  GraduationCap,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -58,6 +60,48 @@ interface Timetable {
   weeklyHours: number;
   createdAt: string;
   slots: Slot[];
+}
+
+interface ClassItem {
+  id: string;
+  subjectName: string;
+  dayOfWeek: number;
+  startMinute: number;
+  endMinute: number;
+  color: string;
+}
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+function toMinute(t: string): number {
+  const parts = t.split(":").map((n) => parseInt(n, 10));
+  const h = isNaN(parts[0]) ? 0 : parts[0];
+  const m = parts.length > 1 && !isNaN(parts[1]) ? parts[1] : 0;
+  return h * 60 + m;
+}
+
+// Week offset (relative to the current week) for the week containing the 1st of a month.
+function weekOffsetForMonthYear(y: number, m: number): number {
+  const today = new Date();
+  const first = new Date(y, m, 1);
+  const msDay = 86400000;
+  const monday = new Date(first);
+  monday.setDate(first.getDate() - ((first.getDay() + 6) % 7));
+  const diff = Math.round((monday.getTime() - today.getTime()) / msDay);
+  return Math.floor(diff / 7);
 }
 
 function fmtClock(min: number): string {
@@ -111,9 +155,10 @@ function DayBreakdown({
   slots: Slot[];
   formatClock: (min: number) => string;
 }) {
-  const isStudy = (s: Slot) => s.type !== "Break" && s.type !== "Nap" && s.type !== "Tea";
-  const study = slots.filter(isStudy);
-  const breaks = slots.filter((s) => !isStudy(s));
+  const isBreak = (s: Slot) => s.type === "Break" || s.type === "Nap" || s.type === "Tea";
+  const study = slots.filter((s) => !isBreak(s) && s.type !== "Class");
+  const classSlots = slots.filter((s) => s.type === "Class");
+  const breaks = slots.filter(isBreak);
   const studyMin = study.reduce((sum, s) => sum + (s.endMinute - s.startMinute), 0);
   const breakMin = breaks.reduce((sum, s) => sum + (s.endMinute - s.startMinute), 0);
 
@@ -140,6 +185,14 @@ function DayBreakdown({
           <p className="text-xs text-muted-foreground">Rest &amp; Meals</p>
         </div>
       </div>
+
+      {classSlots.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          <GraduationCap className="mr-1 inline h-3.5 w-3.5" />
+          Scheduled classes: {classSlots.length} ·{" "}
+          {fmtDur(classSlots.reduce((s, x) => s + (x.endMinute - x.startMinute), 0))} (kept free — no study here)
+        </p>
+      )}
 
       <div className="space-y-1.5">
         {[...study, ...breaks]
@@ -205,6 +258,15 @@ export default function AITimetablePage() {
   const [bedtime, setBedtime] = useState("22:30");
   const [napTime, setNapTime] = useState("14:00");
   const [napEnd, setNapEnd] = useState("15:00");
+  const [dailyHours, setDailyHours] = useState(3);
+  const [classes, setClasses] = useState<ClassItem[]>([]);
+  const [cSubject, setCSubject] = useState(SUBJECTS[0]);
+  const [cDay, setCDay] = useState(0);
+  const [cStart, setCStart] = useState("07:00");
+  const [cEnd, setCEnd] = useState("09:00");
+  const [filterDay, setFilterDay] = useState<number | null>(null);
+  const [filterMonth, setFilterMonth] = useState<number | null>(null);
+  const [filterYear, setFilterYear] = useState<number | null>(null);
   const [generating, setGenerating] = useState(false);
 
   const [view, setView] = useState<"lesson" | "graph">("lesson");
@@ -245,6 +307,71 @@ export default function AITimetablePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function loadClasses() {
+    try {
+      const res = await fetch("/api/classes");
+      if (res.ok) {
+        const data = await res.json();
+        setClasses(data.classes || []);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  useEffect(() => {
+    loadClasses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function addClass() {
+    const startMin = toMinute(cStart);
+    const endMin = toMinute(cEnd);
+    if (endMin <= startMin) {
+      showToast("Class end time must be after start time.", "error");
+      return;
+    }
+    if (!cSubject.trim()) {
+      showToast("Pick a subject first.", "error");
+      return;
+    }
+    try {
+      const res = await fetch("/api/classes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subjectName: cSubject,
+          dayOfWeek: cDay,
+          startMinute: startMin,
+          endMinute: endMin,
+        }),
+      });
+      if (res.ok) {
+        showToast("Class added.", "success");
+        loadClasses();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || "Could not add class.", "error");
+      }
+    } catch (e) {
+      showToast("Could not add class.", "error");
+    }
+  }
+
+  async function removeClass(id: string) {
+    try {
+      const res = await fetch("/api/classes?id=" + id, { method: "DELETE" });
+      if (res.ok) {
+        loadClasses();
+        showToast("Class removed.", "success");
+      } else {
+        showToast("Could not remove class.", "error");
+      }
+    } catch (e) {
+      showToast("Could not remove class.", "error");
+    }
+  }
+
   async function generate() {
     if (!description.trim()) {
       showToast("Write a little about your routine first.", "error");
@@ -256,6 +383,7 @@ export default function AITimetablePage() {
         title: mode === "full_day" ? "My Full Day Plan" : "My AI Timetable",
         description,
         weeklyHours: 28,
+        dailyHours,
         examDate: undefined,
         weakSubjects: [],
         priorities: [],
@@ -309,7 +437,7 @@ export default function AITimetablePage() {
   const subjectAllocation = useMemo(() => {
     const map = new Map<string, number>();
     (active?.slots || [])
-      .filter((s) => s.type !== "Break" && s.type !== "Nap" && s.type !== "Tea")
+      .filter((s) => s.type !== "Break" && s.type !== "Nap" && s.type !== "Tea" && s.type !== "Class")
       .forEach((s) => {
         map.set(s.subjectName, (map.get(s.subjectName) || 0) + (s.endMinute - s.startMinute));
       });
@@ -323,24 +451,28 @@ export default function AITimetablePage() {
   const balanceBreakdown = useMemo(() => {
     let study = 0,
       rest = 0,
-      meals = 0;
+      meals = 0,
+      classes = 0;
     (active?.slots || []).forEach((s) => {
       const mins = s.endMinute - s.startMinute;
       if (s.type === "Nap") rest += mins;
       else if (s.type === "Break" || s.type === "Tea") meals += mins;
+      else if (s.type === "Class") classes += mins;
       else study += mins;
     });
     const h = (mins: number) => Math.round((mins / 60) * 10) / 10;
     return [
       { name: "Study", value: h(study), color: "#10B981" },
       { name: "Rest/Nap", value: h(rest), color: "#8B5CF6" },
-      { name: "Meals/Tea", value: h(meals), color: "#F59E0B" },
+      { name: "Meals/Tea", value: h(meals), color: "#06B6D4" },
+      { name: "Class", value: h(classes), color: "#F59E0B" },
     ].filter((d) => d.value > 0);
   }, [active]);
 
   const dailyIntensity = useMemo(() => {
     const map = new Map<number, number>();
     (active?.slots || []).forEach((s) => {
+      if (s.type === "Class") return;
       map.set(s.dayOfWeek, (map.get(s.dayOfWeek) || 0) + (s.endMinute - s.startMinute));
     });
     return DAY_NAMES.map((name, i) => ({
@@ -369,6 +501,21 @@ export default function AITimetablePage() {
       d.setDate(today.getDate() + diff);
       return d.getDate();
     });
+  }
+
+  function setDayFilter(d: number | null) {
+    setFilterDay(d);
+    setSelectedDay(d);
+  }
+
+  function setMonthJump(m: number | null, y: number | null) {
+    setFilterMonth(m);
+    setFilterYear(y);
+    if (m !== null && y !== null) {
+      setWeekOffset(weekOffsetForMonthYear(y, m));
+    } else {
+      setWeekOffset(0);
+    }
   }
 
   return (
@@ -454,6 +601,20 @@ export default function AITimetablePage() {
 
             <div>
               <label className="text-xs text-muted-foreground">
+                Study hours per day (target — class time is not counted)
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={14}
+                value={dailyHours}
+                onChange={(e) => setDailyHours(Math.max(0, Number(e.target.value)))}
+                className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-muted-foreground">
                 Describe subjects, priorities &amp; custom needs (Sinhala ok)
               </label>
               <textarea
@@ -468,6 +629,78 @@ export default function AITimetablePage() {
             <div className="rounded-md bg-muted/40 p-3 text-[11px] text-muted-foreground">
               The AI builds study blocks only between your start time and bedtime, and
               automatically adds Breakfast, Lunch, Afternoon Nap, Tea &amp; Snack, and Dinner.
+            </div>
+
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                <GraduationCap className="h-4 w-4 text-primary" /> My Classes
+                <span className="font-normal text-muted-foreground">
+                  (show on the timetable — no study overlaps class time)
+                </span>
+              </label>
+              <div className="mt-1 max-h-40 space-y-1.5 overflow-y-auto rounded-md border p-2">
+                {classes.length === 0 ? (
+                  <p className="px-1 py-1 text-xs text-muted-foreground">
+                    No classes yet. Add your class subject &amp; time below.
+                  </p>
+                ) : (
+                  classes.map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex items-center gap-2 rounded-md bg-muted/40 px-2 py-1.5"
+                    >
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: c.color }} />
+                      <span className="min-w-0 flex-1 truncate text-xs font-medium">{c.subjectName}</span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">
+                        {DAY_NAMES[c.dayOfWeek].slice(0, 3)} {fmtClock(c.startMinute)}–{fmtClock(c.endMinute)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeClass(c.id)}
+                        className="text-muted-foreground hover:text-red-400"
+                        aria-label="Remove class"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <select
+                  value={cSubject}
+                  onChange={(e) => setCSubject(e.target.value)}
+                  className="w-full rounded-md border bg-transparent px-2 py-1.5 text-sm"
+                >
+                  {SUBJECTS.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                <select
+                  value={cDay}
+                  onChange={(e) => setCDay(Number(e.target.value))}
+                  className="w-full rounded-md border bg-transparent px-2 py-1.5 text-sm"
+                >
+                  {DAY_NAMES.map((d, i) => (
+                    <option key={d} value={i}>{d}</option>
+                  ))}
+                </select>
+                <input
+                  type="time"
+                  value={cStart}
+                  onChange={(e) => setCStart(e.target.value)}
+                  className="w-full rounded-md border bg-transparent px-2 py-1.5 text-sm"
+                />
+                <input
+                  type="time"
+                  value={cEnd}
+                  onChange={(e) => setCEnd(e.target.value)}
+                  className="w-full rounded-md border bg-transparent px-2 py-1.5 text-sm"
+                />
+              </div>
+              <Button variant="outline" size="sm" className="mt-2 w-full gap-1" onClick={addClass}>
+                <Plus className="h-4 w-4" /> Add Class
+              </Button>
             </div>
 
             <Button className="w-full gap-2" onClick={generate} disabled={generating}>
@@ -535,6 +768,53 @@ export default function AITimetablePage() {
       {/* Visualizer */}
       {active && (
         <>
+          {view === "lesson" && (
+            <div className="mb-3 flex flex-col gap-2 rounded-lg border p-3">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-medium text-muted-foreground">Day:</span>
+                <Button size="sm" variant={filterDay === null ? "default" : "outline"} onClick={() => setDayFilter(null)}>
+                  All
+                </Button>
+                {DAY_NAMES.map((d, i) => (
+                  <Button key={d} size="sm" variant={filterDay === i ? "default" : "outline"} onClick={() => setDayFilter(i)}>
+                    {d.slice(0, 3)}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-medium text-muted-foreground">Month / Year:</span>
+                <select
+                  value={filterMonth === null ? "" : String(filterMonth)}
+                  onChange={(e) => {
+                    const m = e.target.value === "" ? null : parseInt(e.target.value, 10);
+                    setMonthJump(m, m === null ? null : filterYear ?? new Date().getFullYear());
+                  }}
+                  className="rounded-md border bg-transparent px-2 py-1 text-sm"
+                >
+                  <option value="">All months</option>
+                  {MONTH_NAMES.map((mn, i) => (
+                    <option key={mn} value={i}>{mn}</option>
+                  ))}
+                </select>
+                <select
+                  value={filterYear === null ? "" : String(filterYear)}
+                  onChange={(e) => {
+                    const y = e.target.value === "" ? null : parseInt(e.target.value, 10);
+                    setMonthJump(y === null ? null : filterMonth ?? new Date().getMonth(), y);
+                  }}
+                  className="rounded-md border bg-transparent px-2 py-1 text-sm"
+                >
+                  <option value="">All years</option>
+                  {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+                <span className="text-[11px] text-muted-foreground">
+                  {filterDay !== null ? `Showing ${DAY_NAMES[filterDay]} only` : "Showing the full week"}
+                </span>
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between mb-3">
             <div className="flex gap-1">
               <Button
@@ -556,11 +836,32 @@ export default function AITimetablePage() {
             </div>
             {view === "lesson" && (
               <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" onClick={() => setWeekOffset((w) => w - 1)}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setFilterMonth(null);
+                    setFilterYear(null);
+                    setWeekOffset((w) => w - 1);
+                  }}
+                >
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <span className="text-sm text-muted-foreground">Week of {daysFor(weekOffset)[0]}</span>
-                <Button variant="ghost" size="icon" onClick={() => setWeekOffset((w) => w + 1)}>
+                <span className="text-sm text-muted-foreground">
+                  Week of {daysFor(weekOffset)[0]}
+                  {filterMonth !== null && filterYear !== null && (
+                    <span className="ml-1 text-xs"> · {MONTH_NAMES[filterMonth]} {filterYear}</span>
+                  )}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setFilterMonth(null);
+                    setFilterYear(null);
+                    setWeekOffset((w) => w + 1);
+                  }}
+                >
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
@@ -572,6 +873,7 @@ export default function AITimetablePage() {
               <Card className="p-4 overflow-x-auto">
                 <div className="grid grid-cols-7 min-w-[700px] gap-2">
                   {DAY_NAMES.map((day, di) => {
+                    if (filterDay !== null && filterDay !== di) return null;
                     const daySlots = (active.slots || [])
                       .filter((s) => s.dayOfWeek === di)
                       .slice()

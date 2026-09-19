@@ -90,7 +90,16 @@ export function loadReminders(): Reminder[] {
     const raw = localStorage.getItem(REMINDERS_STORAGE_KEY);
     if (!raw) return [];
     const data = JSON.parse(raw);
-    return Array.isArray(data?.reminders) ? data.reminders : [];
+    const list = Array.isArray(data?.reminders) ? data.reminders : [];
+    // Skip malformed entries (missing/broken time) so a bad row can never
+    // crash the reminder renderer and blank the app.
+    return list.filter(
+      (r: Reminder) =>
+        r &&
+        typeof r === "object" &&
+        typeof r.time === "string" &&
+        r.time.includes(":"),
+    );
   } catch {
     return [];
   }

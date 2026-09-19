@@ -14,8 +14,11 @@ export async function GET() {
       select: {
         id: true,
         name: true,
-        email: true,
+        displayName: true,
+        avatarUrl: true,
         image: true,
+        about: true,
+        email: true,
         presence: { select: { status: true, lastSeen: true } },
       },
       orderBy: { createdAt: "asc" },
@@ -23,9 +26,11 @@ export async function GET() {
 
     const list = users.map((u) => ({
       id: u.id,
-      name: u.name || u.email?.split("@")[0] || "User",
+      name: u.displayName || u.name || u.email?.split("@")[0] || "User",
+      fullName: u.name || u.displayName || "",
       email: u.email,
-      image: u.image,
+      image: u.image || u.avatarUrl,
+      about: u.about || "",
       status: u.presence?.status || "offline",
       lastSeen: u.presence?.lastSeen?.toISOString() || null,
     }));

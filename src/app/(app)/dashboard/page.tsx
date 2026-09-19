@@ -24,8 +24,7 @@ import {
   Plus,
   Trophy,
   Crown,
-  CalendarDays,
-  Sparkles,
+  Youtube,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -527,7 +526,7 @@ export default function DashboardPage() {
               : "border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-amber-500/5"
         }`}
       >
-        <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <div
               className={`h-12 w-12 rounded-xl flex items-center justify-center shrink-0 ${
@@ -571,63 +570,41 @@ export default function DashboardPage() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="w-full sm:w-auto grid grid-cols-5 gap-1.5 sm:gap-2">
             {cdSegments.map((s) => (
               <div
                 key={s.label}
-                className="w-16 rounded-md bg-muted/50 px-1 py-2 text-center"
+                className="min-w-0 rounded-md bg-muted/50 px-0.5 sm:px-1 py-2 text-center"
               >
                 {ready ? (
-                  <p className="text-xl font-bold tabular-nums">{s.value}</p>
+                  <p className="text-base sm:text-xl font-bold tabular-nums truncate">{s.value}</p>
                 ) : (
-                  <SkeletonText className="h-6 w-10 mx-auto" />
+                  <SkeletonText className="h-6 w-8 mx-auto" />
                 )}
-                <p className="text-[10px] text-muted-foreground">{s.label}</p>
+                <p className="text-[10px] leading-tight text-muted-foreground truncate">{s.label}</p>
               </div>
             ))}
           </div>
         </div>
       </Card>
 
-      {/* 3. Study Planner Action Card */}
-      <Card className="p-6 border-primary/30 bg-gradient-to-r from-primary/10 to-primary/5">
+      {/* 3. YT Player Card */}
+      <Card className="p-6 border-red-500/30 bg-gradient-to-r from-red-500/10 to-red-500/5">
         <div className="flex flex-col sm:flex-row h-full gap-3 items-start sm:items-center justify-between">
           <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center min-w-0">
-            <div className="h-12 w-12 rounded-xl bg-primary/15 flex items-center justify-center shrink-0">
-              <CalendarDays className="h-6 w-6 text-primary" />
+            <div className="h-12 w-12 rounded-xl bg-red-500/15 flex items-center justify-center shrink-0">
+              <Youtube className="h-6 w-6 text-red-500" />
             </div>
             <div className="min-w-0">
-              <p className="text-lg font-semibold">Study Planner</p>
+              <p className="text-lg font-semibold">YT Player</p>
               <p className="text-sm text-muted-foreground">
-                Plan your week, generate a smart A/L timetable, and track sessions.
+                Ad-free YouTube playback with background play and lock screen controls.
               </p>
             </div>
           </div>
-          <Link href="/planner" className="shrink-0">
-            <Button className="gap-2">
-              <CalendarDays className="h-4 w-4" /> Open Planner
-            </Button>
-          </Link>
-        </div>
-      </Card>
-
-      {/* 3b. AI Study Timetable Card */}
-      <Card className="p-6 border-purple-500/30 bg-gradient-to-r from-purple-500/10 to-purple-500/5">
-        <div className="flex flex-col sm:flex-row h-full gap-3 items-start sm:items-center justify-between">
-          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center min-w-0">
-            <div className="h-12 w-12 rounded-xl bg-purple-500/15 flex items-center justify-center shrink-0">
-              <Sparkles className="h-6 w-6 text-purple-500" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-lg font-semibold">AI Study Planner</p>
-              <p className="text-sm text-muted-foreground">
-                Generate a smart personalized timetable with AI recommendations.
-              </p>
-            </div>
-          </div>
-          <Link href="/planner" className="shrink-0">
-            <Button variant="outline" className="gap-2 border-purple-500/30 text-purple-600 hover:bg-purple-500/10">
-              <Sparkles className="h-4 w-4" /> AI Timetable
+          <Link href="/yt" className="shrink-0">
+            <Button variant="outline" className="gap-2 border-red-500/30 text-red-600 hover:bg-red-500/10">
+              <Youtube className="h-4 w-4" /> Open YT
             </Button>
           </Link>
         </div>

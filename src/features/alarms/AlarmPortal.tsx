@@ -56,13 +56,29 @@ function preArmNative(alarms: Alarm[]) {
   }
 }
 
+function pushNativeAlarms(alarms: Alarm[]) {
+  try {
+    const bridge = (window as any).BioPulseBridge;
+    if (!bridge || typeof bridge.sync !== "function") return;
+    bridge.sync(JSON.stringify({ alarms }));
+  } catch {
+    // ignore
+  }
+}
+
 export function AlarmPortal() {
   const { currentAlarm, isRinging, triggerAlarm, dismiss, snooze } =
     useAlarmRinger();
   const firedRef = useRef<Record<string, number>>({});
+  const lastAlarmPush = useRef("");
 
   const checkDue = useCallback(() => {
     const { alarms, fired } = readAlarms();
+    const pushJson = JSON.stringify({ alarms });
+    if (pushJson !== lastAlarmPush.current) {
+      lastAlarmPush.current = pushJson;
+      pushNativeAlarms(alarms);
+    }
     const dedup = { ...firedRef.current, ...fired };
     firedRef.current = dedup;
     preArmNative(alarms);

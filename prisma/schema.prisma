@@ -15,9 +15,12 @@ model User {
   id            String    @id @default(uuid())
   email         String    @unique
   name          String?
-  passwordHash  String
+  passwordHash  String?
   emailVerified DateTime?
   image         String?
+  displayName   String?
+  avatarUrl     String?
+  about         String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -48,6 +51,8 @@ model User {
   sentMessages      DirectMessage[]         @relation("DirectMessageSender")
   receivedMessages  DirectMessage[]         @relation("DirectMessageReceiver")
   presence          Presence?
+  statuses          UserStatus[]
+  classes           ClassSession[]
 
   @@map("users")
 }
@@ -89,6 +94,24 @@ model VerificationToken {
 
   @@unique([identifier, token])
   @@map("verification_tokens")
+}
+
+model OtpVerification {
+  id         String    @id @default(uuid())
+  email      String
+  codeHash   String // sha256 of the 6-digit code
+  purpose    String    @default("login") // login | register
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  // one-time sign-in token issued after a successful code verification
+  tokenHash       String?
+  tokenExpiresAt  DateTime?
+  usedAt          DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@unique([email, purpose])
+  @@index([email])
+  @@map("otp_verifications")
 }
 
 model Profile {
@@ -873,4 +896,40 @@ model Presence {
   updatedAt DateTime @updatedAt
 
   @@map("user_presence")
+}
+
+// ============================================================
+// STATUS UPDATES (WhatsApp-style stories, 24h expiry)
+// ============================================================
+
+model UserStatus {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text      String?  @db.Text
+  imageUrl  String?
+  imageType String? // image (video uploads stay in chat for now)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("user_statuses")
+}
+
+// ============================================================
+// CLASS SESSIONS (recurring classes the student attends each week)
+// ============================================================
+
+model ClassSession {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectName String
+  dayOfWeek   Int // 0=Mon .. 6=Sun
+  startMinute Int
+  endMinute   Int
+  color       String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, dayOfWeek])
+  @@map("class_sessions")
 }

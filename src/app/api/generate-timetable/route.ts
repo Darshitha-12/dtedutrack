@@ -36,7 +36,7 @@ type ValidatedInput = z.infer<typeof inputSchema>;
 
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-function buildPrompt(input: ValidatedInput, todayISO: string): string {
+function buildPrompt(input: ValidatedInput, todayISO: string, classesText: string): string {
   const subjects = SUBJECT_LIST.map((s) => s.name).join(", ");
   const slots = input.timeSlots.length
     ? input.timeSlots
@@ -55,15 +55,19 @@ function buildPrompt(input: ValidatedInput, todayISO: string): string {
     ? `The student describes their situation in their OWN WORDS (this is the MOST important information — follow it closely): "${description}"`
     : "";
 
+  const daily = input.dailyHours
+    ? `${input.dailyHours} hours per day (only study, exclude class hours)`
+    : "flexible";
+
   return `You are an expert A/L study timetable planner.
 Today's date is ${todayISO}. The user's target A/L exam date is ${input.examDate || "not set"}.
 Mode: ${mode}.
 Day boundaries: study is ONLY allowed between ${input.startTime} (start) and ${input.bedtime} (bedtime/sleep). NO study sessions before start or after bedtime.
-Fixed non-study blocks that ARE ALREADY reserved (do NOT overlap any study session with these): Breakfast 07:30-08:00, Lunch 13:00-13:30, Afternoon Nap ${input.napTime}-${input.napEnd}, Evening Tea & Snack 16:30-17:00, Dinner 20:00-20:30.
+Fixed non-study blocks that ARE ALREADY reserved (do NOT overlap any study session with these): Breakfast 07:30-08:00, Morning Break 10:30-10:45, Lunch 13:00-13:30, Afternoon Nap ${input.napTime}-${input.napEnd}, Evening Tea & Snack 16:30-17:00, Dinner 20:00-20:30.
+Fixed classes the student ATTENDS every week (absolute commitments — for EACH of these you MUST output a separate slot of the day with type "Class", subjectName equal to the class subject, and you must NEVER schedule any study session that overlaps one of these class times):
+${classesText}
 Available subjects: ${subjects}.
-Available weekly study time: ~${input.weeklyHours} hours per week (${
-    input.dailyHours ? input.dailyHours + " per day" : "flexible"
-  }).
+Available weekly study time: ~${input.weeklyHours} hours per week (${daily}).
 Preferred time slots: ${slots}.
 Weak subjects / priority topics: ${weak}.
 Preferred study techniques: ${techs}.
@@ -76,6 +80,7 @@ IMPORTANT:
 - If the description is in Sinhala (Singlish), understand it and plan accordingly; you may answer in plain English.
 - A study session MUST fall entirely between the start time and bedtime. Only schedule study blocks in the free windows between the fixed break blocks listed above (e.g. 08:00-13:00 morning, 15:00-16:30 mid-afternoon, 17:00-20:00 evening, 18:30-20:00 evening).
 - For ${mode === "Full Day" ? "the day" : "each day"} output a sensible spread, and use type values only from: Theory, MCQ, Revision, Past Paper, AITutor, WeakTopic, or Break/Nap/Tea for the reserved blocks.
+- Spread ${mode === "Full Day" ? "the day" : "each day"} into SEVERAL shorter sessions of about 60-90 minutes each, never one long block. Between the fixed breaks there should typically be 3-5 separate study sessions. A study session must fit entirely within one free window (e.g. 08:00-10:30, 10:45-13:00, 15:00-16:30, 17:00-20:00) and never overlap a break or class time.
 
 Return ONLY valid JSON in exactly this shape (no markdown, no code fences):
 {
@@ -142,6 +147,29 @@ export async function POST(req: Request) {
     const input = parsed.data;
     const todayISO = new Date().toISOString().slice(0, 10);
 
+    // The student's recurring classes — absolute, must appear & never overlap study.
+    let myClasses: any[] = [];
+    try {
+      await ensureClassesSchema();
+      myClasses = await db.classSession.findMany({ where: { userId } });
+    } catch (_) {
+      /* classes are optional — continue without them */
+    }
+    const classesText = myClasses.length
+      ? myClasses
+          .map(
+            (c) =>
+              `• ${DAY_NAMES[c.dayOfWeek] ?? "?"} ${fmtHm(c.startMinute)}-${fmtHm(c.endMinute)}: ${c.subjectName}`,
+          )
+          .join("\n")
+      : "None";
+    const classesForMerge = myClasses.map((c) => ({
+      dayOfWeek: clamp(c.dayOfWeek ?? 0, 0, 6),
+      startMinute: clamp(c.startMinute ?? 0, 0, 1439),
+      endMinute: clamp(c.endMinute ?? 0, 1, 1440),
+      subjectName: String(c.subjectName || "Class").slice(0, 100),
+    }));
+
     const provider = getAIProvider();
     const today = new Date();
     const todayDow = (today.getDay() + 6) % 7; // 0=Monday
@@ -150,7 +178,7 @@ export async function POST(req: Request) {
 
     try {
       const res = await provider.chat(
-        [{ role: "system", content: "Return JSON only." }, { role: "user", content: buildPrompt(input, todayISO) }],
+        [{ role: "system", content: "Return JSON only." }, { role: "user", content: buildPrompt(input, todayISO, classesText) }],
         { maxTokens: 3000, temperature: 0.4 },
       );
       const json = parseJson(res.content);
@@ -167,6 +195,9 @@ export async function POST(req: Request) {
     // Auto-inject Breakfast / Lunch / Afternoon Nap / Tea / Dinner breaks, and
     // clip every study session strictly between the user's start time and bedtime.
     slots = injectBreaks(slots, input);
+    // Reserve the student's classes: remove any study/break that overlaps a class
+    // time and add the class blocks themselves ("during class time only the class shows").
+    slots = mergeClasses(slots, classesForMerge);
     // Ensure breaks appear for every day in the plan scope.
     const dayCount = input.mode === "full_day" ? 1 : 7;
     const present = new Set(slots.map((s) => s.dayOfWeek));
@@ -305,6 +336,7 @@ function mapType(t: string): string {
 // Fixed break blocks. Each has: name, type, start ("HH:MM"), end ("HH:MM").
 const NONSTUDY_BLOCKS = [
   { name: "Breakfast", type: "Break", start: "07:30", end: "08:00" },
+  { name: "Morning Break", type: "Break", start: "10:30", end: "10:45" },
   { name: "Lunch", type: "Break", start: "13:00", end: "13:30" },
   { name: "Tea & Snack", type: "Tea", start: "16:30", end: "17:00" },
   { name: "Dinner", type: "Break", start: "20:00", end: "20:30" },
@@ -353,27 +385,104 @@ function injectBreaks(slots: any[], input: ValidatedInput): any[] {
   }
 
   const days = Array.from(new Set(clipped.map((s) => s.dayOfWeek)));
-  const out: any[] = [...clipped];
-
+  const breaks: any[] = [];
   days.forEach((d) => {
-    const dayBreaks = buildDayBreaks(input).map((b) => ({ ...b, dayOfWeek: d }));
-    dayBreaks.forEach((m) => {
-      const clash = out.some(
-        (s) => s.dayOfWeek === d && overlaps(s.startMinute, s.endMinute, m.start, m.end),
-      );
-      if (!clash) {
-        out.push({
-          dayOfWeek: d,
-          startMinute: m.start,
-          endMinute: m.end,
-          subjectName: m.type === "Nap" ? "Afternoon Nap" : m.type === "Tea" ? "Tea & Snack" : m.name,
-          type: m.type,
-          note: m.type === "Nap" ? "Rest & recharge" : "Rest & eat properly",
-        });
-      }
-    });
+    buildDayBreaks(input)
+      .map((b) => ({ ...b, dayOfWeek: d }))
+      .forEach((m) => breaks.push(m));
   });
 
+  // Split any study session that overlaps a fixed break so that every break
+  // (Breakfast, 10:30 Morning Break, Lunch, Nap, Tea, Dinner) always shows up,
+  // and long blocks become several shorter sessions around each break.
+  const out: any[] = [];
+  for (const s of clipped) {
+    let pieces: any[] = [s];
+    for (const b of breaks) {
+      if (b.dayOfWeek !== s.dayOfWeek) continue;
+      const next: any[] = [];
+      for (let i = 0; i < pieces.length; i++) {
+        const p = pieces[i];
+        if (overlaps(p.startMinute, p.endMinute, b.start, b.end)) {
+          if (p.startMinute < b.start) next.push({ ...p, endMinute: b.start });
+          if (p.endMinute > b.end) next.push({ ...p, startMinute: b.end });
+        } else {
+          next.push(p);
+        }
+      }
+      pieces = next;
+    }
+    out.push(...pieces);
+  }
+  out.push(
+    ...breaks.map((m) => ({
+      dayOfWeek: m.dayOfWeek,
+      startMinute: m.start,
+      endMinute: m.end,
+      subjectName: m.type === "Nap" ? "Afternoon Nap" : m.type === "Tea" ? "Tea & Snack" : m.name,
+      type: m.type,
+      note: m.type === "Nap" ? "Rest & recharge" : "Rest & eat properly",
+    })),
+  );
+
+  out.sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.startMinute - b.startMinute);
+  return out;
+}
+
+async function ensureClassesSchema() {
+  try {
+    await db.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "class_sessions" (
+      "id" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "subjectName" TEXT NOT NULL,
+      "dayOfWeek" INTEGER NOT NULL,
+      "startMinute" INTEGER NOT NULL,
+      "endMinute" INTEGER NOT NULL,
+      "color" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "class_sessions_pkey" PRIMARY KEY ("id")
+    )`);
+    await db.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "class_sessions_userId_dayOfWeek_idx" ON "class_sessions" ("userId", "dayOfWeek")`
+    );
+  } catch (error) {
+    console.error("ensureClassesSchema error:", error);
+  }
+}
+
+function fmtHm(min: number): string {
+  const h = Math.floor(min / 60) % 24;
+  const m = min % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+// Reserve the student's class times. For any day where a class exists:
+//  - every study / meal / nap slot that overlaps the class is removed,
+//  - the class itself is added as a block (type "Class").
+// Net effect: during class time only the class appears.
+function mergeClasses(slots: any[], classes: any[]): any[] {
+  if (!Array.isArray(slots)) return [];
+  const classSlots = (Array.isArray(classes) ? classes : [])
+    .filter((c) => c.endMinute > c.startMinute)
+    .map((c) => ({
+      dayOfWeek: clamp(c.dayOfWeek ?? 0, 0, 6),
+      startMinute: clamp(c.startMinute ?? 0, 0, 1439),
+      endMinute: clamp(c.endMinute ?? 0, 1, 1440),
+      subjectName: String(c.subjectName || "Class").slice(0, 100),
+      type: "Class",
+      note: "Scheduled class — keep this time free",
+    }));
+  if (classSlots.length === 0) return slots;
+
+  const out = slots.filter(
+    (s) =>
+      !classSlots.some(
+        (c) =>
+          c.dayOfWeek === s.dayOfWeek &&
+          overlaps(c.startMinute, c.endMinute, s.startMinute, s.endMinute),
+      ),
+  );
+  out.push(...classSlots);
   out.sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.startMinute - b.startMinute);
   return out;
 }

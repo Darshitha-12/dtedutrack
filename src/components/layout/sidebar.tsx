@@ -13,8 +13,6 @@ import {
   ScrollText,
   Layers,
   Microscope,
-  CalendarDays,
-  Sparkles,
   Download,
   AlertTriangle,
   BarChart3,
@@ -31,9 +29,13 @@ import {
   StickyNote,
   MessagesSquare,
   MessageCircle,
+  Wallet,
+  Youtube,
+  Timer,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useT, useLanguage } from "@/lib/language-context"
+import { useChatUnread } from "@/features/chat/lib/unread-store"
 
 interface NavItem {
   label: string
@@ -61,11 +63,11 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Flashcards", labelKey: "sidebar.flashcards", href: "/flashcards", icon: Layers },
       { label: "Note Pad", labelKey: "sidebar.notePad", href: "/note-pad", icon: StickyNote },
       { label: "Exam Marks", labelKey: "sidebar.examMarks", href: "/exam-marks", icon: Award },
+      { label: "Class Fees", labelKey: "sidebar.classFees", href: "/fees", icon: Wallet },
       { label: "Diagram Lab", labelKey: "sidebar.diagramLab", href: "/diagrams", icon: Microscope },
       { label: "Telegram", labelKey: "sidebar.telegram", href: "/telegram", icon: MessagesSquare },
       { label: "Messages", labelKey: "sidebar.messages", href: "/chat", icon: MessageCircle },
-      { label: "Study Planner", labelKey: "sidebar.studyPlanner", href: "/planner", icon: CalendarDays },
-      { label: "AI Timetable", labelKey: "sidebar.aiTimetable", href: "/ai-timetable", icon: Sparkles },
+      { label: "YT", labelKey: "sidebar.yt", href: "/yt", icon: Youtube },
       { label: "Download Manager", labelKey: "sidebar.download", href: "/downloads", icon: Download },
       { label: "Work Log", labelKey: "sidebar.workLog", href: "/work-log", icon: Clock },
       { label: "Mistake Book", labelKey: "sidebar.mistakeBook", href: "/mistakes", icon: AlertTriangle },
@@ -77,6 +79,7 @@ const NAV_SECTIONS: NavSection[] = [
     separator: true,
     items: [
       { label: "Pomodoro", labelKey: "sidebar.pomodoro", href: "/focus", icon: Clock },
+      { label: "Timer", labelKey: "sidebar.timer", href: "/timer", icon: Timer },
       { label: "Alarms", labelKey: "sidebar.alarms", href: "/alarms", icon: Bell },
       { label: "Reminders", labelKey: "sidebar.reminders", href: "/reminders", icon: BellRing },
     ],
@@ -99,6 +102,7 @@ function SidebarContent({ pathname, onClose }: { pathname: string; onClose?: () 
   const { data: session } = useSession()
   const t = useT()
   const { locale, setLocale } = useLanguage()
+  const { totalUnread } = useChatUnread()
   const user = session?.user
   const initial = user?.name?.charAt(0)?.toUpperCase() || user?.email?.charAt(0)?.toUpperCase() || "U"
 
@@ -133,8 +137,9 @@ function SidebarContent({ pathname, onClose }: { pathname: string; onClose?: () 
           <React.Fragment key={si}>
             {section.separator && <div className="my-2 border-t border-border" />}
             {section.items.map((item) => {
+              const trimmed = pathname.replace(/\/+$/, "")
               const isActive =
-                pathname === item.href || pathname.startsWith(item.href + "/")
+                trimmed === item.href || trimmed.startsWith(item.href + "/")
               const Icon = item.icon
               return (
                 <Link
@@ -150,9 +155,13 @@ function SidebarContent({ pathname, onClose }: { pathname: string; onClose?: () 
                 >
                   <Icon className="h-4 w-4 shrink-0" />
                   <span className="flex-1 truncate">{t(item.labelKey)}</span>
-                  {item.badge && (
+                  {((item.href === "/chat" && totalUnread > 0)
+                    ? (totalUnread > 99 ? "99+" : String(totalUnread))
+                    : item.badge) && (
                     <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
-                      {item.badge}
+                      {(item.href === "/chat" && totalUnread > 0)
+                        ? (totalUnread > 99 ? "99+" : totalUnread)
+                        : item.badge}
                     </span>
                   )}
                 </Link>

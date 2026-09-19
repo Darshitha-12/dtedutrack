@@ -14,15 +14,20 @@ import { Bell, Play, X, Check } from "lucide-react";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-const defaultInput: CreateAlarmInput = {
-  time: "07:00",
+const nowTime = () => {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+
+const defaultInput = (): CreateAlarmInput => ({
+  time: nowTime(),
   label: "",
   priority: "normal",
   subject: "none",
   sound: "chime",
   tts: false,
   repeatDays: [],
-};
+});
 
 interface AlarmFormProps {
   editing?: Alarm | null;
@@ -42,7 +47,7 @@ export function AlarmForm({ editing, onSubmit, onCancel }: AlarmFormProps) {
           tts: editing.tts,
           repeatDays: [...editing.repeatDays],
         }
-      : { ...defaultInput },
+      : { ...defaultInput() },
   );
 
   const handleSubmit = useCallback(
@@ -51,7 +56,7 @@ export function AlarmForm({ editing, onSubmit, onCancel }: AlarmFormProps) {
       if (!input.label.trim()) return;
       onSubmit(input);
       if (!editing) {
-        setInput({ ...defaultInput });
+        setInput({ ...defaultInput() });
       }
     },
     [input, editing, onSubmit],

@@ -8,6 +8,12 @@ export function PwaRegister() {
     if (process.env.NODE_ENV !== "production") return;
 
     let active = true;
+    const onMessage = (e: MessageEvent) => {
+      if (e.data && e.data.type === "NEW_VERSION") {
+        if (active) window.location.reload();
+      }
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
     navigator.serviceWorker
       .register("/sw.js")
       .then((reg) => {
@@ -25,6 +31,7 @@ export function PwaRegister() {
 
     return () => {
       active = false;
+      navigator.serviceWorker.removeEventListener("message", onMessage);
     };
   }, []);
 

@@ -1,9 +1,11 @@
 "use client"
 
 import { useSession } from "next-auth/react"
+import { useRouter } from "next/navigation"
 import { Menu, Bell, Globe } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLanguage } from "@/lib/language-context"
+import { useChatUnread } from "@/features/chat/lib/unread-store"
 
 interface TopbarProps {
   onMenuClick: () => void
@@ -13,6 +15,8 @@ interface TopbarProps {
 function Topbar({ onMenuClick, className }: TopbarProps) {
   const { data: session } = useSession()
   const { locale, setLocale } = useLanguage()
+  const { totalUnread } = useChatUnread()
+  const router = useRouter()
   const user = session?.user
   const initial = user?.name?.charAt(0)?.toUpperCase() || user?.email?.charAt(0)?.toUpperCase() || "U"
 
@@ -40,9 +44,19 @@ function Topbar({ onMenuClick, className }: TopbarProps) {
         <Globe className="h-4 w-4" />
         <span>{locale === "si" ? "EN" : "සිංහල"}</span>
       </button>
-      <button className="relative p-1.5 rounded-md hover:bg-accent transition-colors" aria-label="Notifications">
+      <button
+        onClick={() => router.push("/chat")}
+        className="relative p-1.5 rounded-md hover:bg-accent transition-colors"
+        aria-label="Notifications"
+      >
         <Bell className="h-5 w-5" />
-        <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-primary" />
+        {totalUnread > 0 ? (
+          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center px-1 border border-background">
+            {totalUnread > 99 ? "99+" : totalUnread}
+          </span>
+        ) : (
+          <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-primary/80" />
+        )}
       </button>
       <div className="h-8 w-8 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold">
         {initial}

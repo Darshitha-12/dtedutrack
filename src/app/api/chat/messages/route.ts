@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { sendChatNotification } from "@/lib/fcm";
 
 const sendSchema = z.object({
   partnerId: z.string().min(1),
@@ -10,6 +11,23 @@ const sendSchema = z.object({
   mediaType: z.string().max(20).optional(),
   mediaName: z.string().max(255).optional(),
 });
+
+async function pushDirectMessage(receiverId: string, senderId: string, text: string) {
+  try {
+    const prefs = await db.notificationPreference.findUnique({ where: { userId: receiverId } });
+    const token = prefs?.fcmToken;
+    if (!token) return;
+    const sender = await db.user.findUnique({
+      where: { id: senderId },
+      select: { name: true, displayName: true, email: true },
+    });
+    const name =
+      sender?.displayName || sender?.name || (sender?.email ? sender.email.split("@")[0] : "BioPulse");
+    await sendChatNotification(token, name, text || "Media");
+  } catch (error) {
+    console.error("pushDirectMessage error:", error);
+  }
+}
 
 export async function GET(req: Request) {
   try {
@@ -98,6 +116,8 @@ export async function POST(req: Request) {
       },
     });
 
+    await pushDirectMessage(partnerId, me, text || (mediaUrl ? "Media" : ""));
+
     return NextResponse.json(
       {
         message: {
@@ -115,6 +135,39 @@ export async function POST(req: Request) {
     );
   } catch (error) {
     console.error("Direct messages POST error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const partnerId = String(body?.partnerId || "").trim();
+    if (!partnerId) {
+      return NextResponse.json({ error: "partnerId required" }, { status: 400 });
+    }
+    const me = session.user.id;
+    if (partnerId === me) {
+      return NextResponse.json({ error: "Cannot clear your own thread" }, { status: 400 });
+    }
+
+    await db.directMessage.deleteMany({
+      where: {
+        OR: [
+          { senderId: me, receiverId: partnerId },
+          { senderId: partnerId, receiverId: me },
+        ],
+      },
+    });
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("Direct messages DELETE error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

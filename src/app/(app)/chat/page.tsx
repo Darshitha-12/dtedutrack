@@ -11,22 +11,51 @@ import {
   CheckCheck,
   ArrowLeft,
   Download,
+  MessageCircle,
+  Phone,
+  MoreVertical,
+  Video,
+  Smile,
+  Mic,
+  MessageSquarePlus,
+  X,
+  UserRound,
+  CircleDot,
+  Trash2,
+  StopCircle,
 } from "lucide-react";
-import { PageHeader } from "@/components/ui/page-header";
-import { EmptyState } from "@/components/ui/empty-state";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
-import { supabase, isSupabaseConfigured, channelRoomFor } from "@/lib/supabase";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+
+const EMOJIS = [
+  "😀", "😁", "😂", "🤣", "😊", "😇", "🙂", "😉", "😍", "🥰", "😘", "😋",
+  "😎", "🤔", "🤨", "😐", "😴", "🤗", "🤩", "🥳", "😢", "😭", "😡", "🤯",
+  "👍", "👎", "👏", "🙌", "🤝", "🙏", "👋", "💪", "❤️", "🔥", "✨", "🎉",
+  "✅", "❌", "💯", "⭐", "🌟", "💡", "📚", "📝", "⏰", "🎯", "🚀", "🌈",
+];
 
 interface ChatUser {
   id: string;
   name: string;
+  fullName: string;
   email: string;
+  image: string | null;
+  about: string;
+  status: string;
+  lastSeen: string | null;
+}
+
+interface Conversation {
+  id: string;
+  name: string;
   image: string | null;
   status: string;
   lastSeen: string | null;
+  lastMessage: string;
+  lastMessageIsMine: boolean;
+  lastMessageAt: string;
+  unread: number;
 }
 
 interface Dm {
@@ -40,11 +69,35 @@ interface Dm {
   createdAt: string;
 }
 
+interface StatusItem {
+  id: string;
+  userId: string;
+  name: string;
+  image: string | null;
+  text: string | null;
+  imageUrl: string | null;
+  imageType: string | null;
+  createdAt: string;
+}
+
 const POLL_MS = 4000;
+
+const C = {
+  bg: "var(--background)",
+  panel: "var(--card)",
+  header: "var(--card)",
+  hover: "var(--accent)",
+  bubbleMe: "var(--primary)",
+  bubbleOther: "var(--muted)",
+  tickBlue: "var(--primary)",
+  muted: "var(--muted-foreground)",
+  green: "var(--primary)",
+  text: "var(--foreground)",
+};
 
 function formatTime(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
 }
 
 function formatDay(iso: string): string {
@@ -54,7 +107,28 @@ function formatDay(iso: string): string {
   const y = new Date();
   y.setDate(y.getDate() - 1);
   if (d.toDateString() === y.toDateString()) return "Yesterday";
-  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  return d.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+}
+
+function statusTime(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const mins = Math.floor((now.getTime() - d.getTime()) / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins} min${mins > 1 ? "s" : ""} ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs > 1 ? "s" : ""} ago`;
+  return d.toLocaleDateString([], { day: "numeric", month: "short" });
+}
+
+function shortDate(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) return formatTime(iso);
+  const y = new Date();
+  y.setDate(y.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return "Yesterday";
+  return d.toLocaleDateString([], { day: "numeric", month: "short" });
 }
 
 function lastSeenLabel(lastSeen: string | null, status: string): string {
@@ -73,6 +147,53 @@ function fileNameFromUrl(url: string, fallback: string | null): string {
   if (fallback) return fallback;
   const clean = url.split("?")[0].split("/").pop() || "media";
   return decodeURIComponent(clean);
+}
+
+function Avatar({
+  src,
+  name,
+  online,
+  size = 40,
+}: {
+  src: string | null | undefined;
+  name: string;
+  online?: boolean;
+  size?: number;
+}) {
+  return (
+    <div className="relative shrink-0">
+      {src ? (
+        <img
+          src={src}
+          alt=""
+          style={{ width: size, height: size }}
+          className="rounded-full object-cover"
+        />
+      ) : (
+        <div
+          style={{ width: size, height: size, background: "var(--accent)" }}
+          className="flex items-center justify-center rounded-full"
+        >
+          {name ? (
+            <span className="text-sm font-medium text-foreground">
+              {name.charAt(0).toUpperCase()}
+            </span>
+          ) : (
+            <UserRound className="h-5 w-5 text-muted-foreground" />
+          )}
+        </div>
+      )}
+      {online !== undefined && (
+        <span
+          className={cn(
+            "absolute bottom-0 right-0 rounded-full border-2 border-card",
+            online ? "bg-primary" : "bg-muted",
+          )}
+          style={{ width: Math.max(10, size / 4), height: Math.max(10, size / 4) }}
+        />
+      )}
+    </div>
+  );
 }
 
 function mediaBubble(m: Dm, onDownload: (url: string, name: string) => void) {
@@ -98,7 +219,7 @@ function mediaBubble(m: Dm, onDownload: (url: string, name: string) => void) {
       <button
         type="button"
         onClick={() => onDownload(m.mediaUrl as string, name)}
-        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors hover:bg-accent"
+        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors hover:bg-white/10"
       >
         <Download className="h-3 w-3" /> Save {name}
       </button>
@@ -109,41 +230,77 @@ function mediaBubble(m: Dm, onDownload: (url: string, name: string) => void) {
 export default function ChatPage() {
   const { data: session } = useSession();
   const me = session?.user?.id;
+  const myName = session?.user?.name || "";
+  const myImage = (session?.user as { image?: string | null })?.image || null;
   const { showToast } = useToast();
 
   const [users, setUsers] = useState<ChatUser[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Dm[]>([]);
   const [text, setText] = useState("");
   const [search, setSearch] = useState("");
-  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [newChatSearch, setNewChatSearch] = useState("");
+  const [tab, setTab] = useState<"chats" | "status" | "calls">("chats");
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [sending, setSending] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [newChatOpen, setNewChatOpen] = useState(false);
+  const [mobilePane, setMobilePane] = useState<"list" | "chat">("list");
+  const [menuOpen, setMenuOpen] = useState<"none" | "header" | "chat">("none");
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [recordingError, setRecordingError] = useState("");
+  const [statuses, setStatuses] = useState<StatusItem[]>([]);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [statusText, setStatusText] = useState("");
+  const [statusMedia, setStatusMedia] = useState<{ url: string; type: string; name: string } | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [viewerItems, setViewerItems] = useState<StatusItem[] | null>(null);
+  const [viewerIdx, setViewerIdx] = useState(0);
+  const [viewerProgress, setViewerProgress] = useState(0);
+  const [viewerPaused, setViewerPaused] = useState(false);
+  const pausedRef = useRef(false);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const toggleMenu = (which: "header" | "chat") => {
+    setMenuOpen((cur) => (cur === which ? "none" : which));
+  };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoomRef = useRef<string | null>(null);
-  const usersRef = useRef<ChatUser[]>([]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, activeId]);
 
   const activeUser = users.find((u) => u.id === activeId) || null;
-  const filteredUsers = users.filter(
-    (u) =>
-      u.name.toLowerCase().includes(search.toLowerCase()) ||
-      (u.email || "").toLowerCase().includes(search.toLowerCase()),
-  );
+
+  const loadConversations = useCallback(async () => {
+    try {
+      const res = await fetch("/api/chat/conversations");
+      if (res.ok) {
+        const data = await res.json();
+        setConversations(data.conversations || []);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const loadUsers = useCallback(async () => {
     try {
       const res = await fetch("/api/chat/users");
       if (res.ok) {
         const data = await res.json();
-        usersRef.current = data.users || [];
         setUsers(data.users || []);
       }
     } catch {
       /* ignore */
-    } finally {
-      setLoadingUsers(false);
     }
   }, []);
 
@@ -173,14 +330,14 @@ export default function ChatPage() {
       } catch {
         /* ignore */
       }
-      // re-mark newly arrived ones
       setMessages((prev) =>
         prev.map((m) =>
           m.senderId === partnerId && !m.readAt ? { ...m, readAt: new Date().toISOString() } : m,
         ),
       );
+      loadConversations();
     },
-    [],
+    [loadConversations],
   );
 
   const updatePresence = useCallback(async (status: string) => {
@@ -196,6 +353,7 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
+    loadConversations();
     loadUsers();
     updatePresence("online");
     const hb = setInterval(() => updatePresence("online"), 15000);
@@ -214,25 +372,176 @@ export default function ChatPage() {
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("beforeunload", beforeUnload);
     };
-  }, [loadUsers, updatePresence]);
+  }, [loadConversations, loadUsers, updatePresence]);
 
-  // select conversation
   const openChat = useCallback(
     (id: string) => {
       setActiveId(id);
       activeRoomRef.current = id;
-      setMobileOpen(true);
+      setMobilePane("chat");
+      setNewChatOpen(false);
+      loadUsers();
       loadMessages(id);
       markRead(id);
     },
-    [loadMessages, markRead],
+    [loadUsers, loadMessages, markRead],
   );
 
-  // Poll fallback for messages + presence + users
+  const closeChat = useCallback(() => {
+    setActiveId(null);
+    activeRoomRef.current = null;
+    setMessages([]);
+    setMobilePane("list");
+  }, []);
+
+  const loadStatuses = useCallback(async () => {
+    try {
+      const res = await fetch("/api/chat/status");
+      if (res.ok) {
+        const data = await res.json();
+        setStatuses(data.statuses || []);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab !== "status") return;
+    loadStatuses();
+    const id = setInterval(loadStatuses, 30000);
+    return () => clearInterval(id);
+  }, [tab, loadStatuses]);
+
+  const postStatus = async () => {
+    const t = statusText.trim();
+    if ((!t && !statusMedia) || !me) return;
+    setStatusBusy(true);
+    try {
+      const res = await fetch("/api/chat/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: t || undefined,
+          imageUrl: statusMedia?.url || undefined,
+          imageType: statusMedia?.type || undefined,
+        }),
+      });
+      if (res.ok) {
+        setStatusText("");
+        setStatusMedia(null);
+        setComposerOpen(false);
+        loadStatuses();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || "Could not add status", "error");
+      }
+    } catch {
+      showToast("Could not add status", "error");
+    } finally {
+      setStatusBusy(false);
+    }
+  };
+
+  const clearMyStatus = async () => {
+    try {
+      const res = await fetch("/api/chat/status", { method: "DELETE" });
+      if (res.ok) {
+        loadStatuses();
+        showToast("Status cleared.", "success");
+      } else {
+        showToast("Could not clear status", "error");
+      }
+    } catch {
+      showToast("Could not clear status", "error");
+    }
+  };
+
+  const pickStatusImage = async (file: File) => {
+    if (!file) return;
+    setStatusBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/chat/upload", { method: "POST", body: fd });
+      if (res.ok) {
+        const d = await res.json();
+        setStatusMedia({ url: d.mediaUrl, type: d.mediaType || "image", name: d.mediaName || "image" });
+      } else {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || "Upload failed", "error");
+      }
+    } catch {
+      showToast("Upload failed", "error");
+    } finally {
+      setStatusBusy(false);
+    }
+  };
+
+  const myStatusItems = statuses.filter((s) => s.userId === me);
+  const otherGroups: { userId: string; name: string; image: string | null; items: StatusItem[] }[] = [];
+  for (const s of statuses) {
+    if (s.userId === me) continue;
+    let g = otherGroups.find((x) => x.userId === s.userId);
+    if (!g) {
+      g = { userId: s.userId, name: s.name, image: s.image, items: [] };
+      otherGroups.push(g);
+    }
+    g.items.push(s);
+  }
+  otherGroups.sort((a, b) => new Date(b.items[0].createdAt).getTime() - new Date(a.items[0].createdAt).getTime());
+
+  const openStatusViewer = (items: StatusItem[]) => {
+    setViewerItems(items);
+    setViewerIdx(0);
+    setViewerProgress(0);
+  };
+
+  const viewerNext = () => {
+    if (!viewerItems) return;
+    const next = viewerIdx + 1;
+    if (next >= viewerItems.length) {
+      setViewerItems(null);
+    } else {
+      setViewerIdx(next);
+      setViewerProgress(0);
+    }
+  };
+
+  const viewerPrev = () => {
+    if (viewerIdx > 0) {
+      setViewerIdx(viewerIdx - 1);
+      setViewerProgress(0);
+    } else {
+      setViewerItems(null);
+    }
+  };
+
+  useEffect(() => {
+    pausedRef.current = viewerPaused;
+  }, [viewerPaused]);
+
+  useEffect(() => {
+    if (!viewerItems) return;
+    setViewerProgress(0);
+    const id = setInterval(() => {
+      if (pausedRef.current) return;
+      setViewerProgress((p) => Math.min(100, p + (100 * 50) / 5000));
+    }, 50);
+    return () => clearInterval(id);
+  }, [viewerItems]);
+
+  useEffect(() => {
+    if (viewerProgress >= 100 && viewerItems) {
+      const t = setTimeout(viewerNext, 250);
+      return () => clearTimeout(t);
+    }
+  }, [viewerProgress, viewerItems]);
+
   useEffect(() => {
     const poll = setInterval(
       () => {
-        loadUsers();
+        loadConversations();
         if (activeRoomRef.current) {
           loadMessages(activeRoomRef.current);
           markRead(activeRoomRef.current);
@@ -241,7 +550,7 @@ export default function ChatPage() {
       POLL_MS,
     );
     return () => clearInterval(poll);
-  }, [loadUsers, loadMessages, markRead]);
+  }, [loadConversations, loadMessages, markRead]);
 
   // Real-time via Supabase broadcast
   useEffect(() => {
@@ -252,33 +561,34 @@ export default function ChatPage() {
 
     dm
       .on("broadcast", { event: "new" }, () => {
-        // new message may belong to the active room
+        loadConversations();
         if (activeRoomRef.current) loadMessages(activeRoomRef.current);
       })
       .on("broadcast", { event: "read" }, () => {
         if (activeRoomRef.current) loadMessages(activeRoomRef.current);
+        loadConversations();
       })
       .subscribe();
 
-    presence.on("broadcast", { event: "presence" }, ({ payload }) => {
-      usersRef.current = usersRef.current.map((u) =>
-        u.id === payload.userId
-          ? { ...u, status: payload.status, lastSeen: payload.lastSeen || u.lastSeen }
-          : u,
-      );
-      setUsers(usersRef.current);
+    presence.on("broadcast", { event: "presence" }, () => {
+      loadConversations();
+      loadUsers();
     });
 
-    // Broadcast a join so partner can refresh their presence view
     presence.subscribe();
 
     return () => {
       supabase.removeChannel(dm);
       supabase.removeChannel(presence);
     };
-  }, [me, loadMessages]);
+  }, [me, loadConversations, loadMessages, loadUsers]);
 
-  const sendMessage = async (payload: { text?: string; mediaUrl?: string; mediaType?: string; mediaName?: string }) => {
+  const sendMessage = async (payload: {
+    text?: string;
+    mediaUrl?: string;
+    mediaType?: string;
+    mediaName?: string;
+  }) => {
     if (!activeId || !me) return;
     setSending(true);
     try {
@@ -291,12 +601,12 @@ export default function ChatPage() {
         await fetch("/api/chat/messages?partnerId=" + encodeURIComponent(activeId) + "&limit=200")
           .then((r) => r.json())
           .then((d) => setMessages(d.messages || []));
-        // broadcast to peer
+        loadConversations();
         if (isSupabaseConfigured) {
           await supabase.channel("dm-events").send({
             type: "broadcast",
             event: "new",
-            payload: { room: channelRoomFor(me, activeId), from: me, at: new Date().toISOString() },
+            payload: { room: activeId, from: me, at: new Date().toISOString() },
           });
         }
         setText("");
@@ -325,7 +635,6 @@ export default function ChatPage() {
         showToast("Download started — check your Downloads/BioPulse folder.", "success");
         return;
       }
-      // Web fallback: fetch as blob and save locally
       fetch(url)
         .then((r) => (r.ok ? r.blob() : Promise.reject()))
         .then((blob) => {
@@ -344,8 +653,142 @@ export default function ChatPage() {
     }
   };
 
+  const insertEmoji = (e: string) => {
+    setText((t) => t + e);
+    setEmojiOpen(false);
+  };
+
+  const startRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setRecordingError("Recording is not supported in this browser.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      chunksRef.current = [];
+      let mimeType = "";
+      for (const mt of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]) {
+        if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(mt)) {
+          mimeType = mt;
+          break;
+        }
+      }
+      const rec = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : undefined,
+      );
+      mediaRecorderRef.current = rec;
+      rec.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) chunksRef.current.push(ev.data);
+      };
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: mimeType || "audio/webm" });
+        chunksRef.current = [];
+        const ext = mimeType.includes("mp4") ? "m4a" : "webm";
+        const file = new File([blob], `voice-${Date.now()}.${ext}`, {
+          type: mimeType || "audio/webm",
+        });
+        handleFile(file);
+      };
+      rec.start();
+      setRecording(true);
+      setRecordingError("");
+      setRecordingTime(0);
+      timerRef.current = setInterval(() => {
+        setRecordingTime((t) => t + 1);
+      }, 1000);
+    } catch {
+      setRecordingError("Microphone access was denied.");
+    }
+  };
+
+  const stopRecording = () => {
+    const rec = mediaRecorderRef.current;
+    if (rec && rec.state !== "inactive") {
+      rec.stop();
+    }
+    mediaRecorderRef.current = null;
+    setRecording(false);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const cancelRecording = () => {
+    const rec = mediaRecorderRef.current;
+    if (rec && rec.state !== "inactive") {
+      rec.onstop = null;
+      try {
+        rec.stop();
+      } catch {
+        /* ignore */
+      }
+      const stream = rec.stream;
+      stream?.getTracks().forEach((t) => t.stop());
+    }
+    mediaRecorderRef.current = null;
+    chunksRef.current = [];
+    setRecording(false);
+    setRecordingTime(0);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const deleteChat = async () => {
+    if (!activeId) return;
+    try {
+      const res = await fetch("/api/chat/conversation", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ partnerId: activeId }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || "Could not delete chat", "error");
+        return;
+      }
+      closeChat();
+      loadConversations();
+      showToast("Chat deleted.", "success");
+    } catch {
+      showToast("Could not delete chat", "error");
+    } finally {
+      setMenuOpen("none");
+    }
+  };
+
+  const clearMessages = async () => {
+    if (!activeId) return;
+    try {
+      const res = await fetch("/api/chat/messages", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ partnerId: activeId }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || "Could not clear messages", "error");
+        return;
+      }
+      setMessages([]);
+      loadConversations();
+      showToast("Messages cleared.", "success");
+    } catch {
+      showToast("Could not clear messages", "error");
+    } finally {
+      setMenuOpen("none");
+    }
+  };
+
+  const formatRecTime = (s: number) =>
+    `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+
   const handleFile = async (file: File) => {
-    if (!file) return;
+    if (!file || !activeId) return;
     const fd = new FormData();
     fd.append("file", file);
     setSending(true);
@@ -365,206 +808,757 @@ export default function ChatPage() {
     }
   };
 
-  const avatar = (u: ChatUser | null, size = 9) => {
-    if (!u) return <div className={cn("h-9 w-9 rounded-full bg-primary/15 flex items-center justify-center")}>?</div>;
-    if (u.image) {
-      return <img src={u.image} alt="" className={cn("h-9 w-9 rounded-full object-cover")} />;
-    }
-    return (
-      <div className={cn("h-9 w-9 rounded-full bg-primary/15 flex items-center justify-center text-sm font-bold text-primary")}>
-        {u.name.charAt(0).toUpperCase()}
-      </div>
-    );
-  };
+  const activeConv = conversations.find((c) => c.id === activeId) || null;
+  const activeOnline = activeConv?.status === "online";
 
-  const active = activeUser as ChatUser | null;
+  const filteredConversations = conversations.filter(
+    (c) => c.name.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  const filteredNewChat = users.filter((u) => {
+    const q = newChatSearch.toLowerCase();
+    return (
+      !q ||
+      u.name.toLowerCase().includes(q) ||
+      u.fullName.toLowerCase().includes(q) ||
+      (u.email || "").toLowerCase().includes(q)
+    );
+  });
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col">
-      <div className="hidden md:block">
-        <PageHeader
-          title="Messages"
-          description="Private 1-on-1 chat between study buddies"
-        />
-      </div>
-
-      <div className="flex flex-1 overflow-hidden rounded-lg border border-border bg-card">
-        {/* Left: contact list */}
-        <div
-          className={cn(
-            "w-full flex-col border-r border-border md:flex md:w-80 lg:w-96",
-            mobileOpen && activeId ? "hidden md:flex" : "flex",
-          )}
-        >
-          <div className="p-3 border-b border-border">
+    <div className="-mx-4 -my-6 flex h-[calc(100dvh-4rem)] flex-col overflow-hidden bg-card text-foreground md:mx-auto md:my-0 md:h-[calc(100dvh-7rem)] md:max-w-5xl md:rounded-lg md:border md:border-border">
+      {/* OUTSIDE: header + tabs + list */}
+      <div
+        className={cn(
+          "flex min-h-0 w-full flex-col md:flex md:w-[30%] md:min-w-[320px] md:border-r md:border-border",
+          mobilePane === "chat" ? "hidden md:flex" : "flex",
+        )}
+      >
+        {/* Header */}
+        <div className="flex h-14 items-center justify-between border-b border-border bg-card px-4">
+          <div className="flex items-center gap-3">
+            <Avatar src={myImage} name={myName} size={38} />
+            <span className="text-base font-medium">{myName}</span>
+          </div>
+          <div className="flex items-center gap-4 text-muted-foreground">
+            <button onClick={() => setNewChatOpen(true)} aria-label="New chat" className="hover:text-foreground">
+              <MessageCircle className="h-5 w-5" />
+            </button>
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search people..."
-                className="pl-9"
-              />
+              <button
+                onClick={() => toggleMenu("header")}
+                aria-label="Menu"
+                className="hover:text-foreground"
+              >
+                <MoreVertical className="h-5 w-5" />
+              </button>
+              {menuOpen === "header" && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setMenuOpen("none")} />
+                  <div className="absolute right-0 top-9 z-50 w-56 overflow-hidden rounded-xl border border-border py-1.5 text-sm shadow-xl" style={{ background: "var(--popover)", color: "var(--foreground)", boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
+                    <button
+                      onClick={() => { setMenuOpen("none"); setNewChatOpen(true); }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted"
+                    >
+                      <MessageSquarePlus className="h-4 w-4 text-muted-foreground" /> New chat
+                    </button>
+                    <a
+                      href="/profile"
+                      onClick={() => setMenuOpen("none")}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted"
+                    >
+                      <UserRound className="h-4 w-4 text-muted-foreground" /> My profile
+                    </a>
+                    <a
+                      href="/settings"
+                      onClick={() => setMenuOpen("none")}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted"
+                    >
+                      <CircleDot className="h-4 w-4 text-muted-foreground" /> Settings
+                    </a>
+                  </div>
+                </>
+              )}
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto">
-            {loadingUsers ? (
-              <div className="flex justify-center py-10">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : filteredUsers.length === 0 ? (
-              <div className="py-10 px-4 text-center text-sm text-muted-foreground">No users found</div>
-            ) : (
-              filteredUsers.map((u) => (
-                <button
-                  key={u.id}
-                  onClick={() => openChat(u.id)}
-                  className={cn(
-                    "flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-accent transition-colors",
-                    activeId === u.id && "bg-accent",
-                  )}
-                >
-                  <div className="relative shrink-0">
-                    {avatar(u)}
-                    <span
-                      className={cn(
-                        "absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-card",
-                        u.status === "online" ? "bg-green-500" : "bg-muted",
-                      )}
-                    />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{u.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {lastSeenLabel(u.lastSeen, u.status)}
-                    </p>
-                  </div>
-                </button>
-              ))
+        </div>
+
+        {/* Tabs */}
+        <div className="flex h-12 items-end border-b border-border bg-card text-muted-foreground">
+          {(
+            [
+              { id: "chats", label: "Chats", icon: MessageCircle },
+              { id: "status", label: "Status", icon: CircleDot },
+              { id: "calls", label: "Calls", icon: Phone },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "relative flex flex-1 items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors",
+                tab === t.id ? "text-foreground" : "hover:text-foreground",
+              )}
+            >
+              <t.icon className="h-4 w-4" />
+              {t.label}
+              {tab === t.id && (
+                <span className="absolute bottom-0 left-0 right-0 h-[3px] rounded-t bg-primary" />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Search */}
+        <div className="bg-card px-3 py-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search or start a new chat"
+              className="h-10 w-full rounded-lg bg-muted pl-9 pr-9 text-sm text-foreground placeholder:text-muted-foreground outline-none"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
             )}
           </div>
         </div>
 
-        {/* Right: conversation */}
-        <div className={cn("flex-1 flex-col", !mobileOpen || !activeId ? "hidden md:flex" : "flex")}>
-          {!activeId ? (
-            <div className="flex flex-1 items-center justify-center">
-              <EmptyState
-                icon="💬"
-                title="Select a conversation"
-                description="Pick a user to start chatting. Only registered students appear here."
-              />
-            </div>
-          ) : (
-            <div className="flex h-full flex-col">
-              {/* Header */}
-              <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-                <button onClick={() => setMobileOpen(false)} className="md:hidden">
-                  <ArrowLeft className="h-5 w-5" />
+        {/* List / placeholder */}
+        <div className="min-h-0 flex-1 overflow-y-auto bg-card">
+          {tab === "chats" ? (
+            filteredConversations.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+                <div className="mb-3 grid h-16 w-16 place-items-center rounded-full bg-muted">
+                  <MessageCircle className="h-7 w-7 text-muted-foreground" />
+                </div>
+                <p className="text-sm font-medium text-foreground">
+                  {search ? "No results" : "No chats yet"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {search
+                    ? "Try a different name or email."
+                    : "Tap + to start chatting with a study buddy."}
+                </p>
+              </div>
+            ) : (
+              filteredConversations.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => openChat(c.id)}
+                  className={cn(
+                    "flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors",
+                    activeId === c.id ? "bg-primary/10" : "hover:bg-muted",
+                  )}
+                >
+                  <Avatar src={c.image} name={c.name} online={c.status === "online"} size={49} />
+                  <div className="min-w-0 flex-1 border-b border-border/50 pb-2">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <p className="truncate text-[15px] font-medium text-foreground">{c.name}</p>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {shortDate(c.lastMessageAt)}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 flex items-center justify-between gap-2">
+                      <p className={cn("truncate text-[13px]", c.unread > 0 ? "text-foreground" : "text-muted-foreground")}>
+                        {c.lastMessage}
+                      </p>
+                      {c.unread > 0 && (
+                        <span className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-medium text-white">
+                          {c.unread}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </button>
-                <div className="relative">
-                  {avatar(active, 9)}
-                  <span
-                    className={cn(
-                      "absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-card",
-                      activeUser?.status === "online" ? "bg-green-500" : "bg-muted",
-                    )}
-                  />
+              ))
+            )
+          ) : tab === "status" ? (
+            <div>
+              <button
+                onClick={() => setComposerOpen(true)}
+                className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-muted"
+              >
+                <div className="shrink-0 rounded-full bg-gradient-to-tr from-bio to-chem p-[2px]">
+                  <Avatar src={myImage} name={myName} size={50} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold">{activeUser?.name}</p>
+                  <p className="text-[15px] font-medium text-foreground">My status</p>
                   <p className="truncate text-xs text-muted-foreground">
-                    {lastSeenLabel(activeUser?.lastSeen || null, activeUser?.status || "offline")}
+                    {myStatusItems.length > 0
+                      ? `${myStatusItems.length} update${myStatusItems.length > 1 ? "s" : ""} · ${statusTime(myStatusItems[0].createdAt)}`
+                      : "Tap to add a status update"}
                   </p>
                 </div>
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary text-white">
+                  <MessageSquarePlus className="h-5 w-5" />
+                </span>
+              </button>
+              {myStatusItems.length > 0 && (
+                <button
+                  onClick={clearMyStatus}
+                  className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-xs font-medium text-red-400 hover:bg-muted"
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Clear my status
+                </button>
+              )}
+
+              <div className="flex items-center gap-2 border-t border-border px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <CircleDot className="h-4 w-4" /> Recent updates
               </div>
 
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto bg-background/50 px-3 py-4 space-y-1.5">
-                {loadingMsgs && messages.length === 0 ? (
-                  <div className="flex justify-center py-10">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              {otherGroups.length === 0 ? (
+                <div className="flex flex-col items-center justify-center px-6 py-10 text-center">
+                  <div className="mb-3 grid h-16 w-16 place-items-center rounded-full bg-muted">
+                    <CircleDot className="h-7 w-7 text-muted-foreground" />
                   </div>
-                ) : (
-                  messages.map((m, i) => {
-                    const mine = m.senderId === me;
-                    const prev = messages[i - 1];
-                    const showDay = !prev || formatDay(prev.createdAt) !== formatDay(m.createdAt);
-                    return (
-                      <div key={m.id}>
-                        {showDay && (
-                          <div className="my-2 flex justify-center">
-                            <span className="rounded-full bg-muted px-3 py-0.5 text-[11px] text-muted-foreground">
-                              {formatDay(m.createdAt)}
-                            </span>
-                          </div>
-                        )}
-                        <div className={cn("flex", mine ? "justify-end" : "justify-start")}>
-                          <div
-                            className={cn(
-                              "max-w-[75%] rounded-2xl px-3 py-2 text-sm shadow-sm",
-                              mine ? "bg-primary text-primary-foreground rounded-br-sm" : "bg-muted rounded-bl-sm",
-                            )}
-                          >
-                            {mediaBubble(m, saveMedia)}
-                            {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
-                            <div
-                              className={cn(
-                                "mt-0.5 flex items-center justify-end gap-1 text-[10px]",
-                                mine ? "text-primary-foreground/70" : "text-muted-foreground",
-                              )}
-                            >
-                              <span>{formatTime(m.createdAt)}</span>
-                              {mine && (m.readAt ? <CheckCheck className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />)}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-                <div ref={messagesEndRef} />
+                  <p className="text-sm font-medium text-foreground">No updates yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Statuses from your contacts appear here for 24 hours.
+                  </p>
+                </div>
+              ) : (
+                otherGroups.map((g) => (
+                  <button
+                    key={g.userId}
+                    onClick={() => openStatusViewer(g.items)}
+                    className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-muted"
+                  >
+                    <div className="shrink-0 rounded-full bg-gradient-to-tr from-bio to-chem p-[2px]">
+                      <Avatar src={g.image} name={g.name} size={50} />
+                    </div>
+                    <div className="min-w-0 flex-1 border-b border-border/50 pb-2">
+                      <p className="truncate text-[15px] font-medium text-foreground">{g.name}</p>
+                      <p className="text-xs text-muted-foreground">{statusTime(g.items[0].createdAt)}</p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
+                      {g.items.length}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+              <div className="mb-3 grid h-16 w-16 place-items-center rounded-full bg-muted">
+                <Phone className="h-7 w-7 text-muted-foreground" />
               </div>
-
-              {/* Input */}
-              <div className="flex items-center gap-2 border-t border-border p-3">
-                <label className="relative cursor-pointer text-muted-foreground hover:text-foreground">
-                  {sending ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                  ) : (
-                    <Paperclip className="h-5 w-5" />
-                  )}
-                  <input
-                    type="file"
-                    accept="image/*,video/*,audio/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) handleFile(f);
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
-                <Input
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendText();
-                    }
-                  }}
-                  placeholder="Type a message..."
-                  className="flex-1"
-                />
-                <Button size="icon" onClick={handleSendText} disabled={!text.trim() || sending}>
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
+              <p className="text-sm font-medium text-foreground">Calls</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Call history will appear here. Coming soon.
+              </p>
             </div>
           )}
         </div>
+
+        {/* FAB */}
+        <button
+          onClick={() => setNewChatOpen(true)}
+          aria-label="New chat"
+          className="absolute bottom-8 right-4 grid h-14 w-14 place-items-center rounded-full bg-primary text-white shadow-lg transition-transform hover:scale-105 active:scale-95"
+        >
+          <MessageSquarePlus className="h-7 w-7" />
+        </button>
       </div>
+
+      {/* INSIDE: active chat */}
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col",
+          (!activeId || mobilePane === "list") && "hidden md:flex",
+        )}
+      >
+        {!activeId ? (
+          <div className="relative flex flex-1 flex-col items-center justify-center bg-card px-6 text-center">
+            <div className="grid h-20 w-20 place-items-center rounded-full bg-muted">
+              <MessageCircle className="h-9 w-9 text-muted-foreground" />
+            </div>
+            <h2 className="mt-4 text-lg font-medium text-foreground">Select a chat to start messaging</h2>
+            <p className="mt-1 max-w-xs text-sm text-muted-foreground">
+              Pick a conversation from the list, or start a new one.
+            </p>
+          </div>
+        ) : (
+          <div className="relative flex h-full flex-col">
+            {/* Top wallpaper hint (WhatsApp style) */}
+            <div
+              className="pointer-events-none absolute inset-0 z-0"
+              style={{ background: "var(--background)" }}
+            />
+            <div
+              className="pointer-events-none absolute inset-0 z-0 opacity-[0.04]"
+              style={{
+                backgroundImage:
+                  "radial-gradient(circle at 20% 20%, #fff 1px, transparent 1px), radial-gradient(circle at 80% 40%, #fff 1px, transparent 1px), radial-gradient(circle at 40% 70%, #fff 1px, transparent 1px), radial-gradient(circle at 90% 90%, #fff 1px, transparent 1px)",
+                backgroundSize: "180px 180px",
+              }}
+            />
+
+            {/* Header */}
+            <div className="relative z-10 flex h-14 items-center gap-2 bg-card px-3">
+              <button onClick={closeChat} className="text-muted-foreground hover:text-foreground md:hidden">
+                <ArrowLeft className="h-5 w-5" />
+              </button>
+              <Avatar
+                src={activeConv?.image || null}
+                name={activeConv?.name || activeUser?.name || "User"}
+                online={activeOnline}
+                size={40}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[15px] font-medium text-foreground">
+                  {activeConv?.name || activeUser?.name || "User"}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {lastSeenLabel(activeConv?.lastSeen || activeUser?.lastSeen || null, activeConv?.status || activeUser?.status || "offline")}
+                </p>
+              </div>
+              <div className="flex items-center gap-4 text-muted-foreground">
+                <button
+                  onClick={() => showToast("Video calls coming soon.", "info")}
+                  className="hover:text-foreground"
+                >
+                  <Video className="h-5 w-5" />
+                </button>
+                <button
+                  onClick={() => showToast("Voice calls coming soon.", "info")}
+                  className="hover:text-foreground"
+                >
+                  <Phone className="h-5 w-5" />
+                </button>
+                <div className="relative">
+                  <button
+                    onClick={() => toggleMenu("chat")}
+                    aria-label="Chat menu"
+                    className="hover:text-foreground"
+                  >
+                    <MoreVertical className="h-5 w-5" />
+                  </button>
+                  {menuOpen === "chat" && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setMenuOpen("none")} />
+                      <div
+                        className="absolute right-0 top-9 z-50 w-60 overflow-hidden rounded-xl border border-border py-1.5 text-sm shadow-xl"
+                        style={{ background: "var(--popover)", color: "var(--foreground)", boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}
+                      >
+                        <button
+                          onClick={() => { setContactOpen(true); setMenuOpen("none"); }}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted"
+                        >
+                          <UserRound className="h-4 w-4 text-muted-foreground" /> Contact info
+                        </button>
+                        <button
+                          onClick={clearMessages}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted"
+                        >
+                          <Smile className="h-4 w-4 text-muted-foreground" /> Clear messages
+                        </button>
+                        <button
+                          onClick={deleteChat}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-red-400 hover:bg-muted"
+                        >
+                          <Trash2 className="h-4 w-4" /> Delete chat
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Messages */}
+            <div className="relative z-10 min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-1">
+              {loadingMsgs && messages.length === 0 ? (
+                <div className="flex justify-center py-10">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                messages.map((m, i) => {
+                  const mine = m.senderId === me;
+                  const prev = messages[i - 1];
+                  const showDay = !prev || formatDay(prev.createdAt) !== formatDay(m.createdAt);
+                  return (
+                    <div key={m.id}>
+                      {showDay && (
+                        <div className="my-2 flex justify-center">
+                          <span
+                            className="rounded-md px-3 py-1 text-[11px] text-foreground/80"
+                            style={{ background: "var(--muted)", boxShadow: "0 1px 1px rgba(0,0,0,0.3)" }}
+                          >
+                            {formatDay(m.createdAt)}
+                          </span>
+                        </div>
+                      )}
+                      <div className={cn("flex", mine ? "justify-end" : "justify-start")}>
+                        <div
+                          className={cn(
+                            "relative max-w-[80%] rounded-lg px-2 py-1.5 text-sm shadow-sm",
+                            mine
+                              ? "rounded-tr-md bg-primary"
+                              : "rounded-tl-md bg-muted",
+                          )}
+                        >
+                          {mediaBubble(m, saveMedia)}
+                          {m.text && (
+                            <p className="whitespace-pre-wrap break-words pl-0.5 pr-9 text-[14px] text-foreground">
+                              {m.text}
+                            </p>
+                          )}
+                          <div
+                            className={cn(
+                              "mt-0.5 flex items-center justify-end gap-1 text-[11px]",
+                              mine ? "text-primary-foreground/70" : "text-muted-foreground",
+                            )}
+                          >
+                            <span>{formatTime(m.createdAt)}</span>
+                            {mine &&
+                              (m.readAt ? (
+                                <CheckCheck className="h-4 w-4 text-primary-foreground/80" />
+                              ) : (
+                                <Check className="h-4 w-4" />
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Input */}
+            <div className="relative z-10">
+              {emojiOpen && (
+                <div
+                  className="absolute bottom-[calc(100%+8px)] left-3 right-3 rounded-xl border border-border p-3"
+                  style={{ background: "var(--popover)", boxShadow: "0 -4px 24px rgba(0,0,0,0.4)" }}
+                >
+                  <div className="grid max-h-44 grid-cols-8 overflow-y-auto">
+                    {EMOJIS.map((e) => (
+                      <button
+                        key={e}
+                        type="button"
+                        onClick={() => insertEmoji(e)}
+                        className="grid h-9 w-9 place-items-center rounded-lg text-xl hover:bg-muted"
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {recording ? (
+                <div className="flex h-[60px] items-center gap-3 border-t border-border bg-card px-3 py-2.5">
+                  <button
+                    onClick={cancelRecording}
+                    aria-label="Cancel recording"
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                  <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" />
+                  <span className="text-sm font-medium tabular-nums text-foreground">
+                    {formatRecTime(recordingTime)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="h-1 overflow-hidden rounded-full bg-muted">
+                      <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
+                    </div>
+                  </div>
+                  <button
+                    onClick={stopRecording}
+                    aria-label="Stop and send"
+                    className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-primary text-white"
+                  >
+                    <StopCircle className="h-6 w-6" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 border-t border-border bg-card px-3 py-2.5">
+                  <button
+                    onClick={() => setEmojiOpen((o) => !o)}
+                    className={cn("hover:text-foreground", emojiOpen ? "text-primary" : "text-muted-foreground")}
+                    aria-label="Emoji"
+                  >
+                    <Smile className="h-6 w-6" />
+                  </button>
+                  <input
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendText();
+                      }
+                    }}
+                    placeholder="Type a message"
+                    className="h-11 flex-1 rounded-lg bg-muted px-4 text-[14px] text-foreground placeholder:text-muted-foreground outline-none"
+                  />
+                  <label className="relative cursor-pointer text-muted-foreground hover:text-foreground">
+                    <Paperclip className="h-6 w-6" />
+                    <input
+                      type="file"
+                      accept="image/*,video/*,audio/*"
+                      className="hidden"
+                      disabled={sending}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleFile(f);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  {text.trim() ? (
+                    <button
+                      onClick={handleSendText}
+                      disabled={sending}
+                      aria-label="Send"
+                      className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-primary text-white transition-transform hover:scale-105 active:scale-95 disabled:opacity-60"
+                    >
+                      {sending ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <Send className="h-5 w-5" />
+                      )}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={startRecording}
+                      aria-label="Record voice note"
+                      className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-primary text-white"
+                    >
+                      <Mic className="h-5 w-5" />
+                    </button>
+                  )}
+                </div>
+              )}
+              {recordingError && (
+                <div className="absolute bottom-[calc(100%+8px)] left-3 right-3 z-20 rounded-lg border border-border px-3 py-2 text-xs text-red-400" style={{ background: "var(--popover)" }}>
+                  {recordingError}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* NEW CHAT SHEET */}
+      {newChatOpen && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-background/80 p-0 md:items-center md:p-6">
+          <div className="flex h-[85dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-card md:h-[70dvh] md:max-w-md md:rounded-2xl">
+            <div className="flex items-center justify-between border-b border-border bg-card px-4 py-3">
+              <div className="flex items-center gap-2">
+                <button onClick={() => setNewChatOpen(false)} className="text-muted-foreground hover:text-foreground">
+                  <X className="h-5 w-5" />
+                </button>
+                <h2 className="text-base font-medium">New chat</h2>
+              </div>
+            </div>
+            <div className="px-3 py-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={newChatSearch}
+                  onChange={(e) => setNewChatSearch(e.target.value)}
+                  placeholder="Search by name or email"
+                  className="h-10 w-full rounded-lg bg-muted pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground outline-none"
+                />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {filteredNewChat.length === 0 ? (
+                <div className="flex flex-col items-center justify-center px-6 py-10 text-center">
+                  <CircleDot className="mb-2 h-8 w-8 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">No users found.</p>
+                </div>
+              ) : (
+                filteredNewChat.map((u) => {
+                  const inConversation = conversations.some((c) => c.id === u.id);
+                  return (
+                    <button
+                      key={u.id}
+                      onClick={() => openChat(u.id)}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted"
+                    >
+                      <Avatar src={u.image} name={u.name} online={u.status === "online"} size={44} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[15px] font-medium text-foreground">{u.name}</p>
+                        {u.about && <p className="truncate text-xs text-muted-foreground">{u.about}</p>}
+                      </div>
+                      {inConversation && (
+                        <span className="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-medium text-primary">
+                          Chat
+                        </span>
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONTACT INFO SHEET */}
+      {contactOpen && activeConv && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
+          <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-card">
+            <div className="flex items-center justify-between border-b border-border bg-card px-4 py-3">
+              <h2 className="text-base font-medium">Contact info</h2>
+              <button
+                onClick={() => setContactOpen(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex flex-col items-center px-6 py-6 text-center">
+              <Avatar
+                src={activeConv.image || activeUser?.image || null}
+                name={activeConv.name || activeUser?.name || "User"}
+                online={activeOnline}
+                size={88}
+              />
+              <h3 className="mt-3 text-lg font-semibold">
+                {activeConv.name || activeUser?.name || "User"}
+              </h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {activeConv.status === "online"
+                  ? "online"
+                  : lastSeenLabel(activeConv.lastSeen || activeUser?.lastSeen || null, "offline")}
+              </p>
+              {activeUser?.about && (
+                <p className="mt-3 max-w-xs text-sm text-foreground/80">{activeUser.about}</p>
+              )}
+              {activeUser?.email && (
+                <div className="mt-4 w-full rounded-xl bg-card px-4 py-3 text-left">
+                  <p className="text-xs text-muted-foreground">Email</p>
+                  <p className="mt-0.5 break-all text-sm text-foreground">{activeUser.email}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STATUS COMPOSER SHEET */}
+      {composerOpen && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-background/80 p-0 md:items-center md:p-6">
+          <div className="flex h-[70dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-card md:h-auto md:max-w-md md:rounded-2xl">
+            <div className="flex items-center justify-between border-b border-border bg-card px-4 py-3">
+              <div className="flex items-center gap-2">
+                <button onClick={() => setComposerOpen(false)} className="text-muted-foreground hover:text-foreground">
+                  <X className="h-5 w-5" />
+                </button>
+                <h2 className="text-base font-medium">Add status</h2>
+              </div>
+              <button
+                onClick={postStatus}
+                disabled={statusBusy || (!statusText.trim() && !statusMedia)}
+                className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {statusBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Share
+              </button>
+            </div>
+            <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
+              <div className="flex items-center gap-3">
+                <Avatar src={myImage} name={myName} size={44} />
+                <span className="text-sm text-muted-foreground">
+                  Visible to everyone on BioPulse for 24 hours
+                </span>
+              </div>
+              <textarea
+                value={statusText}
+                onChange={(e) => setStatusText(e.target.value)}
+                placeholder="Write a status update…"
+                maxLength={2000}
+                className="min-h-[120px] w-full resize-none rounded-xl border border-border bg-muted px-4 py-3 text-[15px] text-foreground placeholder:text-muted-foreground outline-none"
+              />
+              {statusMedia && (
+                <div className="relative">
+                  <img src={statusMedia.url} alt="status media" className="max-h-56 w-full rounded-xl object-cover" />
+                  <button
+                    onClick={() => setStatusMedia(null)}
+                    className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-background/80 text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-border py-3 text-sm font-medium text-muted-foreground hover:bg-accent">
+                <Paperclip className="h-4 w-4" /> Add a photo
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={statusBusy}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) pickStatusImage(f);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STATUS VIEWER */}
+      {viewerItems && (
+        <div
+          className="fixed inset-0 z-[60] flex flex-col bg-background"
+          onPointerDown={() => setViewerPaused(true)}
+          onPointerUp={() => setViewerPaused(false)}
+          onPointerLeave={() => setViewerPaused(false)}
+        >
+          <div className="flex items-center gap-3 px-4 pt-4">
+            <button onClick={() => setViewerItems(null)} className="p-1 text-muted-foreground hover:text-foreground">
+              <X className="h-6 w-6" />
+            </button>
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <Avatar src={viewerItems[viewerIdx].image} name={viewerItems[viewerIdx].name} size={36} />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">{viewerItems[viewerIdx].name}</p>
+                <p className="text-[11px] text-muted-foreground">{statusTime(viewerItems[viewerIdx].createdAt)}</p>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 px-4 pt-2">
+            {viewerItems.map((s, i) => (
+              <div key={s.id} className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-foreground"
+                  style={{ width: `${i < viewerIdx ? 100 : i === viewerIdx ? viewerProgress : 0}%` }}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="relative min-h-0 flex-1">
+            {viewerItems[viewerIdx].imageUrl ? (
+              <img src={viewerItems[viewerIdx].imageUrl} alt="status" className="h-full w-full object-contain" />
+            ) : (
+              <div className="flex h-full items-center justify-center p-8">
+                <div className="w-full rounded-2xl border border-border bg-card p-6 text-center">
+                  <p className="whitespace-pre-wrap text-lg text-foreground">{viewerItems[viewerIdx].text}</p>
+                </div>
+              </div>
+            )}
+            <button onClick={viewerPrev} aria-label="Previous" className="absolute inset-y-0 left-0 w-1/3" />
+            <button onClick={viewerNext} aria-label="Next" className="absolute inset-y-0 right-0 w-1/3" />
+          </div>
+          <div className="px-4 py-3 text-center text-[11px] text-muted-foreground">
+            Hold to pause · Tap right or left to move
+          </div>
+        </div>
+      )}
     </div>
   );
 }

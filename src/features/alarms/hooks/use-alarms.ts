@@ -19,13 +19,29 @@ export function useAlarms() {
       if (raw) {
         const parsed = JSON.parse(raw);
         const list: Alarm[] = parsed.alarms ?? [];
-        // Older alarms could still carry a removed custom sound reference.
+        const clean: Alarm[] = [];
         for (const a of list) {
-          if (typeof a.sound === "string" && a.sound.startsWith("custom:")) {
-            a.sound = "chime";
-          }
+          // A malformed entry (missing/broken time) would crash the alarm
+          // renderer — drop it instead of blanking the whole app.
+          if (!a || typeof a.time !== "string" || !a.time.includes(":")) continue;
+          clean.push({
+            id: String(a.id ?? ""),
+            time: a.time,
+            label: typeof a.label === "string" ? a.label : "Alarm",
+            priority: a.priority === "high" ? "high" : "normal",
+            subject: ["biology", "chemistry", "physics", "agriculture"].includes(a.subject)
+              ? a.subject
+              : "none",
+            sound: a.sound === "digital" || a.sound === "bio" ? a.sound : "chime",
+            tts: !!a.tts,
+            repeatDays: Array.isArray(a.repeatDays)
+              ? a.repeatDays.map(Number).filter((n) => !Number.isNaN(n))
+              : [],
+            enabled: a.enabled !== false,
+            createdAt: typeof a.createdAt === "number" ? a.createdAt : Date.now(),
+          });
         }
-        setAlarms(list);
+        setAlarms(clean);
         setFired(parsed.fired ?? {});
       }
     } catch {

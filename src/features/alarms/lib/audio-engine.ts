@@ -39,9 +39,30 @@ class AudioEngineClass {
     this.activeOscillators = [];
   }
 
-  cue(_name: string): void {
+  cue(name: string): void {
     this.ensure();
     if (!this.ctx || !this.masterGain) return;
+    if (name === "message") {
+      // Two-tone "message received" blip: 987 Hz then 1318 Hz.
+      const now = this.ctx.currentTime;
+      const tone = (freq: number, at: number, dur: number) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.01, at);
+        gain.gain.linearRampToValueAtTime(0.35, at + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, at + dur);
+        osc.connect(gain);
+        gain.connect(this.masterGain!);
+        osc.start(at);
+        osc.stop(at + dur + 0.02);
+        this.activeOscillators.push(osc);
+      };
+      tone(987, now, 0.16);
+      tone(1318, now + 0.16, 0.2);
+      return;
+    }
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = "sine";

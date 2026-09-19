@@ -1,10 +1,42 @@
-/* BioPulse service worker — offline app-shell + asset caching */
-const CACHE_NAME = "biopulse-v2";
+/* BioPulse service worker — offline app-shell + asset caching.
+ * Navigations are served cache-first so the app shell loads instantly even
+ * fully offline (WebView otherwise shows a hard network error). In the
+ * background the live page is fetched; if it differs from the cached copy a
+ * NEW_VERSION message is posted so open pages reload once to the new deploy.
+ */
+const CACHE_NAME = "biopulse-v6";
 const OFFLINE_FALLBACK = "/offline.html";
 
 // Core static assets to precache on install.
 const PRECACHE = [
   "/",
+  "/dashboard",
+  "/alarms",
+  "/reminders",
+  "/focus",
+  "/planner",
+  "/notes",
+  "/note-pad",
+  "/flashcards",
+  "/past-papers",
+  "/exam-marks",
+  "/fees",
+  "/mistakes",
+  "/questions",
+  "/practice",
+  "/topics",
+  "/search",
+  "/diagrams",
+  "/analytics",
+  "/work-log",
+  "/ai-timetable",
+  "/ai-tutor",
+  "/downloads",
+  "/telegram",
+  "/onboarding",
+  "/profile",
+  "/settings",
+  "/chat",
   "/manifest.json",
   "/icon-192.png",
   "/icon-512.png",
@@ -51,6 +83,25 @@ function fallbackResponse() {
   );
 }
 
+function refreshNavigation(req) {
+  fetch(req)
+    .then(async (response) => {
+      if (!response || !response.ok) return;
+      const cache = await caches.open(CACHE_NAME);
+      const prev = await cache.match(req);
+      await cache.put(req, response.clone());
+      if (prev) {
+        const prevText = await prev.text();
+        const freshText = await response.clone().text();
+        if (prevText !== freshText) {
+          const clients = await self.clients.matchAll({ type: "window" });
+          clients.forEach((client) => client.postMessage({ type: "NEW_VERSION" }));
+        }
+      }
+    })
+    .catch(() => {});
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
@@ -58,25 +109,34 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Navigations (HTML pages): cache-first, network update, offline fallback.
+  // Navigations (HTML pages): serve the cached copy instantly (offline-friendly)
+  // and refresh it in the background; if nothing is cached yet, fetch from the
+  // network and fall back to the bundled offline page instead of the browser's
+  // default "web page not available" error screen.
   if (request.mode === "navigate") {
     event.respondWith(
-      caches.match(request).then(
-        (cached) =>
-          cached ||
-          fetch(request)
-            .then((response) => {
-              const copy = response.clone();
-              caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-              return response;
-            })
-            .catch(fallbackResponse),
-      ),
+      caches.match(request).then((cached) => {
+        if (cached) {
+          refreshNavigation(request);
+          return cached;
+        }
+        return fetch(request)
+          .then((response) => {
+            if (response && response.ok) {
+              caches.open(CACHE_NAME).then((cache) =>
+                cache.put(request, response.clone()),
+              );
+            }
+            return response;
+          })
+          .catch(() => fallbackResponse());
+      }),
     );
     return;
   }
 
-  // Static assets: stale-while-revalidate.
+  // Static assets: stale-while-revalidate. Hashed chunk URLs change on every
+  // build, so a stale match only ever serves content for the current version.
   event.respondWith(
     caches.match(request).then((cached) => {
       const network = fetch(request)
