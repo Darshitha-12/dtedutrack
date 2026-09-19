@@ -69,9 +69,14 @@ export async function POST(req: Request) {
 
     const sendResult = await sendOtpEmail(normalizedEmail, code);
 
-    // Dev convenience: when no email provider is configured, return the code in the
-    // response so development/testing can proceed. Never do this in production.
-    if (!sendResult.ok && process.env.NODE_ENV !== "production") {
+    // Fallback when no email provider is available:
+    //  - dev mode always returns the code,
+    //  - production returns the code only when OTP_DEV_FALLBACK=1 is explicitly
+    //    set on the host. This keeps login working on deploys that haven't
+    //    configured Resend yet, without weakening production by default.
+    const allowDevCode =
+      process.env.NODE_ENV !== "production" || process.env.OTP_DEV_FALLBACK === "1";
+    if (!sendResult.ok && allowDevCode) {
       return NextResponse.json({ ok: true, devCode: code, warning: sendResult.error });
     }
     if (!sendResult.ok) {
