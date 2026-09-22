@@ -366,19 +366,50 @@ export default function DashboardPage() {
   }
 
   const examCountdown = useMemo(() => {
-    const target = new Date(
-      profile?.examDate && profile.examDate.trim() !== ""
-        ? profile.examDate
-        : "2027-08-16"
-    );
+    const dateStr =
+      profile?.examDate && profile.examDate.trim() !== "" ? profile.examDate : "2027-08-16";
+
+    // Parse the date-only string as a LOCAL midnight (Sri Lanka, UTC+5:30).
+    // new Date("YYYY-MM-DD") would silently parse as UTC midnight, making the
+    // countdown expire ~5.5h early and the day count off by one.
+    const parts = dateStr.split("-").map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) {
+      return { months: 0, days: 0, hours: 0, minutes: 0, seconds: 0, expired: true, target: null };
+    }
+    const [y, m, d] = parts;
+    const target = new Date(y, m - 1, d, 0, 0, 0, 0); // local midnight of exam day
+
     const diff = target.getTime() - now.getTime();
     if (diff <= 0) {
       return { months: 0, days: 0, hours: 0, minutes: 0, seconds: 0, expired: true, target };
     }
+
+    // Real calendar months/days between now (local) and the exam date, instead of
+    // approximating every month as 30 days (that drifts vs 28–31 day months).
+    const addMonthsClamped = (base: Date, n: number): Date => {
+      const totalMonth = base.getMonth() + n;
+      const y = base.getFullYear() + Math.floor(totalMonth / 12);
+      const m = ((totalMonth % 12) + 12) % 12;
+      const lastDay = new Date(y, m + 1, 0).getDate();
+      return new Date(y, m, Math.min(base.getDate(), lastDay), 0, 0, 0, 0);
+    };
+
+    let months = (target.getFullYear() - now.getFullYear()) * 12 + (target.getMonth() - now.getMonth());
+    let anchor = addMonthsClamped(now, months);
+    if (anchor.getTime() > target.getTime()) {
+      months -= 1;
+      anchor = addMonthsClamped(now, months);
+    }
+    if (months < 0) {
+      months = 0;
+      anchor = now;
+    }
+    const days = Math.max(
+      0,
+      Math.floor((target.getTime() - anchor.getTime()) / (1000 * 60 * 60 * 24)),
+    );
+
     const totalSeconds = Math.floor(diff / 1000);
-    const totalDays = Math.floor(totalSeconds / 86400);
-    const months = Math.floor(totalDays / 30);
-    const days = totalDays % 30;
     const hours = Math.floor((totalSeconds % 86400) / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
