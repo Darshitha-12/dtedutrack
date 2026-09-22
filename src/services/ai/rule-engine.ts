@@ -82,7 +82,11 @@ export function computeAdvice(
   }
 
   if (examDate) {
-    const days = Math.ceil((new Date(examDate).getTime() - Date.now()) / 864e5);
+    const parts = examDate.split("-").map(Number);
+    const examDays = parts.length === 3 && parts.every((n) => !isNaN(n))
+      ? (new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0).getTime() - Date.now()) / 864e5
+      : NaN;
+    const days = Math.ceil(examDays);
     if (days <= 14 && days >= 0) {
       out.push({
         tone: "crit",

@@ -374,46 +374,25 @@ export default function DashboardPage() {
     // countdown expire ~5.5h early and the day count off by one.
     const parts = dateStr.split("-").map(Number);
     if (parts.length !== 3 || parts.some(isNaN)) {
-      return { months: 0, days: 0, hours: 0, minutes: 0, seconds: 0, expired: true, target: null };
+      return { days: 0, hours: 0, minutes: 0, seconds: 0, expired: true, target: null };
     }
     const [y, m, d] = parts;
     const target = new Date(y, m - 1, d, 0, 0, 0, 0); // local midnight of exam day
 
     const diff = target.getTime() - now.getTime();
     if (diff <= 0) {
-      return { months: 0, days: 0, hours: 0, minutes: 0, seconds: 0, expired: true, target };
+      return { days: 0, hours: 0, minutes: 0, seconds: 0, expired: true, target };
     }
 
-    // Real calendar months/days between now (local) and the exam date, instead of
-    // approximating every month as 30 days (that drifts vs 28–31 day months).
-    const addMonthsClamped = (base: Date, n: number): Date => {
-      const totalMonth = base.getMonth() + n;
-      const y = base.getFullYear() + Math.floor(totalMonth / 12);
-      const m = ((totalMonth % 12) + 12) % 12;
-      const lastDay = new Date(y, m + 1, 0).getDate();
-      return new Date(y, m, Math.min(base.getDate(), lastDay), 0, 0, 0, 0);
-    };
-
-    let months = (target.getFullYear() - now.getFullYear()) * 12 + (target.getMonth() - now.getMonth());
-    let anchor = addMonthsClamped(now, months);
-    if (anchor.getTime() > target.getTime()) {
-      months -= 1;
-      anchor = addMonthsClamped(now, months);
-    }
-    if (months < 0) {
-      months = 0;
-      anchor = now;
-    }
-    const days = Math.max(
-      0,
-      Math.floor((target.getTime() - anchor.getTime()) / (1000 * 60 * 60 * 24)),
-    );
-
+    // One consistent decomposition of the remaining time:
+    // days = whole remaining days, hours/min/sec = within-day remainder.
+    // This always adds up exactly to the real remaining time (no month-day drift).
     const totalSeconds = Math.floor(diff / 1000);
+    const days = Math.floor(totalSeconds / 86400);
     const hours = Math.floor((totalSeconds % 86400) / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
-    return { months, days, hours, minutes, seconds, expired: false, target };
+    return { days, hours, minutes, seconds, expired: false, target };
   }, [profile?.examDate, now]);
 
   useEffect(() => {
@@ -439,7 +418,6 @@ export default function DashboardPage() {
 
   /* ---- Countdown segment boxes — always visible, fixed height/width. ---- */
   const cdSegments = [
-    { label: "Months", value: examCountdown.months },
     { label: "Days", value: examCountdown.days },
     { label: "Hours", value: examCountdown.hours },
     { label: "Minutes", value: examCountdown.minutes },
@@ -601,7 +579,7 @@ export default function DashboardPage() {
               </p>
             </div>
           </div>
-          <div className="w-full sm:w-auto grid grid-cols-5 gap-1.5 sm:gap-2">
+          <div className="w-full sm:w-auto grid grid-cols-4 gap-1.5 sm:gap-2">
             {cdSegments.map((s) => (
               <div
                 key={s.label}
