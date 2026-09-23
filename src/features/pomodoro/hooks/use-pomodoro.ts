@@ -128,6 +128,16 @@ export function usePomodoroTimer() {
     return () => clearInterval(id);
   }, [tick]);
 
+  // Re-render while running so the visible countdown ticks live (the remainingMs
+  // below is derived from Date.now() at render time, so it needs a trigger).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live.running) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, [live.running]);
+
   useEffect(() => {
     const id = setInterval(() => {
       const current = liveRef.current;
@@ -228,7 +238,7 @@ export function usePomodoroTimer() {
 
   const remainingMs =
     live.running || live.pausedMs > 0
-      ? Math.max(0, live.running ? live.endTs - Date.now() : live.pausedMs)
+      ? Math.max(0, live.running ? live.endTs - now : live.pausedMs)
       : phaseDuration(live.phase === "idle" ? "study" : live.phase, config);
 
   const totalMs =
