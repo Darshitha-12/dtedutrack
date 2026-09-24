@@ -71,11 +71,14 @@ export async function POST(req: Request) {
 
     // Fallback when no email provider is available:
     //  - dev mode always returns the code,
-    //  - production returns the code only when OTP_DEV_FALLBACK=1 is explicitly
-    //    set on the host. This keeps login working on deploys that haven't
-    //    configured Resend yet, without weakening production by default.
+    //  - production falls back automatically when the email service is not
+    //    configured at all (no RESEND_API_KEY), so login keeps working on
+    //    deploys that haven't added Resend yet.
+    const providerConfigured = Boolean(process.env.RESEND_API_KEY);
     const allowDevCode =
-      process.env.NODE_ENV !== "production" || process.env.OTP_DEV_FALLBACK === "1";
+      process.env.NODE_ENV !== "production" ||
+      !providerConfigured ||
+      process.env.OTP_DEV_FALLBACK === "1";
     if (!sendResult.ok && allowDevCode) {
       return NextResponse.json({ ok: true, devCode: code, warning: sendResult.error });
     }
