@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { useSession } from "next-auth/react";
 import {
   DEFAULT_POMODORO,
   DEFAULT_LIVE,
@@ -14,6 +15,76 @@ import { notificationService } from "@/services/notification";
 const CONFIG_KEY = "biopulse_pomodoro_config_v1";
 const LIVE_KEY = "biopulse_pomodoro_live_v1";
 const STATUS_TAG = "biopulse-pomodoro-status";
+
+const WORKLOG_QUEUE_KEY = "bp_worklog_queue_v1";
+
+interface WorkLogQueueItem {
+  date: string;
+  minutes: number;
+  note?: string;
+}
+
+function todayStr(): string {
+  const d = new Date();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mo}-${da}`;
+}
+
+function loadWorkLogQueue(): WorkLogQueueItem[] {
+  try {
+    const raw = localStorage.getItem(WORKLOG_QUEUE_KEY);
+    if (!raw) return [];
+    const o = JSON.parse(raw);
+    return Array.isArray(o) ? o.filter((x) => typeof x === "object" && x !== null) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveWorkLogQueue(q: WorkLogQueueItem[]) {
+  try {
+    localStorage.setItem(WORKLOG_QUEUE_KEY, JSON.stringify(q));
+  } catch {
+    // ignore
+  }
+}
+
+async function postWorkLog(minutes: number): Promise<boolean> {
+  try {
+    const res = await fetch("/api/work-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: todayStr(), minutes }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function flushWorkLogQueue() {
+  const q = loadWorkLogQueue();
+  if (!q.length) return;
+  const remaining: WorkLogQueueItem[] = [];
+  for (const it of q) {
+    const ok = await postWorkLog(it.minutes);
+    if (!ok) remaining.push(it);
+  }
+  saveWorkLogQueue(remaining);
+}
+
+function saveWorkLog(minutes: number) {
+  postWorkLog(minutes).then((ok) => {
+    if (ok) {
+      flushWorkLogQueue();
+      return;
+    }
+    const q = loadWorkLogQueue();
+    q.push({ date: todayStr(), minutes });
+    saveWorkLogQueue(q);
+  });
+}
 
 function loadConfig(): PomodoroConfig {
   try {
@@ -54,6 +125,7 @@ function phaseDuration(phase: PomodoroPhase, config: PomodoroConfig): number {
 }
 
 export function usePomodoroTimer() {
+  const { status: sessionStatus } = useSession();
   const [config, setConfig] = useState<PomodoroConfig>(() =>
     loadConfig(),
   );
@@ -80,6 +152,11 @@ export function usePomodoroTimer() {
 
     if (snapshot.phase === "study") {
       const isLast = snapshot.cyclesDone + 1 >= cfg.cycles;
+      const remaining = Math.max(0, snapshot.running ? snapshot.endTs - now : snapshot.pausedMs);
+      const workedMs = phaseDuration("study", cfg) - remaining;
+      if (workedMs >= 60_000) {
+        saveWorkLog(Math.max(1, Math.round(workedMs / 60_000)));
+      }
       next = {
         ...snapshot,
         phase: isLast ? "longbreak" : "break",
@@ -171,6 +248,17 @@ export function usePomodoroTimer() {
       // storage full or unavailable
     }
   }, [live]);
+
+  // Flush any work-log entries queued while signed out / offline once an auth
+  // session is available, and retry when we come back online.
+  useEffect(() => {
+    if (sessionStatus === "authenticated") {
+      flushWorkLogQueue();
+    }
+    const onOnline = () => flushWorkLogQueue();
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [sessionStatus]);
 
   useEffect(() => {
     const current = liveRef.current;
