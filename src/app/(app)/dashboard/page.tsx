@@ -187,7 +187,13 @@ export default function DashboardPage() {
   }
 
   function fmtWork(mins: number) {
-    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+    const h = Math.floor(mins / 60);
+    const m = Math.round(mins % 60);
+    if (h > 0) {
+      const mm = m > 0 ? ` ${m}m` : "";
+      return `${h}h${mm}`;
+    }
+    return `${m}m`;
   }
 
   useEffect(() => {
@@ -789,9 +795,24 @@ export default function DashboardPage() {
                 <BarChart data={studyWeek} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
                   <XAxis dataKey="date" fontSize={10} tickFormatter={(d: string) => d.slice(5)} />
-                  <YAxis fontSize={10} />
+                  <YAxis
+                    fontSize={10}
+                    tickFormatter={(v: number) => {
+                      const h = Math.floor(v / 60);
+                      const m = v % 60;
+                      if (h > 0 && m === 0) return `${h}h`;
+                      if (h > 0) return `${h}h${m}m`;
+                      return `${m}m`;
+                    }}
+                  />
                   <Tooltip
-                    formatter={(v: number) => [`${v}m`, "Minutes"]}
+                    formatter={(v: number) => {
+                      const h = Math.floor(v / 60);
+                      const m = Math.round(v % 60);
+                      if (h > 0 && m === 0) return [`${h}h`, "Study Time"];
+                      if (h > 0) return [`${h}h ${m}m`, "Study Time"];
+                      return [`${m}m`, "Study Time"];
+                    }}
                     labelFormatter={(d) => d}
                   />
                   <Bar dataKey="minutes" fill="#10B981" radius={[4, 4, 0, 0]} />
