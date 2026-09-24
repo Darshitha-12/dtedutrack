@@ -271,11 +271,28 @@ export default function ChatPage() {
     setMenuOpen((cur) => (cur === which ? "none" : which));
   };
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const nearBottomRef = useRef(true);
+  const prevActiveRef = useRef<string | null>(null);
   const activeRoomRef = useRef<string | null>(null);
 
+  const handleMessagesScroll = () => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  };
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Switching conversations always snaps to the bottom; otherwise only
+    // stick to the bottom when the user is already near it, so polling
+    // refreshes don't yank you up while reading history.
+    if (prevActiveRef.current !== activeId) {
+      prevActiveRef.current = activeId;
+      nearBottomRef.current = true;
+    }
+    if (!nearBottomRef.current) return;
+    const el = messagesScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages, activeId]);
 
   const activeUser = users.find((u) => u.id === activeId) || null;
@@ -1173,7 +1190,11 @@ export default function ChatPage() {
             </div>
 
             {/* Messages */}
-            <div className="relative z-10 min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-1">
+            <div
+              ref={messagesScrollRef}
+              onScroll={handleMessagesScroll}
+              className="relative z-10 min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-1"
+            >
               {loadingMsgs && messages.length === 0 ? (
                 <div className="flex justify-center py-10">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -1230,7 +1251,6 @@ export default function ChatPage() {
                   );
                 })
               )}
-              <div ref={messagesEndRef} />
             </div>
 
             {/* Input */}
