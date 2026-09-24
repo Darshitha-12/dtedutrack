@@ -9,3 +9,8 @@ coverage/
 
 .vercel
 .env*
+
+deploy_log*.txt
+verceldeploy*.txt
+webbuild*.txt
+webbuild_id.txt
