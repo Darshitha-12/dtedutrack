@@ -4,32 +4,21 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
-import { credentialsSignIn } from "@/lib/client-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { registerSchema, type RegisterInput } from "@/lib/validations";
-import { Loader2, AlertCircle, CheckCircle, ArrowLeft, Zap, ShieldCheck } from "lucide-react";
-
-type Method = "otp" | "password";
+import { Loader2, AlertCircle, ArrowLeft, Zap, ShieldCheck } from "lucide-react";
 
 export default function RegisterPage() {
   const router = useRouter();
   const [error, setError] = useState<string>("");
-  const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [method, setMethod] = useState<Method>("otp");
   const [step, setStep] = useState<"form" | "otp">("form");
   const [code, setCode] = useState("");
   const [devCode, setDevCode] = useState<string | null>(null);
   const [resendIn, setResendIn] = useState(0);
   const otpInputRef = useRef<HTMLInputElement>(null);
-  const [form, setForm] = useState<RegisterInput>({
-    name: "",
-    email: "",
-    password: "",
-    confirmPassword: "",
-  });
+  const [form, setForm] = useState({ name: "", email: "" });
 
   useEffect(() => {
     if (step === "otp") otpInputRef.current?.focus();
@@ -44,11 +33,11 @@ export default function RegisterPage() {
   async function sendOtp() {
     if (!form.name.trim()) {
       setError("Please enter your name.");
-      return false;
+      return;
     }
     if (!form.email.trim()) {
       setError("Please enter your email address.");
-      return false;
+      return;
     }
     setError("");
     setLoading(true);
@@ -66,15 +55,13 @@ export default function RegisterPage() {
         } else {
           setError(data.error || "Failed to send the code. Please try again.");
         }
-        return false;
+        return;
       }
       setDevCode(data.devCode ?? null);
       setStep("otp");
       setResendIn(60);
-      return true;
     } catch {
       setError("An unexpected error occurred. Please try again.");
-      return false;
     } finally {
       setLoading(false);
     }
@@ -93,20 +80,27 @@ export default function RegisterPage() {
       const res = await fetch("/api/auth/otp/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: form.email.trim(), code: c, purpose: "register", name: form.name }),
+        body: JSON.stringify({
+          email: form.email.trim(),
+          code: c,
+          purpose: "register",
+          name: form.name,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error || "Verification failed. Please try again.");
         return;
       }
-      const r = await credentialsSignIn(
-        form.email.trim(),
-        data.token as string,
-        window.location.href,
-      );
-      if (!r.ok) {
-        setError(r.error || "Sign-in failed. Please try again.");
+
+      const r = await signIn("credentials", {
+        email: form.email.trim(),
+        otpToken: data.token as string,
+        redirect: false,
+        callbackUrl: "/dashboard",
+      });
+      if (r?.error) {
+        setError("Sign-in failed. Please try again.");
         return;
       }
       router.push("/dashboard");
@@ -116,62 +110,6 @@ export default function RegisterPage() {
     } finally {
       setLoading(false);
     }
-  }
-
-  const handlePasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-
-    const result = registerSchema.safeParse(form);
-    if (!result.success) {
-      setError(result.error.issues[0].message);
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: form.name,
-          email: form.email,
-          password: form.password,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || "Registration failed. Please try again.");
-        return;
-      }
-
-      setSuccess(true);
-    } catch {
-      setError("An unexpected error occurred. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (success) {
-    return (
-      <div className="flex min-h-screen items-center justify-center px-4 bg-gradient-to-br from-background via-background to-primary/5">
-        <Card className="w-full max-w-sm p-6 space-y-6 glass text-center">
-          <CheckCircle className="h-12 w-12 mx-auto text-green-500" />
-          <div className="space-y-2">
-            <h1 className="text-2xl font-bold">Account created!</h1>
-            <p className="text-sm text-muted-foreground">
-              Your account has been created successfully. Please sign in to continue.
-            </p>
-          </div>
-          <Link href="/login">
-            <Button className="w-full">Sign in</Button>
-          </Link>
-        </Card>
-      </div>
-    );
   }
 
   return (
@@ -219,33 +157,7 @@ export default function RegisterPage() {
         )}
 
         {step === "form" && (
-          <form onSubmit={method === "otp" ? sendOtp : handlePasswordSubmit} className="space-y-4">
-            {/* Method toggle */}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => { setMethod("otp"); setError(""); }}
-                className={`flex items-center justify-center gap-2 h-10 rounded-md border text-sm font-medium transition-colors ${
-                  method === "otp"
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-input bg-background hover:bg-accent"
-                }`}
-              >
-                <ShieldCheck className="h-4 w-4" /> Email code
-              </button>
-              <button
-                type="button"
-                onClick={() => { setMethod("password"); setError(""); }}
-                className={`flex items-center justify-center gap-2 h-10 rounded-md border text-sm font-medium transition-colors ${
-                  method === "password"
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-input bg-background hover:bg-accent"
-                }`}
-              >
-                Password
-              </button>
-            </div>
-
+          <form onSubmit={(e) => { e.preventDefault(); sendOtp(); }} className="space-y-4">
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Full name</label>
               <Input
@@ -270,46 +182,17 @@ export default function RegisterPage() {
               />
             </div>
 
-            {method === "password" && (
-              <>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Password</label>
-                  <Input
-                    type="password"
-                    placeholder="Min 8 chars, mixed case + number"
-                    value={form.password}
-                    onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
-                    required
-                    autoComplete="new-password"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Confirm password</label>
-                  <Input
-                    type="password"
-                    placeholder="Repeat password"
-                    value={form.confirmPassword}
-                    onChange={(e) => setForm((p) => ({ ...p, confirmPassword: e.target.value }))}
-                    required
-                    autoComplete="new-password"
-                  />
-                </div>
-              </>
-            )}
-
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  {method === "otp" ? "Sending code..." : "Creating account..."}
+                  Sending code...
                 </>
-              ) : method === "otp" ? (
+              ) : (
                 <>
                   <ShieldCheck className="h-4 w-4 mr-2" />
                   Continue with email code
                 </>
-              ) : (
-                "Create account"
               )}
             </Button>
           </form>
@@ -352,11 +235,7 @@ export default function RegisterPage() {
               {resendIn > 0 ? (
                 <p>Resend code in {resendIn}s</p>
               ) : (
-                <button
-                  type="button"
-                  onClick={sendOtp}
-                  className="text-primary hover:underline font-medium"
-                >
+                <button type="button" onClick={sendOtp} className="text-primary hover:underline font-medium">
                   Resend code
                 </button>
               )}
