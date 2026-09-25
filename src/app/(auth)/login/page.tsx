@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
+import { credentialsSignIn } from "@/lib/client-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -141,13 +142,13 @@ function LoginForm() {
         return;
       }
 
-      const r = await signIn("credentials", {
-        email: email.trim(),
-        otpToken: data.token as string,
-        redirect: false,
-      });
-      if (r?.error) {
-        setError("Sign-in failed. Please try again.");
+      const r = await credentialsSignIn(
+        email.trim(),
+        data.token as string,
+        window.location.href,
+      );
+      if (!r.ok) {
+        setError(r.error || "Sign-in failed. Please try again.");
         return;
       }
       router.push(callbackUrl);
