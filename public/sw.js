@@ -4,7 +4,7 @@
  * background the live page is fetched; if it differs from the cached copy a
  * NEW_VERSION message is posted so open pages reload once to the new deploy.
  */
-const CACHE_NAME = "biopulse-v7";
+const CACHE_NAME = "biopulse-v8";
 const OFFLINE_FALLBACK = "/offline.html";
 
 // Core static assets to precache on install.
@@ -89,10 +89,11 @@ function refreshNavigation(req) {
       if (!response || !response.ok) return;
       const cache = await caches.open(CACHE_NAME);
       const prev = await cache.match(req);
-      await cache.put(req, response.clone());
+      const copy = response.clone();
+      await cache.put(req, copy);
       if (prev) {
         const prevText = await prev.text();
-        const freshText = await response.clone().text();
+        const freshText = await copy.text();
         if (prevText !== freshText) {
           const clients = await self.clients.matchAll({ type: "window" });
           clients.forEach((client) => client.postMessage({ type: "NEW_VERSION" }));
