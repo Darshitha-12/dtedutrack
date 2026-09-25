@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { signIn } from "next-auth/react";
+import { credentialsSignIn } from "@/lib/client-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -93,17 +93,12 @@ export default function RegisterPage() {
         return;
       }
 
-      const r = await signIn("credentials", {
-        email: form.email.trim(),
-        otpToken: data.token as string,
-        redirect: false,
-        callbackUrl: "/dashboard",
-      });
-      if (r?.error) {
-        setError("Sign-in failed. Please try again.");
+      const r = await credentialsSignIn(form.email.trim(), data.token as string, "/dashboard");
+      if (!r.ok) {
+        setError(r.error || "Sign-in failed. Please try again.");
         return;
       }
-      router.push("/dashboard");
+      router.push(r.url || "/dashboard");
       router.refresh();
     } catch {
       setError("An unexpected error occurred. Please try again.");
