@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { resolvePresence } from "@/lib/presence";
 
 export async function GET() {
   try {
@@ -24,16 +25,19 @@ export async function GET() {
       orderBy: { createdAt: "asc" },
     });
 
-    const list = users.map((u) => ({
-      id: u.id,
-      name: u.displayName || u.name || u.email?.split("@")[0] || "User",
-      fullName: u.name || u.displayName || "",
-      email: u.email,
-      image: u.image || u.avatarUrl,
-      about: u.about || "",
-      status: u.presence?.status || "offline",
-      lastSeen: u.presence?.lastSeen?.toISOString() || null,
-    }));
+    const list = users.map((u) => {
+      const { status, lastSeen } = resolvePresence(u.presence || null);
+      return {
+        id: u.id,
+        name: u.displayName || u.name || u.email?.split("@")[0] || "User",
+        fullName: u.name || u.displayName || "",
+        email: u.email,
+        image: u.image || u.avatarUrl,
+        about: u.about || "",
+        status,
+        lastSeen,
+      };
+    });
 
     return NextResponse.json({ users: list });
   } catch (error) {

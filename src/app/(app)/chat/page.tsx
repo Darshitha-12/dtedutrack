@@ -532,7 +532,11 @@ export default function ChatPage() {
     loadConversations();
     loadUsers();
     updatePresence("online");
-    const hb = setInterval(() => updatePresence("online"), 15000);
+    // Heartbeat only while the tab is visible so a hidden/backgrounded tab
+    // doesn't flip the user back to "online" after we've gone offline.
+    const hb = setInterval(() => {
+      if (!document.hidden) updatePresence("online");
+    }, 15000);
     const handleVisibility = () => updatePresence(document.hidden ? "offline" : "online");
     document.addEventListener("visibilitychange", handleVisibility);
     const beforeUnload = () => {

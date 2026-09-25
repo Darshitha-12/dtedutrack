@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { resolvePresence } from "@/lib/presence";
 
 export async function GET() {
   try {
@@ -68,6 +69,7 @@ export async function GET() {
       .map(([id, entry]) => {
         const p = partnerMap.get(id);
         const last = entry.last;
+        const { status, lastSeen } = resolvePresence(p?.presence || null);
         const preview = last.mediaUrl
           ? last.mediaType === "image"
             ? "📷 Photo"
@@ -81,8 +83,10 @@ export async function GET() {
           id,
           name: p?.displayName || p?.name || "User",
           image: p?.image || p?.avatarUrl || null,
-          status: p?.presence?.status || "offline",
-          lastSeen: p?.presence?.lastSeen?.toISOString() || null,
+          status,
+          // Fall back to the partner's latest message when they've never
+          // opened the chat (no presence row yet).
+          lastSeen: lastSeen || (last.senderId !== me ? last.createdAt.toISOString() : null),
           lastMessage: entry.lastIsMine ? `You: ${preview}` : preview,
           lastMessageIsMine: entry.lastIsMine,
           lastMessageAt: last.createdAt.toISOString(),
