@@ -29,7 +29,23 @@ export async function POST(req: Request) {
 
     // Prefer Supabase storage when configured; otherwise fall back to storing
     // the image as a base64 data URL directly on the user row so avatar upload
-    // keeps working without any external storage service.
+    // keeps working without any external storage service (or when the storage
+    // project is unreachable).
+    const storeDataUrl = async () => {
+      if (file.size > MAX_DB_BYTES) {
+        return NextResponse.json(
+          { error: "Image too large (max 2MB when storage isn't configured)" },
+          { status: 400 },
+        );
+      }
+      const dataUrl = `data:${file.type || "image/png"};base64,${Buffer.from(await file.arrayBuffer()).toString("base64")}`;
+      await db.user.update({
+        where: { id: userId },
+        data: { image: dataUrl, avatarUrl: dataUrl },
+      });
+      return NextResponse.json({ avatarUrl: dataUrl });
+    };
+
     if (isSupabaseConfigured) {
       const safeName = (file.name || "avatar").replace(/[^a-zA-Z0-9._-]/g, "_");
       const path = `${userId}/avatars/${Date.now()}-${safeName}`;
@@ -39,37 +55,22 @@ export async function POST(req: Request) {
         .from(BUCKET)
         .upload(path, buffer, { contentType: file.type || "image/png", upsert: false });
 
-      if (error) {
-        console.error("Avatar upload storage error:", error);
-        return NextResponse.json({ error: `Upload failed: ${error.message}` }, { status: 500 });
+      if (!error) {
+        const { data: pub } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path);
+        const avatarUrl = pub?.publicUrl || "";
+
+        await db.user.update({
+          where: { id: userId },
+          data: { image: avatarUrl, avatarUrl },
+        });
+
+        return NextResponse.json({ avatarUrl });
       }
 
-      const { data: pub } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path);
-      const avatarUrl = pub?.publicUrl || "";
-
-      await db.user.update({
-        where: { id: userId },
-        data: { image: avatarUrl, avatarUrl },
-      });
-
-      return NextResponse.json({ avatarUrl });
+      console.error("Avatar upload storage error, falling back to data URL:", error);
     }
 
-    if (file.size > MAX_DB_BYTES) {
-      return NextResponse.json(
-        { error: "Image too large (max 2MB when storage isn't configured)" },
-        { status: 400 },
-      );
-    }
-
-    const dataUrl = `data:${file.type || "image/png"};base64,${Buffer.from(await file.arrayBuffer()).toString("base64")}`;
-
-    await db.user.update({
-      where: { id: userId },
-      data: { image: dataUrl, avatarUrl: dataUrl },
-    });
-
-    return NextResponse.json({ avatarUrl: dataUrl });
+    return storeDataUrl();
   } catch (error) {
     console.error("Avatar upload POST error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

@@ -7,7 +7,7 @@ import { sendChatNotification } from "@/lib/fcm";
 const sendSchema = z.object({
   partnerId: z.string().min(1),
   text: z.string().max(4000).optional().default(""),
-  mediaUrl: z.string().max(2000).optional(),
+  mediaUrl: z.string().max(6_000_000).optional(),
   mediaType: z.string().max(20).optional(),
   mediaName: z.string().max(255).optional(),
 });

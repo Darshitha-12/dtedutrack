@@ -4,19 +4,13 @@ import { supabaseAdmin, isSupabaseConfigured } from "@/lib/supabase-admin";
 
 const BUCKET = "chat-media";
 const MAX_BYTES = 15 * 1024 * 1024; // 15MB
+const MAX_INLINE_BYTES = 2 * 1024 * 1024; // base64 data-URL fallback cap (2MB raw)
 
 export async function POST(req: Request) {
   try {
     const session = await auth();
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    if (!isSupabaseConfigured) {
-      return NextResponse.json(
-        { error: "Media upload is not configured. Add Supabase env variables." },
-        { status: 503 },
-      );
     }
 
     const form = await req.formData();
@@ -34,17 +28,39 @@ export async function POST(req: Request) {
     else if (mine.startsWith("video/")) mediaType = "video";
     else if (mine.startsWith("audio/")) mediaType = "audio";
 
+    // Fall back to storing the file as a base64 data URL on the message/status
+    // row when external storage isn't configured or is unreachable, so uploads
+    // keep working everywhere.
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const inlineFallback = () => {
+      if (buffer.length > MAX_INLINE_BYTES) {
+        throw new Error(
+          "Media storage is not configured. Try a smaller file (max 2MB) or add Supabase storage.",
+        );
+      }
+      return NextResponse.json({
+        mediaUrl: `data:${mine};base64,${buffer.toString("base64")}`,
+        mediaType,
+        mediaName: file.name,
+        bucket: null,
+        inline: true,
+      });
+    };
+
+    if (!isSupabaseConfigured) {
+      return inlineFallback();
+    }
+
     const safeName = (file.name || "file").replace(/[^a-zA-Z0-9._-]/g, "_");
     const path = `${session.user.id}/${Date.now()}-${safeName}`;
 
-    const buffer = Buffer.from(await file.arrayBuffer());
     const { error } = await supabaseAdmin.storage
       .from(BUCKET)
       .upload(path, buffer, { contentType: mine, upsert: false });
 
     if (error) {
       console.error("Chat upload storage error:", error);
-      return NextResponse.json({ error: `Upload failed: ${error.message}` }, { status: 500 });
+      return inlineFallback();
     }
 
     const { data: pub } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path);
@@ -53,6 +69,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ mediaUrl, mediaType, mediaName: file.name, bucket: BUCKET });
   } catch (error) {
     console.error("Chat upload POST error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -31,8 +31,8 @@ function pruneExpired() {
 }
 
 const statusSchema = z.object({
-  text: z.string().max(2000).optional().default(""),
-  imageUrl: z.string().max(2000).optional(),
+  text: z.string().max(5000).optional().default(""),
+  imageUrl: z.string().max(6_000_000).optional(),
   imageType: z.string().max(20).optional(),
 });
 
@@ -46,14 +46,25 @@ export async function GET(req: Request) {
     pruneExpired();
 
     const since = new Date(Date.now() - EXPIRY_MS);
-    const rows = await db.userStatus.findMany({
-      where: { createdAt: { gte: since } },
-      include: {
-        user: { select: { id: true, name: true, displayName: true, avatarUrl: true, image: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 500,
-    });
+    let rows: { id: string; text: string | null; imageUrl: string | null; imageType: string | null; createdAt: Date; userId: string; user: { id: string; name: string; displayName?: string | null; avatarUrl?: string | null; image?: string | null } }[];
+    try {
+      rows = (await db.userStatus.findMany({
+        where: { createdAt: { gte: since } },
+        include: {
+          user: { select: { id: true, name: true, displayName: true, avatarUrl: true, image: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 500,
+      })) as typeof rows;
+    } catch {
+      // Deployed DB may predate displayName/avatarUrl columns.
+      rows = (await db.userStatus.findMany({
+        where: { createdAt: { gte: since } },
+        include: { user: { select: { id: true, name: true, image: true } } },
+        orderBy: { createdAt: "desc" },
+        take: 500,
+      })) as typeof rows;
+    }
 
     const statuses = rows.map((s) => ({
       id: s.id,
