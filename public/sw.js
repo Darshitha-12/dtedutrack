@@ -4,7 +4,7 @@
  * background the live page is fetched; if it differs from the cached copy a
  * NEW_VERSION message is posted so open pages reload once to the new deploy.
  */
-const CACHE_NAME = "biopulse-v8";
+const CACHE_NAME = "biopulse-v9";
 const OFFLINE_FALLBACK = "/offline.html";
 
 // Core static assets to precache on install.
@@ -122,22 +122,24 @@ self.addEventListener("fetch", (event) => {
   // default "web page not available" error screen.
   if (request.mode === "navigate") {
     event.respondWith(
-      caches.match(request).then((cached) => {
+      caches.match(request).then(async (cached) => {
         if (cached) {
           refreshNavigation(request);
           return cached;
         }
-        return fetch(request)
-          .then((response) => {
-            if (response && response.ok) {
-              caches.open(CACHE_NAME).then((cache) =>
-                cache.put(request, response.clone()),
-              );
-            }
-            return response;
-          })
-          .catch(() => fallbackResponse());
-      }),
+        const response = await fetch(request);
+        if (!response) return fallbackResponse();
+        if (response.ok) {
+          try {
+            const copy = response.clone();
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(request, copy);
+          } catch {
+            /* cache write must never break the page load */
+          }
+        }
+        return response;
+      }).catch(() => fallbackResponse()),
     );
     return;
   }
@@ -145,12 +147,17 @@ self.addEventListener("fetch", (event) => {
   // Static assets: stale-while-revalidate. Hashed chunk URLs change on every
   // build, so a stale match only ever serves content for the current version.
   event.respondWith(
-    caches.match(request).then((cached) => {
+    caches.match(request).then(async (cached) => {
       const network = fetch(request)
-        .then((response) => {
+        .then(async (response) => {
           if (response && response.status === 200 && response.type === "basic") {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+            try {
+              const copy = response.clone();
+              const cache = await caches.open(CACHE_NAME);
+              await cache.put(request, copy);
+            } catch {
+              /* cache write must never break the asset load */
+            }
           }
           return response;
         })
