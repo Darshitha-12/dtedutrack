@@ -2,9 +2,9 @@ import { PrismaClient, Prisma } from "@prisma/client";
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
-// Neon (and other serverless Postgres) auto-pause compute when idle, so the
-// first query after a pause returns P1001 while the host resumes. Retry those
-// transient connection errors instead of failing the whole request.
+// Neon (and other serverless Postgres) auto-pauses the compute when idle, so
+// the first query after a pause returns P1001 while the host resumes. Retry
+// those transient connection errors instead of failing the whole request.
 const TRANSIENT_CODES = new Set(["P1001", "P1002", "P1008", "P2024"]);
 
 function sleep(ms: number) {
@@ -16,10 +16,25 @@ function buildDatasourceUrl(): string | undefined {
   if (!base) return undefined;
   try {
     const url = new URL(base);
-    // Keep connect short so a paused host fails fast and the retry loop kicks
-    // in instead of hanging the request for 30s+.
-    if (!url.searchParams.has("connect_timeout")) url.searchParams.set("connect_timeout", "10");
-    if (!url.searchParams.has("socket_timeout")) url.searchParams.set("socket_timeout", "30");
+
+    // Neon pooled endpoints need `pgbouncer=true` so Prisma formats queries
+    // correctly through the pooler.
+    if (base.includes("-pooler.") && !url.searchParams.has("pgbouncer")) {
+      url.searchParams.set("pgbouncer", "true");
+    }
+
+    // A small connection pool per instance is plenty for a serverless app and
+    // avoids exhausting Neon's PgBouncer connections under load.
+    if (!url.searchParams.has("connection_limit")) {
+      url.searchParams.set("connection_limit", "3");
+    }
+
+    // Don't hang a request forever if the host can't be reached; the retry
+    // loop below will give a paused compute time to wake up again.
+    if (!url.searchParams.has("connect_timeout")) {
+      url.searchParams.set("connect_timeout", "15");
+    }
+
     return url.toString();
   } catch {
     return base;
@@ -38,22 +53,22 @@ function createClient() {
     ? new PrismaClient({ datasources: { db: { url: datasourceUrl } } })
     : new PrismaClient();
 
-  // Serverless datastores (Neon) pause compute when idle and resume on demand.
-  // Wrap every model query with a small retry loop for transient connect errors.
+  // Wrap every model query with a retry loop for the transient connection
+  // errors a serverless datastore throws while resuming from idle.
   const extended = prisma.$extends({
     query: {
       $allModels: {
-        async $allOperations({ query }) {
+async $allOperations({ args, query }) {
           const MAX_ATTEMPTS = 3;
           let lastErr: unknown = null;
           for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-              return await query({});
+              return await query(args);
             } catch (error) {
               lastErr = error;
               if (!isTransientPrismaError(error)) throw error;
               if (attempt < MAX_ATTEMPTS) {
-                // Exponential backoff (1s, 3s) gives Neon time to resume.
+                // Backoff while Neon wakes up: 1s then 2s.
                 await sleep(1000 * attempt);
               }
             }
