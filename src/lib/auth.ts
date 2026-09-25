@@ -18,7 +18,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const creds = (credentials ?? {}) as { email?: string; password?: string; otpToken?: string };
         // OTP sign-in path: credentials carry the one-time token issued after
         // a successful email-code verification.
-        if (typeof creds.otpToken === "string" && creds.otpToken.length > 0) {
+        if (typeof creds.otpToken === "string" && /^[a-f0-9]{96}$/.test(creds.otpToken)) {
           const otpEmail = typeof creds.email === "string" ? creds.email.trim().toLowerCase() : "";
           if (!otpEmail) return null;
 
@@ -108,7 +108,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       const isOnDashboard = nextUrl.pathname.startsWith("/dashboard");
       const isOnLogin = nextUrl.pathname === "/login";
       const isOnRegister = nextUrl.pathname === "/register";
-      const isOnPublic = isOnLogin || isOnRegister;
+      const isOnForgotPassword = nextUrl.pathname === "/forgot-password";
+      const isOnPublic = isOnLogin || isOnRegister || isOnForgotPassword;
 
       if (isLoggedIn && isOnPublic) {
         return Response.redirect(new URL("/dashboard", nextUrl));

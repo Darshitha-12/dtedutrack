@@ -4,9 +4,13 @@ export type ClientAuthResult =
   | { ok: true; url?: string }
   | { ok: false; error?: string };
 
+export type CredentialsInput =
+  | { otpToken: string }
+  | { password: string };
+
 export async function credentialsSignIn(
   email: string,
-  otpToken: string,
+  secret: string,
   callbackUrl: string,
 ): Promise<ClientAuthResult> {
   try {
@@ -19,13 +23,21 @@ export async function credentialsSignIn(
       return { ok: false, error: "Security token missing. Please refresh and try again." };
     }
 
+    const body = new URLSearchParams({ email, csrfToken, callbackUrl });
+    // A 96-char hex token is the OTP sign-in token; anything else is a password.
+    if (/^[a-f0-9]{96}$/.test(secret)) {
+      body.set("otpToken", secret);
+    } else {
+      body.set("password", secret);
+    }
+
     const res = await fetch("/api/auth/callback/credentials", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "X-Auth-Return-Redirect": "1",
       },
-      body: new URLSearchParams({ email, otpToken, csrfToken, callbackUrl }),
+      body,
       credentials: "same-origin",
     });
 
