@@ -11,6 +11,43 @@ const sendSchema = z.object({
 
 const RESEND_MIN_MS = 60 * 1000; // 60s before a new code can be requested
 
+// The live DB was set up without Prisma migrations, so guarantee the table
+// (and its columns) exist, and dedupe any stale rows from older deploys that
+// predate the [email, purpose] unique index.
+async function ensureSchema(normalizedEmail: string, purpose: string) {
+  try {
+    await db.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "otp_verifications" (
+      "id" TEXT NOT NULL,
+      "email" TEXT NOT NULL,
+      "codeHash" TEXT NOT NULL,
+      "purpose" TEXT NOT NULL DEFAULT 'login',
+      "attempts" INTEGER NOT NULL DEFAULT 0,
+      "expiresAt" TIMESTAMP(3) NOT NULL,
+      "tokenHash" TEXT,
+      "tokenExpiresAt" TIMESTAMP(3),
+      "usedAt" TIMESTAMP(3),
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "otp_verifications_pkey" PRIMARY KEY ("id")
+    )`);
+    await db.$executeRawUnsafe(
+      `ALTER TABLE "otp_verifications" ADD COLUMN IF NOT EXISTS "tokenHash" TEXT`
+    );
+    await db.$executeRawUnsafe(
+      `ALTER TABLE "otp_verifications" ADD COLUMN IF NOT EXISTS "tokenExpiresAt" TIMESTAMP(3)`
+    );
+    await db.$executeRawUnsafe(`ALTER TABLE "otp_verifications" ADD COLUMN IF NOT EXISTS "usedAt" TIMESTAMP(3)`);
+    await db.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "otp_verifications_email_idx" ON "otp_verifications" ("email")`);
+    // Remove consumed/stale rows so verify() can never land on a used code.
+    await db.$executeRawUnsafe(
+      `DELETE FROM "otp_verifications" WHERE email = $1 AND purpose = $2 AND "usedAt" IS NOT NULL`,
+      normalizedEmail,
+      purpose,
+    );
+  } catch (error) {
+    console.error("OTP ensureSchema error:", error);
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -21,9 +58,11 @@ export async function POST(req: Request) {
 
     const { email, purpose } = parsed.data;
     const normalizedEmail = email.trim().toLowerCase();
+    await ensureSchema(normalizedEmail, purpose);
 
-    const existing = await db.otpVerification.findUnique({
-      where: { email_purpose: { email: normalizedEmail, purpose } },
+    const existing = await db.otpVerification.findFirst({
+      where: { email: normalizedEmail, purpose, usedAt: null },
+      orderBy: { createdAt: "desc" },
     });
 
     if (existing && !existing.usedAt) {
@@ -49,8 +88,15 @@ export async function POST(req: Request) {
 
     const code = generateOtpCode();
 
+    const record =
+      existing ||
+      (await db.otpVerification.findFirst({
+        where: { email: normalizedEmail, purpose },
+        orderBy: { createdAt: "desc" },
+      }));
+
     await db.otpVerification.upsert({
-      where: { email_purpose: { email: normalizedEmail, purpose } },
+      where: { id: record?.id || "__none__" },
       update: {
         codeHash: otpHash(normalizedEmail, purpose, code),
         attempts: 0,
