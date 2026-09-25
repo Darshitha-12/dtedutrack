@@ -462,6 +462,13 @@ export default function ChatPage() {
       if (res.ok) {
         const data = await res.json();
         setConversations(data.conversations || []);
+      } else if (res.status === 500) {
+        // Serverless DB may be resuming from idle — retry once.
+        const retry = await fetch("/api/chat/conversations");
+        if (retry.ok) {
+          const data = await retry.json();
+          setConversations(data.conversations || []);
+        }
       }
     } catch {
       /* ignore */
@@ -483,11 +490,14 @@ export default function ChatPage() {
   const loadMessages = useCallback(async (partnerId: string) => {
     try {
       setLoadingMsgs(true);
-      const res = await fetch(`/api/chat/messages?partnerId=${encodeURIComponent(partnerId)}&limit=200`);
-      if (res.ok) {
-        const data = await res.json();
-        setMessages(data.messages || []);
+      let data: { messages?: Dm[] } | null = null;
+      // Serverless DB may be resuming from idle — retry once on failure.
+      for (let attempt = 0; attempt < 2 && !data; attempt++) {
+        const res = await fetch(`/api/chat/messages?partnerId=${encodeURIComponent(partnerId)}&limit=200`);
+        if (res.ok) data = await res.json();
+        else if (res.status !== 500) break;
       }
+      if (data) setMessages(data.messages || []);
     } catch {
       /* ignore */
     } finally {
