@@ -19,6 +19,29 @@ async function ensureSchema() {
     await db.$executeRawUnsafe(
       `CREATE INDEX IF NOT EXISTS "user_statuses_userId_createdAt_idx" ON "user_statuses" ("userId", "createdAt")`
     );
+    await db.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "status_views" (
+      "id" TEXT NOT NULL,
+      "statusId" TEXT NOT NULL,
+      "viewerId" TEXT NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "status_views_pkey" PRIMARY KEY ("id"),
+      CONSTRAINT "status_views_statusId_viewerId_key" UNIQUE ("statusId", "viewerId")
+    )`);
+    await db.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "status_views_statusId_idx" ON "status_views" ("statusId")`
+    );
+    await db.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "status_reactions" (
+      "id" TEXT NOT NULL,
+      "statusId" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "emoji" TEXT NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "status_reactions_pkey" PRIMARY KEY ("id"),
+      CONSTRAINT "status_reactions_statusId_userId_key" UNIQUE ("statusId", "userId")
+    )`);
+    await db.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "status_reactions_statusId_idx" ON "status_reactions" ("statusId")`
+    );
   } catch (error) {
     console.error("ensureSchema error:", error);
   }
@@ -34,6 +57,7 @@ const statusSchema = z.object({
   text: z.string().max(5000).optional().default(""),
   imageUrl: z.string().max(6_000_000).optional(),
   imageType: z.string().max(20).optional(),
+  duration: z.number().max(60_000).optional(),
 });
 
 export async function GET(req: Request) {
@@ -66,16 +90,59 @@ export async function GET(req: Request) {
       })) as typeof rows;
     }
 
-    const statuses = rows.map((s) => ({
-      id: s.id,
-      userId: s.user.id,
-      name: s.user.displayName || s.user.name || "User",
-      image: s.user.image || s.user.avatarUrl || null,
-      text: s.text,
-      imageUrl: s.imageUrl,
-      imageType: s.imageType,
-      createdAt: s.createdAt.toISOString(),
-    }));
+    const statusIds = rows.map((s) => s.id);
+    const ownIds = rows.filter((s) => s.userId === session.user!.id).map((s) => s.id);
+    const [views, reactions, myViews] = await Promise.all([
+      db.statusView.findMany({ where: { statusId: { in: statusIds } } }),
+      db.statusReaction.findMany({ where: { statusId: { in: statusIds } } }),
+      ownIds.length
+        ? db.statusView.findMany({
+            where: { statusId: { in: ownIds } },
+            include: {
+              viewer: { select: { id: true, name: true, displayName: true, avatarUrl: true, image: true } },
+            },
+            orderBy: { createdAt: "desc" },
+          })
+        : Promise.resolve([]),
+    ]).catch(() => [[], [], []]);
+
+    const myViewersByStatus: Record<string, { userId: string; name: string; image: string | null; viewedAt: string }[]> = {};
+    for (const v of myViews as any[]) {
+      const name = v.viewer?.displayName || v.viewer?.name || "User";
+      const image = v.viewer?.image || v.viewer?.avatarUrl || null;
+      (myViewersByStatus[v.statusId] ||= []).push({
+        userId: v.viewer?.id || "?",
+        name,
+        image,
+        viewedAt: v.createdAt?.toISOString?.() || new Date().toISOString(),
+      });
+    }
+
+    const statuses = rows.map((s) => {
+      const sViews = views.filter((v) => v.statusId === s.id);
+      const sReactions = reactions.filter((r) => r.statusId === s.id);
+      const mine = s.userId === session.user!.id;
+      const reactionMap: Record<string, number> = {};
+      for (const r of sReactions) reactionMap[r.emoji] = (reactionMap[r.emoji] || 0) + 1;
+      return {
+        id: s.id,
+        userId: s.user.id,
+        name: s.user.displayName || s.user.name || "User",
+        image: s.user.image || s.user.avatarUrl || null,
+        text: s.text,
+        imageUrl: s.imageUrl,
+        imageType: s.imageType,
+        createdAt: s.createdAt.toISOString(),
+        viewCount: sViews.length,
+        myReaction: sReactions.find((r) => r.userId === session.user!.id)?.emoji || null,
+        reactions: Object.entries(reactionMap)
+          .map(([emoji, count]) => ({ emoji, count }))
+          .sort((a, b) => b.count - a.count),
+        seenByFew: sViews.length > 0 && sViews.length < 5,
+        viewedByMe: mine || sViews.some((v) => v.viewerId === session.user!.id),
+        viewers: mine ? (myViewersByStatus[s.id as keyof typeof myViewersByStatus] || []) : undefined,
+      };
+    });
 
     return NextResponse.json({ statuses });
   } catch (error) {
@@ -97,9 +164,9 @@ export async function POST(req: Request) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
     }
-    const { text, imageUrl, imageType } = parsed.data;
+    const { text, imageUrl, imageType, duration } = parsed.data;
     if (!text.trim() && !imageUrl) {
-      return NextResponse.json({ error: "Status needs some text or a photo" }, { status: 400 });
+      return NextResponse.json({ error: "Status needs some text or media" }, { status: 400 });
     }
 
     const status = await db.userStatus.create({
@@ -107,7 +174,7 @@ export async function POST(req: Request) {
         userId: session.user.id,
         text: text.trim() || null,
         imageUrl: imageUrl || null,
-        imageType: imageUrl ? imageType || "image" : null,
+        imageType: imageUrl ? imageType || (duration ? "video" : "image") : null,
       },
     });
 

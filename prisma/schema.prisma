@@ -52,6 +52,8 @@ model User {
   receivedMessages  DirectMessage[]         @relation("DirectMessageReceiver")
   presence          Presence?
   statuses          UserStatus[]
+  statusViews       StatusView[]
+  statusReactions   StatusReaction[]
   classes           ClassSession[]
 
   @@map("users")
@@ -910,9 +912,46 @@ model UserStatus {
   imageUrl  String?
   imageType String? // image (video uploads stay in chat for now)
   createdAt DateTime @default(now())
+  views     StatusView[]
+  reactions StatusReaction[]
 
   @@index([userId, createdAt])
   @@map("user_statuses")
+}
+
+// ============================================================
+// STATUS VIEWS (WhatsApp-style "seen by N" tracking)
+// ============================================================
+
+model StatusView {
+  id        String     @id @default(uuid())
+  statusId  String
+  status    UserStatus @relation(fields: [statusId], references: [id], onDelete: Cascade)
+  viewerId  String
+  viewer    User       @relation(fields: [viewerId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+
+  @@unique([statusId, viewerId])
+  @@index([statusId])
+  @@map("status_views")
+}
+
+// ============================================================
+// STATUS REACTIONS (WhatsApp-style emoji reactions)
+// ============================================================
+
+model StatusReaction {
+  id        String     @id @default(uuid())
+  statusId  String
+  status    UserStatus @relation(fields: [statusId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emoji     String
+  createdAt DateTime   @default(now())
+
+  @@unique([statusId, userId])
+  @@index([statusId])
+  @@map("status_reactions")
 }
 
 // ============================================================

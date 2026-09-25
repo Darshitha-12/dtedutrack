@@ -224,6 +224,12 @@ interface StatusItem {
   imageUrl: string | null;
   imageType: string | null;
   createdAt: string;
+  viewCount: number;
+  myReaction: string | null;
+  reactions: { emoji: string; count: number }[];
+  seenByFew: boolean;
+  viewedByMe: boolean;
+  viewers?: { userId: string; name: string; image: string | null; viewedAt: string }[];
 }
 
 const POLL_MS = 4000;
@@ -385,6 +391,7 @@ export default function ChatPage() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Dm[]>([]);
   const [text, setText] = useState("");
+  const [replyDraft, setReplyDraft] = useState("");
   const [search, setSearch] = useState("");
   const [newChatSearch, setNewChatSearch] = useState("");
   const [tab, setTab] = useState<"chats" | "status" | "calls">("chats");
@@ -408,7 +415,11 @@ export default function ChatPage() {
   const [viewerItems, setViewerItems] = useState<StatusItem[] | null>(null);
   const [viewerIdx, setViewerIdx] = useState(0);
   const [viewerProgress, setViewerProgress] = useState(0);
+  const [viewerReactionsOpen, setViewerReactionsOpen] = useState(false);
+  const [viewerViewersOpen, setViewerViewersOpen] = useState(false);
+  const [viewerReplyTo, setViewerReplyTo] = useState<StatusItem | null>(null);
   const [viewerPaused, setViewerPaused] = useState(false);
+  const viewerVideoRef = useRef<HTMLVideoElement | null>(null);
   const pausedRef = useRef(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -559,6 +570,14 @@ export default function ChatPage() {
     setMobilePane("list");
   }, []);
 
+  // Apply a pending status reply once the target chat is active.
+  useEffect(() => {
+    if (replyDraft && activeId) {
+      setText(replyDraft);
+      setReplyDraft("");
+    }
+  }, [replyDraft, activeId]);
+
   const loadStatuses = useCallback(async () => {
     try {
       const res = await fetch("/api/chat/status");
@@ -660,6 +679,60 @@ export default function ChatPage() {
     setViewerItems(items);
     setViewerIdx(0);
     setViewerProgress(0);
+    setViewerReactionsOpen(false);
+    setViewerViewersOpen(false);
+    items.forEach((s) => {
+      if (s.userId !== me && !s.viewedByMe) markStatusViewed(s.id);
+    });
+  };
+
+  const markStatusViewed = async (statusId: string) => {
+    try {
+      await fetch("/api/chat/status/view", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statusId }),
+      });
+      setStatuses((prev) =>
+        prev.map((s) => (s.id === statusId ? { ...s, viewedByMe: true, viewCount: s.viewCount + 1 } : s)),
+      );
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const reactToStatus = async (statusId: string, emoji: string) => {
+    try {
+      const res = await fetch("/api/chat/status/reaction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statusId, emoji }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setStatuses((prev) =>
+          prev.map((s) =>
+            s.id === statusId ? { ...s, myReaction: d.myReaction, reactions: d.reactions } : s,
+          ),
+        );
+        setViewerItems((prev) =>
+          prev ? prev.map((s) => (s.id === statusId ? { ...s, myReaction: d.myReaction, reactions: d.reactions } : s)) : prev,
+        );
+      } else {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || "Could not react", "error");
+      }
+    } catch {
+      showToast("Could not react", "error");
+    }
+  };
+
+  const replyToStatus = (item: StatusItem) => {
+    setViewerItems(null);
+    if (!item.userId) return;
+    openChat(item.userId);
+    const quoted = item.text ? item.text.trim() : item.imageType === "video" ? "video status" : "photo status";
+    setReplyDraft(`Re: ${quoted.slice(0, 80)}`);
   };
 
   const viewerNext = () => {
@@ -689,12 +762,15 @@ export default function ChatPage() {
   useEffect(() => {
     if (!viewerItems) return;
     setViewerProgress(0);
+    const item = viewerItems[viewerIdx];
+    if (!item) return;
+    if (item.imageType === "video") return; // video progress driven by timeupdate
     const id = setInterval(() => {
       if (pausedRef.current) return;
       setViewerProgress((p) => Math.min(100, p + (100 * 50) / 5000));
     }, 50);
     return () => clearInterval(id);
-  }, [viewerItems]);
+  }, [viewerItems, viewerIdx]);
 
   useEffect(() => {
     if (viewerProgress >= 100 && viewerItems) {
@@ -1147,7 +1223,7 @@ export default function ChatPage() {
           ) : tab === "status" ? (
             <div>
               <button
-                onClick={() => setComposerOpen(true)}
+                onClick={() => (myStatusItems.length > 0 ? openStatusViewer(myStatusItems) : setComposerOpen(true))}
                 className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-muted"
               >
                 <div className="shrink-0 rounded-full bg-gradient-to-tr from-bio to-chem p-[2px]">
@@ -1157,7 +1233,15 @@ export default function ChatPage() {
                   <p className="text-[15px] font-medium text-foreground">My status</p>
                   <p className="truncate text-xs text-muted-foreground">
                     {myStatusItems.length > 0
-                      ? `${myStatusItems.length} update${myStatusItems.length > 1 ? "s" : ""} · ${statusTime(myStatusItems[0].createdAt)}`
+                      ? `${myStatusItems.length} update${myStatusItems.length > 1 ? "s" : ""} · ${
+                          myStatusItems.reduce((n, s) => n + s.viewCount, 0) === 0
+                            ? "no views yet"
+                            : myStatusItems.reduce((n, s) => n + s.viewCount, 0) > 20
+                              ? "seen by many"
+                              : myStatusItems.reduce((n, s) => n + s.viewCount, 0) >= 5
+                                ? "seen by several"
+                                : "seen by few"
+                        } · ${statusTime(myStatusItems[0].createdAt)}`
                       : "Tap to add a status update"}
                   </p>
                 </div>
@@ -1189,24 +1273,27 @@ export default function ChatPage() {
                   </p>
                 </div>
               ) : (
-                otherGroups.map((g) => (
-                  <button
-                    key={g.userId}
-                    onClick={() => openStatusViewer(g.items)}
-                    className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-muted"
-                  >
-                    <div className="shrink-0 rounded-full bg-gradient-to-tr from-bio to-chem p-[2px]">
-                      <Avatar src={g.image} name={g.name} size={50} />
-                    </div>
-                    <div className="min-w-0 flex-1 border-b border-border/50 pb-2">
-                      <p className="truncate text-[15px] font-medium text-foreground">{g.name}</p>
-                      <p className="text-xs text-muted-foreground">{statusTime(g.items[0].createdAt)}</p>
-                    </div>
-                    <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
-                      {g.items.length}
-                    </span>
-                  </button>
-                ))
+                otherGroups.map((g) => {
+                  const allSeen = g.items.every((s) => s.viewedByMe || s.userId === me);
+                  return (
+                    <button
+                      key={g.userId}
+                      onClick={() => openStatusViewer(g.items)}
+                      className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-muted"
+                    >
+                      <div className={cn("shrink-0 rounded-full p-[2px]", allSeen ? "bg-muted" : "bg-gradient-to-tr from-bio to-chem")}>
+                        <Avatar src={g.image} name={g.name} size={50} />
+                      </div>
+                      <div className="min-w-0 flex-1 border-b border-border/50 pb-2">
+                        <p className="truncate text-[15px] font-medium text-foreground">{g.name}</p>
+                        <p className="text-xs text-muted-foreground">{statusTime(g.items[0].createdAt)}</p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
+                        {g.items.length} · 👁 {g.items[0].viewCount}
+                      </span>
+                    </button>
+                  );
+                })
               )}
             </div>
           ) : (
@@ -1682,7 +1769,11 @@ export default function ChatPage() {
               />
               {statusMedia && (
                 <div className="relative">
-                  <img src={statusMedia.url} alt="status media" className="max-h-56 w-full rounded-xl object-cover" />
+                  {statusMedia.type === "video" ? (
+                    <video src={statusMedia.url} controls className="max-h-56 w-full rounded-xl object-contain bg-black" />
+                  ) : (
+                    <img src={statusMedia.url} alt="status media" className="max-h-56 w-full rounded-xl object-cover" />
+                  )}
                   <button
                     onClick={() => setStatusMedia(null)}
                     className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-background/80 text-foreground"
@@ -1692,10 +1783,10 @@ export default function ChatPage() {
                 </div>
               )}
               <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-border py-3 text-sm font-medium text-muted-foreground hover:bg-accent">
-                <Paperclip className="h-4 w-4" /> Add a photo
+                <Paperclip className="h-4 w-4" /> Add photo or video
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/*"
                   className="hidden"
                   disabled={statusBusy}
                   onChange={(e) => {
@@ -1742,7 +1833,24 @@ export default function ChatPage() {
           </div>
           <div className="relative min-h-0 flex-1">
             {viewerItems[viewerIdx].imageUrl ? (
-              <img src={viewerItems[viewerIdx].imageUrl} alt="status" className="h-full w-full object-contain" />
+              viewerItems[viewerIdx].imageType === "video" ? (
+                <video
+                  ref={viewerVideoRef}
+                  src={viewerItems[viewerIdx].imageUrl}
+                  autoPlay
+                  playsInline
+                  controls
+                  className="h-full w-full object-contain bg-black"
+                  onTimeUpdate={(e) => {
+                    const v = e.currentTarget;
+                    if (v?.duration) setViewerProgress((v.currentTime / v.duration) * 100);
+                  }}
+                  onPause={() => setViewerPaused(true)}
+                  onPlay={() => setViewerPaused(false)}
+                />
+              ) : (
+                <img src={viewerItems[viewerIdx].imageUrl} alt="status" className="h-full w-full object-contain" />
+              )
             ) : (
               <div className="flex h-full items-center justify-center p-8">
                 <div className="w-full rounded-2xl border border-border bg-card p-6 text-center">
@@ -1753,9 +1861,113 @@ export default function ChatPage() {
             <button onClick={viewerPrev} aria-label="Previous" className="absolute inset-y-0 left-0 w-1/3" />
             <button onClick={viewerNext} aria-label="Next" className="absolute inset-y-0 right-0 w-1/3" />
           </div>
-          <div className="px-4 py-3 text-center text-[11px] text-muted-foreground">
-            Hold to pause · Tap right or left to move
+          <div className="flex items-center justify-between gap-2 px-4 py-3 text-center text-[11px] text-muted-foreground">
+            <span className="min-w-0 flex-1">Hold to pause · Tap right or left to move</span>
+            {viewerItems[viewerIdx].userId === me && (
+              <button
+                onClick={() => setViewerViewersOpen(true)}
+                className="shrink-0 rounded-full border border-border bg-card px-2 py-0.5 font-medium text-foreground active:bg-muted"
+              >
+                👁 {viewerItems[viewerIdx].viewCount} {viewerItems[viewerIdx].viewCount === 1 ? "view" : "views"}
+              </button>
+            )}
           </div>
+          {viewerItems[viewerIdx].reactions.length > 0 && (
+            <div className="flex justify-center gap-1 px-4 pb-2">
+              {viewerItems[viewerIdx].reactions.slice(0, 8).map((r) => (
+                <span
+                  key={r.emoji}
+                  className={cn(
+                    "flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-sm",
+                    viewerItems[viewerIdx].myReaction === r.emoji
+                      ? "border-primary bg-primary/15 text-foreground"
+                      : "border-border bg-card text-foreground",
+                  )}
+                >
+                  {r.emoji} <span className="text-[10px]">{r.count}</span>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center justify-around border-t border-border/60 bg-card px-4 py-2">
+            <button
+              onClick={() => setViewerReactionsOpen((o) => !o)}
+              className={cn(
+                "flex flex-col items-center gap-1 rounded-lg px-3 py-1.5 text-[11px] font-medium transition-colors",
+                viewerReactionsOpen ? "text-primary" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {viewerItems[viewerIdx].myReaction ? (
+                <span className="text-xl leading-none">{viewerItems[viewerIdx].myReaction}</span>
+              ) : (
+                <Smile className="h-5 w-5" />
+              )}
+              React
+            </button>
+            <button
+              onClick={() => replyToStatus(viewerItems[viewerIdx])}
+              className="flex flex-col items-center gap-1 rounded-lg px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <MessageCircle className="h-5 w-5" />
+              Reply
+            </button>
+            <button
+              onClick={viewerNext}
+              className="flex flex-col items-center gap-1 rounded-lg px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <X className="h-5 w-5" />
+              Close
+            </button>
+          </div>
+          {viewerReactionsOpen && (
+            <div className="flex items-center gap-1.5 border-t border-border/60 bg-card px-4 py-2">
+              {["❤️", "👍", "😂", "😮", "😢", "🙏", "😡", "🥳"].map((e) => (
+                <button
+                  key={e}
+                  onClick={() => reactToStatus(viewerItems[viewerIdx].id, e)}
+                  className={cn(
+                    "grid h-9 w-9 place-items-center rounded-full text-xl transition-transform hover:scale-110",
+                    viewerItems[viewerIdx].myReaction === e ? "bg-primary/20 ring-2 ring-primary" : "bg-muted",
+                  )}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          )}
+          {viewerViewersOpen && (
+            <div className="fixed inset-0 z-[70] flex items-end justify-center bg-background/70 md:items-center md:p-6">
+              <div className="flex max-h-[60dvh] w-full max-w-sm flex-col overflow-hidden rounded-t-2xl bg-card md:rounded-2xl">
+                <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                  <h3 className="text-base font-medium">
+                    {viewerItems[viewerIdx].viewCount}{" "}
+                    {viewerItems[viewerIdx].viewCount === 1 ? "viewer" : "viewers"}
+                  </h3>
+                  <button onClick={() => setViewerViewersOpen(false)} className="text-muted-foreground hover:text-foreground">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-2">
+                  {(viewerItems[viewerIdx].viewers || []).length === 0 ? (
+                    <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+                      No one has viewed this status yet.
+                    </p>
+                  ) : (
+                    viewerItems[viewerIdx]
+                      .viewers!.map((v) => (
+                        <div key={v.userId} className="flex items-center gap-3 px-3 py-2">
+                          <Avatar src={v.image} name={v.name} size={40} />
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-foreground">{v.name}</p>
+                            <p className="text-xs text-muted-foreground">{statusTime(v.viewedAt)}</p>
+                          </div>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
