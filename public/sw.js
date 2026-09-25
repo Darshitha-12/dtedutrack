@@ -4,7 +4,7 @@
  * background the live page is fetched; if it differs from the cached copy a
  * NEW_VERSION message is posted so open pages reload once to the new deploy.
  */
-const CACHE_NAME = "biopulse-v6";
+const CACHE_NAME = "biopulse-v7";
 const OFFLINE_FALLBACK = "/offline.html";
 
 // Core static assets to precache on install.
@@ -108,6 +108,12 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+
+  // Never intercept API calls — they must always hit the network so cookies,
+  // CSRF tokens and fresh data reach the page. Serving a cached copy of
+  // /api/auth/csrf would hand the login flow a stale token without its
+  // Set-Cookie, causing "MissingCSRF" on sign-in.
+  if (url.pathname.startsWith("/api/")) return;
 
   // Navigations (HTML pages): serve the cached copy instantly (offline-friendly)
   // and refresh it in the background; if nothing is cached yet, fetch from the

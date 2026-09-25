@@ -25,7 +25,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const otp = await db.otpVerification.findFirst({
             where: {
               email: otpEmail,
-              purpose: "login",
+              purpose: { in: ["login", "register"] },
               usedAt: null,
               tokenHash: hashSecret(creds.otpToken),
               tokenExpiresAt: { gt: new Date() },
