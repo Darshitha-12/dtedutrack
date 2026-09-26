@@ -2,8 +2,25 @@ import { NextResponse } from "next/server";
 import net from "net";
 
 const RAW_URL = process.env.DATABASE_URL || "";
-const HOST = /@([^:\/\s]+):(\d+)/.exec(RAW_URL)?.[1] || (RAW_URL.includes("pooler") ? "has-pooler" : "no-at");
-const PORT = Number(/@([^:\/\s]+):(\d+)/.exec(RAW_URL)?.[2] || 5432);
+
+function extractHost(url: string): { host: string; port: number } {
+  try {
+    const u = new URL(url);
+    return { host: u.hostname, port: Number(u.port || 5432) };
+  } catch {
+    return { host: "url-parse-fail", port: 5432 };
+  }
+}
+
+const { host: HOST, port: PORT } = extractHost(RAW_URL);
+const SHAPE = (() => {
+  try {
+    const u = new URL(RAW_URL);
+    return { scheme: u.protocol, hostname: u.hostname, port: u.port, hasUser: !!u.username, hasPass: !!u.password, db: u.pathname?.split("/").filter(Boolean)[0], params: Array.from(new URLSearchParams(u.search).keys()) };
+  } catch {
+    return { raw: RAW_URL.slice(0, 40).replace(/[^ -~]/g, ".") };
+  }
+})();
 
 function tcpProbe(): Promise<string> {
   return new Promise((resolve) => {
@@ -52,7 +69,7 @@ export async function GET() {
   const results: Record<string, string> = {};
   results.urlLen = String(RAW_URL.length);
   results.host = HOST + ":" + PORT;
-  results.urlShape = RAW_URL.replace(/^(.{0,12}).*/, "$1...") + " scheme=" + RAW_URL.split(":")[0];
+  results.urlShape = JSON.stringify(SHAPE);
   results.dns = await dnsProbe();
   results.tcp = await tcpProbe();
   try {
