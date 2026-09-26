@@ -1,76 +1,118 @@
 import { NextResponse } from "next/server";
-import net from "net";
 import tls from "tls";
 
 const RAW_URL = process.env.DATABASE_URL || "";
 
-function pgStartup(cb: (ok: string, err?: string) => void) {
-  try {
-    const u = new URL(RAW_URL);
-    const host = u.hostname;
-    const port = Number(u.port || 5432);
-    const user = Buffer.from(u.username);
-    const db = Buffer.from(u.pathname?.split("/").filter(Boolean)[0] || "neondb");
-    const body = Buffer.concat([
-      Buffer.from([0, 3, 0, 0]),
-      Buffer.from("user\0"), user, Buffer.from([0]),
-      Buffer.from("database\0"), db, Buffer.from([0]),
-      Buffer.from([0]),
-    ]);
-    const len = Buffer.alloc(4);
-    len.writeInt32BE(body.length + 4, 0);
+function fullAuthProtocol(): Promise<string> {
+  return new Promise((resolve) => {
+    try {
+      const u = new URL(RAW_URL);
+      const host = u.hostname;
+      const port = Number(u.port || 5432);
+      const user = Buffer.from(decodeURIComponent(u.username));
+      const pass = Buffer.from(decodeURIComponent(u.password));
+      const db = Buffer.from((u.pathname || "").split("/").filter(Boolean)[0] || "neondb");
 
-    // Do TLS right away (sslmode=require style)
-    const sock = tls.connect({ host, port, rejectUnauthorized: false });
-    const t = setTimeout(() => { sock.destroy(); cb("TIMEOUT", "no response in 25s"); }, 25000);
-    sock.setTimeout(25000);
-    sock.on("secureConnect", () => {
-      sock.write(Buffer.concat([len, body]));
-    });
-    sock.on("data", (d) => {
-      clearTimeout(t);
-      sock.destroy();
-      cb("BYTES " + d.toString("hex").slice(0, 80));
-    });
-    sock.on("timeout", () => { clearTimeout(t); sock.destroy(); cb("TIMEOUT"); });
-    sock.on("error", (e) => { clearTimeout(t); sock.destroy(); cb("TLS_ERR", e.message); });
-  } catch (e) {
-    cb("SCRIPT_ERR", String(e));
-  }
+      const body = Buffer.concat([
+        Buffer.from([0, 3, 0, 0]),
+        Buffer.from("user\0"), user, Buffer.from([0]),
+        Buffer.from("database\0"), db, Buffer.from([0]),
+        Buffer.from([0]),
+      ]);
+      const len = Buffer.alloc(4);
+      len.writeInt32BE(body.length + 4, 0);
+
+      const sock = tls.connect({ host, port, rejectUnauthorized: false });
+      let sentStartup = false;
+      let authed = false;
+      let chunks: Buffer[] = [];
+      sock.setTimeout(20000);
+      const t = setTimeout(() => { sock.destroy(); resolve("TIMEOUT (buffered: " + Buffer.concat(chunks).toString("latin1").replace(/[^\x20-\x7e]/g, ".").slice(0, 120) + ")"); }, 25000);
+
+      sock.on("secureConnect", () => {
+        sock.write(Buffer.concat([len, body]));
+        sentStartup = true;
+      });
+
+      sock.on("data", (d) => {
+        chunks.push(d);
+        let buf = Buffer.concat(chunks);
+        chunks = [];
+        while (buf.length >= 5) {
+          const type = buf[0];
+          const msgLen = buf.readInt32BE(1);
+          if (buf.length < msgLen + 1) {
+            chunks.push(buf);
+            break;
+          }
+          const msg = buf.subarray(5, msgLen + 1);
+          buf = buf.subarray(msgLen + 1);
+
+          if (type === 82) {
+            // Authentication request. Code at msg[0..3]
+            const code = msg.readInt32BE(0);
+            if (code === 3) {
+              // cleartext password
+              const plen = Buffer.alloc(4);
+              plen.writeInt32BE(pass.length + 5, 0);
+              const pmsg = Buffer.concat([Buffer.from("p"), plen, pass, Buffer.from([0])]);
+              sock.write(pmsg);
+            } else if (code === 0) {
+              authed = true;
+              // authentication ok -> send query
+              const q = Buffer.from("SELECT 1 as ok, current_database() as db");
+              const qlen = Buffer.alloc(4);
+              qlen.writeInt32BE(q.length + 5, 0);
+              sock.write(Buffer.concat([Buffer.from("Q"), qlen, q, Buffer.from([0])]));
+            } else {
+              sock.destroy();
+              clearTimeout(t);
+              resolve("AUTH_CODE_" + code + " (unsupported, e.g. MD5/SCRAM)");
+            }
+          } else if (type === 69) {
+            // ErrorResponse
+            const txt = msg.toString("latin1").replace(/[^\x20-\x7e]/g, ".").slice(0, 150);
+            sock.destroy();
+            clearTimeout(t);
+            resolve("PG_ERROR: " + txt);
+          } else if (type === 84) {
+            // RowDescription
+            continue;
+          } else if (type === 68) {
+            // DataRow
+            continue;
+          } else if (type === 67) {
+            // CommandComplete
+            continue;
+          } else if (type === 73) {
+            // EmptyQueryResponse
+            continue;
+          } else if (type === 90) {
+            // ReadyForQuery
+            sock.destroy();
+            clearTimeout(t);
+            resolve("FULL_AUTH_QUERY_SUCCESS");
+          } else {
+            // unknown, keep going
+            continue;
+          }
+          if (buf.length === 0) break;
+        }
+      });
+      sock.on("timeout", () => { clearTimeout(t); sock.destroy(); resolve("SOCK_TIMEOUT"); });
+      sock.on("error", (e) => { clearTimeout(t); sock.destroy(); resolve("TLS_ERR " + e.message); });
+    } catch (e) {
+      resolve("SCRIPT_ERR " + String(e));
+    }
+  });
 }
 
 export async function GET() {
-  const dbMod = await import("@/lib/db");
-  const dbInstance = (dbMod as { db: unknown }).db as {
-    $queryRawUnsafe(sql: string): Promise<unknown>;
-    $on?(event: string, cb: (e: unknown) => void): void;
-  };
-
   const results: Record<string, string> = {};
-  results.protocol = await new Promise((resolve) => pgStartup((a, b) => resolve(b ? `${a}: ${b}` : a)));
-
-  if (typeof dbInstance.$on === "function") {
-    const events: string[] = [];
-    dbInstance.$on("query" as never, (e: unknown) => {
-      events.push(String((e as { query?: string })?.query || "").slice(0, 80));
-    });
-    dbInstance.$on("info" as never, (e: unknown) => {
-      events.push("INFO:" + String((e as { message?: string })?.message || "").slice(0, 80));
-    });
-    results.eventsBefore = events.join(" | ");
-  }
-
-  try {
-    const t0 = Date.now();
-    const table = await dbInstance.$queryRawUnsafe("SELECT 1 as ok");
-    results.query = "QUERY OK " + JSON.stringify(table) + " in " + (Date.now() - t0) + "ms";
-  } catch (e) {
-    const err = e as { constructor?: { name?: string }; message?: string; code?: string };
-    results.queryErrName = err.constructor?.name || "?";
-    results.queryErrCode = String(err.code || "none");
-    results.query = String(err.message || "").replace(/\s+/g, " ");
-  }
-
+  results.userLen = String(decodeURIComponent(new URL(RAW_URL).username).length);
+  results.passLen = String(decodeURIComponent(new URL(RAW_URL).password).length);
+  results.socketHost = new URL(RAW_URL).hostname;
+  results.auth = await fullAuthProtocol();
   return NextResponse.json(results);
 }
 
