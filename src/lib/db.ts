@@ -3,8 +3,8 @@ import { PrismaClient, Prisma } from "@prisma/client";
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
 // Neon (and other serverless Postgres) auto-pauses the compute when idle, so
-// the first query after a pause returns P1001 while the host resumes. Retry
-// those transient connection errors instead of failing the whole request.
+// the first query after a pause returns P1001/P1002 while the host resumes.
+// Retry those transient connection errors instead of failing the whole request.
 const TRANSIENT_CODES = new Set(["P1001", "P1002", "P1008", "P2024"]);
 
 function sleep(ms: number) {
@@ -29,10 +29,14 @@ function buildDatasourceUrl(): string | undefined {
       url.searchParams.set("connection_limit", "3");
     }
 
-    // Don't hang a request forever if the host can't be reached; the retry
-    // loop below will give a paused compute time to wake up again.
+    // Short connect timeout so a retry cycle can quickly wake a paused
+    // compute rather than hanging the whole request on a single attempt.
     if (!url.searchParams.has("connect_timeout")) {
-      url.searchParams.set("connect_timeout", "15");
+      url.searchParams.set("connect_timeout", "20");
+    }
+
+    if (!url.searchParams.has("socket_timeout")) {
+      url.searchParams.set("socket_timeout", "30");
     }
 
     return url.toString();
@@ -41,10 +45,21 @@ function buildDatasourceUrl(): string | undefined {
   }
 }
 
-function isTransientPrismaError(err: unknown): boolean {
+function isTransientPrismaError(err: unknown, message: string): boolean {
+  // instanceof can fail when Next.js bundles a second copy of @prisma/client,
+  // so fall back to constructor name and known P-codes.
+  const name = (err as { constructor?: { name?: string } })?.constructor?.name || "";
+  if (name === "PrismaClientInitializationError") return true;
+  if (name === "PrismaClientKnownRequestError" && TRANSIENT_CODES.has(message)) return true;
   if (err instanceof Prisma.PrismaClientInitializationError) return true;
-  if (err instanceof Prisma.PrismaClientKnownRequestError && TRANSIENT_CODES.has(err.code)) return true;
+  if (err instanceof Prisma.PrismaClientKnownRequestError && TRANSIENT_CODES.has(codeOf(err))) return true;
   return false;
+}
+
+// PrismaClientKnownRequestError exposes `code`; keep instanceof path extracted
+// here so the chain above stays readable.
+function codeOf(err: Prisma.PrismaClientKnownRequestError): string {
+  return err.code || "";
 }
 
 function createClient() {
@@ -58,18 +73,19 @@ function createClient() {
   const extended = prisma.$extends({
     query: {
       $allModels: {
-async $allOperations({ args, query }) {
-          const MAX_ATTEMPTS = 3;
+        async $allOperations({ args, query }) {
+          const MAX_ATTEMPTS = 4;
           let lastErr: unknown = null;
           for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
               return await query(args);
             } catch (error) {
               lastErr = error;
-              if (!isTransientPrismaError(error)) throw error;
+              const msg = String((error as { message?: unknown })?.message || "");
+              if (!isTransientPrismaError(error, msg)) throw error;
               if (attempt < MAX_ATTEMPTS) {
-                // Backoff while Neon wakes up: 1s then 2s.
-                await sleep(1000 * attempt);
+                // Backoff while Neon wakes up: 2s, 4s, 8s.
+                await sleep(2000 * attempt);
               }
             }
           }
