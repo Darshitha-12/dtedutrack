@@ -1,93 +1,77 @@
 import { NextResponse } from "next/server";
 import net from "net";
+import tls from "tls";
 
 const RAW_URL = process.env.DATABASE_URL || "";
 
-function extractHost(url: string): { host: string; port: number } {
-  try {
-    const u = new URL(url);
-    return { host: u.hostname, port: Number(u.port || 5432) };
-  } catch {
-    return { host: "url-parse-fail", port: 5432 };
-  }
-}
-
-const { host: HOST, port: PORT } = extractHost(RAW_URL);
-const SHAPE = (() => {
+function pgStartup(cb: (ok: string, err?: string) => void) {
   try {
     const u = new URL(RAW_URL);
-    return { scheme: u.protocol, hostname: u.hostname, port: u.port, hasUser: !!u.username, hasPass: !!u.password, db: u.pathname?.split("/").filter(Boolean)[0], params: Array.from(new URLSearchParams(u.search).keys()) };
-  } catch {
-    return { raw: RAW_URL.slice(0, 40).replace(/[^ -~]/g, ".") };
+    const host = u.hostname;
+    const port = Number(u.port || 5432);
+    const user = Buffer.from(u.username);
+    const db = Buffer.from(u.pathname?.split("/").filter(Boolean)[0] || "neondb");
+    const body = Buffer.concat([
+      Buffer.from([0, 3, 0, 0]),
+      Buffer.from("user\0"), user, Buffer.from([0]),
+      Buffer.from("database\0"), db, Buffer.from([0]),
+      Buffer.from([0]),
+    ]);
+    const len = Buffer.alloc(4);
+    len.writeInt32BE(body.length + 4, 0);
+
+    // Do TLS right away (sslmode=require style)
+    const sock = tls.connect({ host, port, rejectUnauthorized: false });
+    const t = setTimeout(() => { sock.destroy(); cb("TIMEOUT", "no response in 25s"); }, 25000);
+    sock.setTimeout(25000);
+    sock.on("secureConnect", () => {
+      sock.write(Buffer.concat([len, body]));
+    });
+    sock.on("data", (d) => {
+      clearTimeout(t);
+      sock.destroy();
+      cb("BYTES " + d.toString("hex").slice(0, 80));
+    });
+    sock.on("timeout", () => { clearTimeout(t); sock.destroy(); cb("TIMEOUT"); });
+    sock.on("error", (e) => { clearTimeout(t); sock.destroy(); cb("TLS_ERR", e.message); });
+  } catch (e) {
+    cb("SCRIPT_ERR", String(e));
   }
-})();
-
-function tcpProbe(): Promise<string> {
-  return new Promise((resolve) => {
-    const t0 = Date.now();
-    const s = net.connect({ host: HOST, port: PORT });
-    const t = setTimeout(() => {
-      s.destroy();
-      resolve("TIMEOUT after " + (Date.now() - t0) + "ms");
-    }, 25000);
-    s.setTimeout(25000);
-    s.on("connect", () => {
-      clearTimeout(t);
-      s.destroy();
-      resolve("CONNECT OK in " + (Date.now() - t0) + "ms to " + HOST + ":" + PORT);
-    });
-    s.on("timeout", () => {
-      clearTimeout(t);
-      s.destroy();
-      resolve("TIMEOUT after " + (Date.now() - t0) + "ms");
-    });
-    s.on("error", (e) => {
-      clearTimeout(t);
-      s.destroy();
-      resolve("ERROR " + e.message + " after " + (Date.now() - t0) + "ms");
-    });
-  });
-}
-
-function dnsProbe(): Promise<string> {
-  return new Promise((resolve) => {
-    try {
-      const dns = require("dns") as typeof import("dns");
-      dns.lookup(HOST, { all: true }, (err, addrs) => {
-        if (err) resolve("DNS ERROR " + err.message);
-        else resolve("DNS OK " + JSON.stringify(addrs.map((a) => a.address)));
-      });
-    } catch (e) {
-      resolve("DNS SCRIPT ERR " + String(e));
-    }
-  });
 }
 
 export async function GET() {
-  const { db: _db, PrismaNext } = await importDb();
-  const dbInstance = _db as { $queryRawUnsafe(sql: string): Promise<unknown> };
+  const dbMod = await import("@/lib/db");
+  const dbInstance = (dbMod as { db: unknown }).db as {
+    $queryRawUnsafe(sql: string): Promise<unknown>;
+    $on?(event: string, cb: (e: unknown) => void): void;
+  };
+
   const results: Record<string, string> = {};
-  results.urlLen = String(RAW_URL.length);
-  results.host = HOST + ":" + PORT;
-  results.urlShape = JSON.stringify(SHAPE);
-  results.dns = await dnsProbe();
-  results.tcp = await tcpProbe();
+  results.protocol = await new Promise((resolve) => pgStartup((a, b) => resolve(b ? `${a}: ${b}` : a)));
+
+  if (typeof dbInstance.$on === "function") {
+    const events: string[] = [];
+    dbInstance.$on("query" as never, (e: unknown) => {
+      events.push(String((e as { query?: string })?.query || "").slice(0, 80));
+    });
+    dbInstance.$on("info" as never, (e: unknown) => {
+      events.push("INFO:" + String((e as { message?: string })?.message || "").slice(0, 80));
+    });
+    results.eventsBefore = events.join(" | ");
+  }
+
   try {
     const t0 = Date.now();
     const table = await dbInstance.$queryRawUnsafe("SELECT 1 as ok");
-    results.query = "QUERY OK result=" + JSON.stringify(table) + " in " + (Date.now() - t0) + "ms";
+    results.query = "QUERY OK " + JSON.stringify(table) + " in " + (Date.now() - t0) + "ms";
   } catch (e) {
-    results.query = "QUERY ERR [" + (e as { constructor?: { name?: string } })?.constructor?.name + "] " + String((e as { message?: string })?.message).split("\n").slice(0, 4).join(" | ");
+    const err = e as { constructor?: { name?: string }; message?: string; code?: string };
+    results.queryErrName = err.constructor?.name || "?";
+    results.queryErrCode = String(err.code || "none");
+    results.query = String(err.message || "").replace(/\s+/g, " ");
   }
-  results.prismaVer = PrismaNext;
+
   return NextResponse.json(results);
 }
 
-async function importDb() {
-  const dbMod = await import("@/lib/db");
-  const prismaMod = await import("@prisma/client");
-  return { db: (dbMod as { db: unknown }).db, PrismaNext: (prismaMod as { Prisma: { prismaVersion?: { version?: string } } }).Prisma?.prismaVersion?.version || "?" };
-}
-
-// 15-minute limit to allow long probes
 export const maxDuration = 60;
