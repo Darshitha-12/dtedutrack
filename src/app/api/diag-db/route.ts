@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import net from "net";
 
-const HOST = process.env.DATABASE_URL?.match(/@([^:\/\s]+):(\d+)/)?.[1] || "unknown";
-const PORT = Number(process.env.DATABASE_URL?.match(/@([^:\/\s]+):(\d+)/)?.[2] || 5432);
+const RAW_URL = process.env.DATABASE_URL || "";
+const HOST = /@([^:\/\s]+):(\d+)/.exec(RAW_URL)?.[1] || (RAW_URL.includes("pooler") ? "has-pooler" : "no-at");
+const PORT = Number(/@([^:\/\s]+):(\d+)/.exec(RAW_URL)?.[2] || 5432);
 
 function tcpProbe(): Promise<string> {
   return new Promise((resolve) => {
@@ -49,7 +50,9 @@ export async function GET() {
   const { db: _db, PrismaNext } = await importDb();
   const dbInstance = _db as { $queryRawUnsafe(sql: string): Promise<unknown> };
   const results: Record<string, string> = {};
+  results.urlLen = String(RAW_URL.length);
   results.host = HOST + ":" + PORT;
+  results.urlShape = RAW_URL.replace(/^(.{0,12}).*/, "$1...") + " scheme=" + RAW_URL.split(":")[0];
   results.dns = await dnsProbe();
   results.tcp = await tcpProbe();
   try {
