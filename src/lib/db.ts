@@ -27,7 +27,7 @@ function parseUrl(url: string) {
 }
 
 function createClient() {
-  const base = process.env.DATABASE_URL;
+  const base = String(process.env.DATABASE_URL || "").replace(/^\uFEFF/, "").trim();
   const pg: PgHttp = require("pg") as PgHttp;
 
   const pool = new pg.Pool({
@@ -40,6 +40,10 @@ function createClient() {
         ? { rejectUnauthorized: false }
         : undefined,
   });
+
+  // Driver adapters in Prisma 6 use the Rust-free Node pg client; the pg Pool
+  // itself handles SNI/SSL. Guard against a leading UTF-8 BOM that some env
+  // injection paths can prepend to the connection string.
 
   // Keep the Prisma-level transient retry guard. PrismaClientInitializationError
   // no longer applies when using a driver adapter, so rely on the P-codes and
