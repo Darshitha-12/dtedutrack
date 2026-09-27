@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { requireDbUser } from "@/lib/require-db-user";
 
 const EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -55,16 +55,19 @@ function pruneExpired() {
 
 const statusSchema = z.object({
   text: z.string().max(5000).optional().default(""),
-  imageUrl: z.string().max(6_000_000).optional(),
+  imageUrl: z.string().max(14_000_000).optional(),
   imageType: z.string().max(20).optional(),
   duration: z.number().max(60_000).optional(),
 });
 
 export async function GET(req: Request) {
   try {
-    const session = await auth();
+    const session = await requireDbUser();
     if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Session expired. Please sign in again." },
+        { status: 401 },
+      );
     }
     await ensureSchema();
     pruneExpired();
@@ -153,9 +156,12 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const session = await auth();
+    const session = await requireDbUser();
     if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Session expired. Please sign in again." },
+        { status: 401 },
+      );
     }
     await ensureSchema();
 
@@ -190,9 +196,12 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const session = await auth();
+    const session = await requireDbUser();
     if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Session expired. Please sign in again." },
+        { status: 401 },
+      );
     }
     await ensureSchema();
     await db.userStatus.deleteMany({ where: { userId: session.user.id } });

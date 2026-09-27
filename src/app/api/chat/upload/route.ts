@@ -4,7 +4,7 @@ import { supabaseAdmin, isSupabaseConfigured } from "@/lib/supabase-admin";
 
 const BUCKET = "chat-media";
 const MAX_BYTES = 15 * 1024 * 1024; // 15MB
-const MAX_INLINE_BYTES = 2 * 1024 * 1024; // base64 data-URL fallback cap (2MB raw)
+const MAX_INLINE_BYTES = 10 * 1024 * 1024; // base64 data-URL fallback cap (10MB raw)
 
 export async function POST(req: Request) {
   try {

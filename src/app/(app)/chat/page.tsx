@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { useSession } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 import {
   Search,
   Send,
@@ -386,6 +386,17 @@ export default function ChatPage() {
   const myImage = (session?.user as { image?: string | null })?.image || null;
   const { showToast } = useToast();
 
+  const signingOutRef = useRef(false);
+  const forceReLogin = useCallback(async () => {
+    if (signingOutRef.current) return;
+    signingOutRef.current = true;
+    try {
+      await signOut({ callbackUrl: "/login" });
+    } catch {
+      window.location.href = "/login";
+    }
+  }, []);
+
   const [users, setUsers] = useState<ChatUser[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -528,15 +539,16 @@ export default function ChatPage() {
 
   const updatePresence = useCallback(async (status: string) => {
     try {
-      await fetch("/api/chat/presence", {
+      const res = await fetch("/api/chat/presence", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
+      if (res.status === 401) forceReLogin();
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [forceReLogin]);
 
   useEffect(() => {
     loadConversations();
@@ -625,6 +637,10 @@ export default function ChatPage() {
           imageType: statusMedia?.type || undefined,
         }),
       });
+      if (res.status === 401) {
+        forceReLogin();
+        return;
+      }
       if (res.ok) {
         setStatusText("");
         setStatusMedia(null);
@@ -644,6 +660,10 @@ export default function ChatPage() {
   const clearMyStatus = async () => {
     try {
       const res = await fetch("/api/chat/status", { method: "DELETE" });
+      if (res.status === 401) {
+        forceReLogin();
+        return;
+      }
       if (res.ok) {
         loadStatuses();
         showToast("Status cleared.", "success");
@@ -702,11 +722,15 @@ export default function ChatPage() {
 
   const markStatusViewed = async (statusId: string) => {
     try {
-      await fetch("/api/chat/status/view", {
+      const res = await fetch("/api/chat/status/view", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ statusId }),
       });
+      if (res.status === 401) {
+        forceReLogin();
+        return;
+      }
       setStatuses((prev) =>
         prev.map((s) => (s.id === statusId ? { ...s, viewedByMe: true, viewCount: s.viewCount + 1 } : s)),
       );
@@ -722,6 +746,10 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ statusId, emoji }),
       });
+      if (res.status === 401) {
+        forceReLogin();
+        return;
+      }
       if (res.ok) {
         const d = await res.json();
         setStatuses((prev) =>
@@ -852,6 +880,10 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ partnerId: activeId, ...payload }),
       });
+      if (res.status === 401) {
+        forceReLogin();
+        return;
+      }
       if (res.ok) {
         await fetch("/api/chat/messages?partnerId=" + encodeURIComponent(activeId) + "&limit=200")
           .then((r) => r.json())

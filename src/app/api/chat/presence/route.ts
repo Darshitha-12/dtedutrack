@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
+import { requireDbUser } from "@/lib/require-db-user";
 import { db } from "@/lib/db";
 import { supabaseAdmin, isSupabaseConfigured } from "@/lib/supabase-admin";
 import { channelRoomFor } from "@/lib/supabase";
@@ -11,9 +11,12 @@ const presenceSchema = z.object({
 
 export async function POST(req: Request) {
   try {
-    const session = await auth();
+    const session = await requireDbUser();
     if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Session expired. Please sign in again." },
+        { status: 401 },
+      );
     }
 
     const body = await req.json().catch(() => ({}));

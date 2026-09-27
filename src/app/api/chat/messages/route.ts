@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
+import { requireDbUser } from "@/lib/require-db-user";
 import { db } from "@/lib/db";
 import { sendChatNotification } from "@/lib/fcm";
 
 const sendSchema = z.object({
   partnerId: z.string().min(1),
   text: z.string().max(4000).optional().default(""),
-  mediaUrl: z.string().max(6_000_000).optional(),
+  mediaUrl: z.string().max(14_000_000).optional(),
   mediaType: z.string().max(20).optional(),
   mediaName: z.string().max(255).optional(),
 });
@@ -76,9 +77,12 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const session = await auth();
+    const session = await requireDbUser();
     if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Session expired. Please sign in again." },
+        { status: 401 },
+      );
     }
 
     const body = await req.json();
