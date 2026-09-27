@@ -137,7 +137,7 @@ function ForgotPasswordForm() {
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4 bg-gradient-to-br from-background via-background to-primary/5">
-      <Card className="w-full max-w-sm p-6 space-y-6 glass">
+      <Card className="w-full max-w-sm p-6 space-y-6 bg-card border-border shadow-xl">
         <div className="text-center space-y-2">
           <div className="text-4xl mb-2">🧬</div>
           <h1 className="text-2xl font-bold">Reset password</h1>

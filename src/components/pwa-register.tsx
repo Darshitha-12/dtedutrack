@@ -10,7 +10,14 @@ export function PwaRegister() {
     let active = true;
     const onMessage = (e: MessageEvent) => {
       if (e.data && e.data.type === "NEW_VERSION") {
-        if (active) window.location.reload();
+        if (!active) return;
+        // Never reload while an editable element has focus — a mid-keystroke
+        // reload closes the on-screen keyboard on mobile.
+        const el = document.activeElement as HTMLElement | null;
+        if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+          return;
+        }
+        window.location.reload();
       }
     };
     navigator.serviceWorker.addEventListener("message", onMessage);
