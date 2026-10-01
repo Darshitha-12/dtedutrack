@@ -1,0 +1,12 @@
+{
+  "appId": "com.biopulse.app",
+  "appName": "BioPulse",
+  "webDir": "out",
+  "server": {
+    "url": "https://dtedutrack-euc4.vercel.app",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

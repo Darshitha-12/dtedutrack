@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BioPulse</string>
+    <string name="title_activity_main">BioPulse</string>
+    <string name="package_name">com.biopulse.app</string>
+    <string name="custom_url_scheme">com.biopulse.app</string>
+</resources>
