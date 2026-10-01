@@ -4,78 +4,274 @@
 
 @layer base {
   :root {
-    --background: 160 38% 5%;
-    --foreground: 160 20% 92%;
-    --card: 160 30% 8%;
-    --card-foreground: 160 20% 92%;
-    --popover: 160 30% 8%;
-    --popover-foreground: 160 20% 92%;
-    --primary: 160 84% 39%;
+    --background: 165 32% 4%;
+    --foreground: 155 22% 95%;
+
+    --card: 165 28% 7%;
+    --card-foreground: 155 22% 95%;
+    --popover: 165 30% 8%;
+    --popover-foreground: 155 22% 95%;
+
+    --surface: 165 26% 6%;
+    --surface-2: 165 24% 9%;
+    --elevated: 165 26% 10%;
+
+    --primary: 158 76% 42%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 174 72% 41%;
+    --secondary: 187 72% 44%;
     --secondary-foreground: 0 0% 100%;
-    --muted: 160 20% 12%;
-    --muted-foreground: 160 10% 55%;
-    --accent: 160 30% 14%;
-    --accent-foreground: 160 20% 92%;
-    --destructive: 350 89% 60%;
+
+    --muted: 165 18% 13%;
+    --muted-foreground: 160 9% 58%;
+    --accent: 163 28% 16%;
+    --accent-foreground: 155 22% 95%;
+
+    --destructive: 350 84% 58%;
     --destructive-foreground: 0 0% 100%;
-    --border: 160 20% 14%;
-    --input: 160 20% 14%;
-    --ring: 160 84% 39%;
-    --radius: 0.75rem;
+    --success: 152 68% 44%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 30 60% 10%;
+
+    --border: 165 18% 16%;
+    --border-strong: 165 18% 24%;
+    --input: 165 18% 18%;
+    --ring: 158 76% 42%;
+
+    --radius: 0.875rem;
+
+    --shadow-xs: 0 1px 2px 0 hsl(165 40% 2% / 0.4);
+    --shadow-sm: 0 1px 3px 0 hsl(165 40% 2% / 0.45), 0 1px 2px -1px hsl(165 40% 2% / 0.4);
+    --shadow-md: 0 4px 12px -2px hsl(165 40% 2% / 0.5), 0 2px 6px -2px hsl(165 40% 2% / 0.4);
+    --shadow-lg: 0 12px 28px -6px hsl(165 40% 2% / 0.6), 0 4px 10px -4px hsl(165 40% 2% / 0.45);
+    --shadow-xl: 0 24px 48px -12px hsl(165 40% 2% / 0.7), 0 8px 16px -8px hsl(165 40% 2% / 0.5);
+    --shadow-2xl: 0 40px 80px -20px hsl(165 40% 2% / 0.78), 0 12px 28px -12px hsl(165 40% 2% / 0.55);
+
+    --font-sans: "Inter var", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-display: "Inter var", "Inter", system-ui, -apple-system, sans-serif;
   }
 
   .light {
-    --background: 160 20% 97%;
-    --foreground: 160 30% 10%;
+    --background: 160 24% 98%;
+    --foreground: 168 32% 10%;
+
     --card: 0 0% 100%;
-    --card-foreground: 160 30% 10%;
+    --card-foreground: 168 32% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 160 30% 10%;
-    --primary: 160 84% 39%;
+    --popover-foreground: 168 32% 10%;
+
+    --surface: 160 20% 98%;
+    --surface-2: 160 18% 95%;
+    --elevated: 0 0% 100%;
+
+    --primary: 158 72% 33%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 174 72% 41%;
+    --secondary: 190 78% 32%;
     --secondary-foreground: 0 0% 100%;
-    --muted: 160 14% 93%;
-    --muted-foreground: 160 10% 45%;
-    --accent: 160 14% 90%;
-    --accent-foreground: 160 30% 10%;
-    --destructive: 350 89% 60%;
+
+    --muted: 160 16% 94%;
+    --muted-foreground: 165 12% 38%;
+    --accent: 158 30% 94%;
+    --accent-foreground: 168 32% 10%;
+
+    --destructive: 350 74% 46%;
     --destructive-foreground: 0 0% 100%;
-    --border: 160 14% 88%;
-    --input: 160 14% 88%;
-    --ring: 160 84% 39%;
+    --success: 152 62% 32%;
+    --success-foreground: 0 0% 100%;
+    --warning: 34 90% 44%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 165 16% 88%;
+    --border-strong: 165 16% 78%;
+    --input: 165 16% 90%;
+    --ring: 158 72% 33%;
+
+    --shadow-xs: 0 1px 2px 0 hsl(165 20% 40% / 0.06);
+    --shadow-sm: 0 1px 3px 0 hsl(165 20% 40% / 0.1), 0 1px 2px -1px hsl(165 20% 40% / 0.08);
+    --shadow-md: 0 4px 12px -2px hsl(165 20% 40% / 0.12), 0 2px 6px -2px hsl(165 20% 40% / 0.08);
+    --shadow-lg: 0 12px 28px -6px hsl(165 20% 40% / 0.16), 0 4px 10px -4px hsl(165 20% 40% / 0.1);
+    --shadow-xl: 0 24px 48px -12px hsl(165 20% 40% / 0.18), 0 8px 16px -8px hsl(165 20% 40% / 0.12);
+    --shadow-2xl: 0 40px 80px -20px hsl(165 20% 40% / 0.2), 0 12px 28px -12px hsl(165 20% 40% / 0.14);
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    min-height: 100dvh;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Typography scale — tighter, more premium display tracking */
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display tracking-[-0.022em];
+  }
+
+  h1 {
+    letter-spacing: -0.03em;
+  }
+
+  /* Focus ring — consistent + accessible everywhere */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring/70 ring-offset-2 ring-offset-background;
+  }
+
+  /* Remove default number spinners for a cleaner look */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+
+  ::selection {
+    @apply bg-primary/30 text-foreground;
   }
 }
 
-@layer base {
-  * { @apply border-border; }
-  body { @apply bg-background text-foreground antialiased; }
+@layer components {
+  /* ---- Surfaces ---- */
+  .glass {
+    @apply bg-card/70 backdrop-blur-2xl border border-border/60;
+  }
+  .glass-hover {
+    @apply transition-all duration-300 ease-premium hover:bg-accent/40 hover:border-primary/30;
+  }
+  .glass-strong {
+    @apply bg-elevated/85 backdrop-blur-2xl border border-border-strong/70 shadow-xl;
+  }
+  .surface-card {
+    @apply bg-card border border-border rounded-2xl shadow-md;
+  }
+  .surface-elevated {
+    @apply bg-elevated border border-border-strong/60 rounded-2xl shadow-lg;
+  }
+
+  /* ---- Gradients & glows ---- */
+  .text-gradient {
+    @apply bg-gradient-to-r from-bio to-chem bg-clip-text text-transparent;
+  }
+  .text-gradient-warm {
+    @apply bg-gradient-to-r from-agri to-math bg-clip-text text-transparent;
+  }
+  .text-gradient-brand {
+    @apply bg-gradient-brand bg-clip-text text-transparent;
+  }
+  .glow-bio {
+    box-shadow: 0 0 24px hsl(158 76% 42% / 0.28);
+  }
+  .glow-chem {
+    box-shadow: 0 0 24px hsl(187 72% 44% / 0.28);
+  }
+  .glow-rose {
+    box-shadow: 0 0 24px hsl(350 84% 58% / 0.28);
+  }
+  .glow-amber {
+    box-shadow: 0 0 24px hsl(38 92% 55% / 0.28);
+  }
+
+  /* ---- Interactive affordances ---- */
+  .pressable {
+    @apply transition-transform duration-200 ease-premium active:scale-[0.97];
+  }
+  .hover-lift {
+    @apply transition-all duration-300 ease-premium hover:-translate-y-0.5 hover:shadow-lg;
+  }
+  .tap-highlight {
+    @apply transition-colors duration-200 ease-smooth hover:bg-accent/50;
+  }
+
+  /* ---- Scrollbars ---- */
+  .scrollbar-slim {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border-strong)) transparent;
+  }
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ---- Skeleton shimmer ---- */
+  .skeleton {
+    @apply relative overflow-hidden bg-muted/60 rounded-md;
+  }
+  .skeleton::after {
+    content: "";
+    @apply absolute inset-0 -translate-x-full bg-gradient-shimmer;
+    animation: shimmer 1.8s infinite;
+  }
+
+  /* ---- Decorative patterns ---- */
+  .bg-dots {
+    background-image: radial-gradient(circle at center, hsl(var(--foreground) / 0.07) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .bg-grid {
+    background-image:
+      linear-gradient(hsl(var(--border) / 0.5) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--border) / 0.5) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  /* ---- Focus ring helper ---- */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+
+  /* ---- Ring progress (Pomodoro) ---- */
+  .ring-progress {
+    transition: stroke-dashoffset 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* ---- Avatar presence ring ---- */
+  .avatar-ring {
+    @apply rounded-full ring-2 ring-offset-2 ring-offset-background;
+  }
 }
 
-@layer utilities {
-  .glass { @apply bg-card/80 backdrop-blur-xl border border-border/50; }
-  .glass-hover { @apply hover:bg-accent/50 hover:border-primary/30 transition-all duration-200; }
-  .text-gradient { @apply bg-gradient-to-r from-bio to-chem bg-clip-text text-transparent; }
-  .text-gradient-warm { @apply bg-gradient-to-r from-agri to-math bg-clip-text text-transparent; }
-  .glow-bio { box-shadow: 0 0 20px rgba(16,185,129,0.15); }
-  .glow-chem { box-shadow: 0 0 20px rgba(6,182,212,0.15); }
-  .glow-rose { box-shadow: 0 0 20px rgba(244,63,94,0.15); }
-  .glow-amber { box-shadow: 0 0 20px rgba(245,158,11,0.15); }
+/* Custom scrollbar (WebKit) */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border-strong));
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.7);
+  background-clip: content-box;
 }
 
-html { scroll-behavior: smooth; }
-body { min-height: 100dvh; }
-
-/* Custom scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
-
-/* Ring animation for Pomodoro */
-.ring-progress { transition: stroke-dashoffset 0.4s linear; }
-
-/* Focus ring */
-.focus-ring { @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background; }
+/* Reduced motion — respect accessibility preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

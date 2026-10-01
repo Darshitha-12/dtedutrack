@@ -27,6 +27,18 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import {
+  VideoCallOverlay,
+  type CallPeer,
+} from "@/features/chat/components/video-call-overlay";
+
+function VideoIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden>
+      <path d="M4 5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5zm12.5 3.5 3-2.3A1 1 0 0 1 21 7v10a1 1 0 0 1-1.5.9l-3-2.3v-1.6z" />
+    </svg>
+  );
+}
 
 const EMOJI_CATEGORIES: { name: string; icon: string; emojis: string[] }[] = [
   {
@@ -415,6 +427,8 @@ export default function ChatPage() {
   const [emojiCategory, setEmojiCategory] = useState("Smileys");
   const [emojiQuery, setEmojiQuery] = useState("");
   const [contactOpen, setContactOpen] = useState(false);
+  const [callPeer, setCallPeer] = useState<CallPeer | null>(null);
+  const [callRole, setCallRole] = useState<"caller" | "callee">("caller");
   const [recording, setRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [recordingError, setRecordingError] = useState("");
@@ -466,6 +480,23 @@ export default function ChatPage() {
   }, [messages, activeId]);
 
   const activeUser = users.find((u) => u.id === activeId) || null;
+
+  // ---- Video calls -----------------------------------------------------
+  // The overlay handles signaling (offer/answer/ICE) and the callee's own
+  // `hello`. Nothing extra to send here — mounting the overlay starts the call.
+  const startCall = useCallback((u: ChatUser) => {
+    setCallRole("caller");
+    setCallPeer({ id: u.id, name: u.fullName || u.name, avatar: u.image });
+  }, []);
+
+  const startCallWith = useCallback(() => {
+    if (!activeUser) return;
+    startCall(activeUser);
+  }, [activeUser, startCall]);
+
+  const closeCall = useCallback(() => {
+    setCallPeer(null);
+  }, []);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -866,6 +897,40 @@ export default function ChatPage() {
     };
   }, [me, loadConversations, loadMessages, loadUsers]);
 
+  // Incoming call ring. Supabase realtime is unavailable (dead project), so we
+  // poll a lightweight endpoint that surfaces unanswered call signals.
+  useEffect(() => {
+    if (!me) return;
+    let stopped = false;
+
+    const check = async () => {
+      try {
+        const res = await fetch("/api/chat/call-signal/incoming", { cache: "no-store" });
+        if (!res.ok || stopped) return;
+        const data = (await res.json()) as { caller?: CallPeer & { callId: string } };
+        const caller = data.caller;
+        if (!caller?.id || caller.id === me) return;
+        if (callPeerRef.current) return; // already in a call
+        setCallRole("callee");
+        setCallPeer({ id: caller.id, name: caller.name, avatar: caller.avatar });
+      } catch {
+        /* ignore */
+      }
+    };
+
+    void check();
+    const iv = window.setInterval(check, 3000);
+    return () => {
+      stopped = true;
+      clearInterval(iv);
+    };
+  }, [me]);
+
+  const callPeerRef = useRef<CallPeer | null>(null);
+  useEffect(() => {
+    callPeerRef.current = callPeer;
+  }, [callPeer]);
+
   const sendMessage = async (payload: {
     text?: string;
     mediaUrl?: string;
@@ -1113,53 +1178,53 @@ export default function ChatPage() {
   });
 
   return (
-    <div className="-mx-4 -my-6 flex h-[calc(100dvh-4rem)] flex-col overflow-hidden bg-card text-foreground md:mx-auto md:my-0 md:h-[calc(100dvh-7rem)] md:max-w-5xl md:rounded-lg md:border md:border-border">
+    <div className="flex h-[calc(100dvh-4rem)] flex-col overflow-hidden bg-background text-foreground md:mx-auto md:h-[calc(100dvh-2.5rem)] md:max-w-6xl md:rounded-2xl md:border md:border-border md:shadow-xl">
       {/* OUTSIDE: header + tabs + list */}
       <div
         className={cn(
-          "flex min-h-0 w-full flex-col md:flex md:w-[30%] md:min-w-[320px] md:border-r md:border-border",
+          "flex min-h-0 w-full flex-col bg-card md:flex md:w-[32%] md:min-w-[330px] md:border-r md:border-border",
           mobilePane === "chat" ? "hidden md:flex" : "flex",
         )}
       >
         {/* Header */}
-        <div className="flex h-14 items-center justify-between border-b border-border bg-card px-4">
-          <div className="flex items-center gap-3">
-            <Avatar src={myImage} name={myName} size={38} />
-            <span className="text-base font-medium">{myName}</span>
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card/70 px-4 backdrop-blur-xl">
+          <div className="flex min-w-0 items-center gap-3">
+            <Avatar src={myImage} name={myName} size={40} />
+            <span className="truncate text-[15px] font-semibold">{myName}</span>
           </div>
-          <div className="flex items-center gap-4 text-muted-foreground">
-            <button onClick={() => setNewChatOpen(true)} aria-label="New chat" className="hover:text-foreground">
+          <div className="flex items-center gap-1 text-muted-foreground">
+            <button onClick={() => setNewChatOpen(true)} aria-label="New chat" className="pressable rounded-lg p-2 hover:bg-accent hover:text-foreground">
               <MessageCircle className="h-5 w-5" />
             </button>
             <div className="relative">
               <button
                 onClick={() => toggleMenu("header")}
                 aria-label="Menu"
-                className="hover:text-foreground"
+                className="pressable rounded-lg p-2 hover:bg-accent hover:text-foreground"
               >
                 <MoreVertical className="h-5 w-5" />
               </button>
               {menuOpen === "header" && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setMenuOpen("none")} />
-                  <div className="absolute right-0 top-9 z-50 w-56 overflow-hidden rounded-xl border border-border py-1.5 text-sm shadow-xl" style={{ background: "var(--popover)", color: "var(--foreground)", boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
+                  <div className="absolute right-0 top-11 z-50 w-56 animate-scale-in overflow-hidden rounded-xl border border-border bg-popover py-1.5 text-sm text-popover-foreground shadow-2xl">
                     <button
                       onClick={() => { setMenuOpen("none"); setNewChatOpen(true); }}
-                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted"
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-accent"
                     >
                       <MessageSquarePlus className="h-4 w-4 text-muted-foreground" /> New chat
                     </button>
                     <a
                       href="/profile"
                       onClick={() => setMenuOpen("none")}
-                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted"
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-accent"
                     >
                       <UserRound className="h-4 w-4 text-muted-foreground" /> My profile
                     </a>
                     <a
                       href="/settings"
                       onClick={() => setMenuOpen("none")}
-                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted"
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-accent"
                     >
                       <CircleDot className="h-4 w-4 text-muted-foreground" /> Settings
                     </a>
@@ -1183,14 +1248,16 @@ export default function ChatPage() {
               key={t.id}
               onClick={() => setTab(t.id)}
               className={cn(
-                "relative flex flex-1 items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors",
-                tab === t.id ? "text-foreground" : "hover:text-foreground",
+                "relative flex flex-1 items-center justify-center gap-1.5 py-3 text-sm font-semibold transition-all duration-200 ease-premium",
+                tab === t.id
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
-              <t.icon className="h-4 w-4" />
+              <t.icon className={cn("h-4 w-4 transition-transform duration-200", tab === t.id && "scale-110")} />
               {t.label}
               {tab === t.id && (
-                <span className="absolute bottom-0 left-0 right-0 h-[3px] rounded-t bg-primary" />
+                <span className="absolute inset-x-3 bottom-0 h-[3px] rounded-t-full bg-gradient-primary shadow-glow" />
               )}
             </button>
           ))}
@@ -1343,14 +1410,40 @@ export default function ChatPage() {
               )}
             </div>
           ) : (
-            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-              <div className="mb-3 grid h-16 w-16 place-items-center rounded-full bg-muted">
-                <Phone className="h-7 w-7 text-muted-foreground" />
-              </div>
-              <p className="text-sm font-medium text-foreground">Calls</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Call history will appear here. Coming soon.
-              </p>
+            <div className="scrollbar-slim flex-1 overflow-y-auto">
+              {users.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+                  <div className="mb-3 grid h-16 w-16 place-items-center rounded-2xl bg-muted">
+                    <Phone className="h-7 w-7 text-muted-foreground" />
+                  </div>
+                  <p className="text-sm font-medium text-foreground">No contacts yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Start a chat to see contacts here.
+                  </p>
+                </div>
+              ) : (
+                <ul className="divide-y divide-border/60">
+                  {users.map((u) => (
+                    <li key={u.id}>
+                      <button
+                        onClick={() => startCall(u)}
+                        className="flex w-full items-center gap-3 px-3 py-3 text-left transition-all duration-200 ease-premium hover:bg-accent/50 active:bg-accent/80"
+                      >
+                        <Avatar src={u.image} name={u.fullName} size={44} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[15px] font-medium">{u.fullName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {u.status === "online" ? "Online now" : "Tap to start a call"}
+                          </p>
+                        </div>
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/12 text-primary transition-all duration-200 ease-spring hover:scale-110 hover:bg-primary hover:text-primary-foreground">
+                          <VideoIcon className="h-[18px] w-[18px]" />
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
         </div>
@@ -1419,13 +1512,14 @@ export default function ChatPage() {
               </div>
               <div className="flex items-center gap-4 text-muted-foreground">
                 <button
-                  onClick={() => showToast("Video calls coming soon.", "info")}
-                  className="hover:text-foreground"
+                  onClick={startCallWith}
+                  aria-label="Start video call"
+                  className="pressable hover:text-primary"
                 >
                   <Video className="h-5 w-5" />
                 </button>
                 <button
-                  onClick={() => showToast("Voice calls coming soon.", "info")}
+                  onClick={() => showToast("Voice calls are not available yet.", "info")}
                   className="hover:text-foreground"
                 >
                   <Phone className="h-5 w-5" />
@@ -1488,11 +1582,8 @@ export default function ChatPage() {
                   return (
                     <div key={m.id}>
                       {showDay && (
-                        <div className="my-2 flex justify-center">
-                          <span
-                            className="rounded-md px-3 py-1 text-[11px] text-foreground/80"
-                            style={{ background: "var(--muted)", boxShadow: "0 1px 1px rgba(0,0,0,0.3)" }}
-                          >
+                        <div className="my-3 flex justify-center">
+                          <span className="rounded-full border border-border/70 bg-elevated/70 px-3 py-1 text-[11px] font-medium text-muted-foreground shadow-sm backdrop-blur-sm">
                             {formatDay(m.createdAt)}
                           </span>
                         </div>
@@ -1500,28 +1591,28 @@ export default function ChatPage() {
                       <div className={cn("flex", mine ? "justify-end" : "justify-start")}>
                         <div
                           className={cn(
-                            "relative max-w-[80%] rounded-lg px-2 py-1.5 text-sm shadow-sm",
+                            "relative max-w-[80%] animate-bubble-in rounded-2xl px-3 py-1.5 text-sm shadow-md",
                             mine
-                              ? "rounded-tr-md bg-primary"
-                              : "rounded-tl-md bg-muted",
+                              ? "rounded-br-md bg-gradient-primary text-primary-foreground"
+                              : "rounded-bl-md border border-border/60 bg-card text-card-foreground",
                           )}
                         >
                           {mediaBubble(m, saveMedia)}
                           {m.text && (
-                            <p className="whitespace-pre-wrap break-words pl-0.5 pr-9 text-[14px] text-foreground">
+                            <p className="whitespace-pre-wrap break-words pr-9 text-[14.5px] leading-relaxed text-inherit">
                               {m.text}
                             </p>
                           )}
                           <div
                             className={cn(
                               "mt-0.5 flex items-center justify-end gap-1 text-[11px]",
-                              mine ? "text-primary-foreground/70" : "text-muted-foreground",
+                              mine ? "text-primary-foreground/75" : "text-muted-foreground",
                             )}
                           >
                             <span>{formatTime(m.createdAt)}</span>
                             {mine &&
                               (m.readAt ? (
-                                <CheckCheck className="h-4 w-4 text-primary-foreground/80" />
+                                <CheckCheck className="h-3.5 w-3.5 text-primary-foreground/90" />
                               ) : (
                                 <Check className="h-4 w-4" />
                               ))}
@@ -1616,7 +1707,7 @@ export default function ChatPage() {
                 <div className="flex items-center gap-2 border-t border-border bg-card px-3 py-2.5">
                   <button
                     onClick={() => setEmojiOpen((o) => !o)}
-                    className={cn("hover:text-foreground", emojiOpen ? "text-primary" : "text-muted-foreground")}
+                    className={cn("pressable rounded-lg p-1.5", emojiOpen ? "text-primary" : "text-muted-foreground hover:text-foreground")}
                     aria-label="Emoji"
                   >
                     <Smile className="h-6 w-6" />
@@ -1631,9 +1722,9 @@ export default function ChatPage() {
                       }
                     }}
                     placeholder="Type a message"
-                    className="h-11 flex-1 rounded-lg bg-muted px-4 text-[14px] text-foreground placeholder:text-muted-foreground outline-none"
+                    className="h-11 flex-1 rounded-xl border border-transparent bg-muted/70 px-4 text-[14.5px] text-foreground placeholder:text-muted-foreground/70 outline-none transition-all duration-200 ease-smooth focus:border-primary/40 focus:bg-muted"
                   />
-                  <label className="relative cursor-pointer text-muted-foreground hover:text-foreground">
+                  <label className="pressable cursor-pointer rounded-lg p-1.5 text-muted-foreground hover:text-foreground">
                     <Paperclip className="h-6 w-6" />
                     <input
                       type="file"
@@ -1652,7 +1743,7 @@ export default function ChatPage() {
                       onClick={handleSendText}
                       disabled={sending}
                       aria-label="Send"
-                      className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-primary text-white transition-transform hover:scale-105 active:scale-95 disabled:opacity-60"
+                      className="pressable grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 hover:shadow-glow active:scale-95 disabled:opacity-60"
                     >
                       {sending ? (
                         <Loader2 className="h-5 w-5 animate-spin" />
@@ -1664,7 +1755,7 @@ export default function ChatPage() {
                     <button
                       onClick={startRecording}
                       aria-label="Record voice note"
-                      className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-primary text-white"
+                      className="pressable grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-primary text-primary-foreground shadow-lg hover:shadow-glow"
                     >
                       <Mic className="h-5 w-5" />
                     </button>
@@ -1672,7 +1763,7 @@ export default function ChatPage() {
                 </div>
               )}
               {recordingError && (
-                <div className="absolute bottom-[calc(100%+8px)] left-3 right-3 z-20 rounded-lg border border-border px-3 py-2 text-xs text-red-400" style={{ background: "var(--popover)" }}>
+                <div className="absolute bottom-[calc(100%+8px)] left-3 right-3 z-20 animate-fade-up rounded-lg border border-destructive/30 bg-popover px-3 py-2 text-xs text-destructive shadow-lg">
                   {recordingError}
                 </div>
               )}
@@ -2015,6 +2106,18 @@ export default function ChatPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Full-screen premium video call */}
+      {callPeer && me && (
+        <VideoCallOverlay
+          peer={callPeer}
+          selfId={me}
+          selfName={myName}
+          selfAvatar={myImage}
+          role={callRole}
+          onClose={closeCall}
+        />
       )}
     </div>
   );

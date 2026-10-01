@@ -1,16 +1,9 @@
 "use client";
 
-import { useState, useCallback, createContext, useContext } from "react";
-import { cn } from "@/lib/utils";
-import { X, CheckCircle, AlertCircle, Info } from "lucide-react";
+import { useCallback, createContext, useContext } from "react";
+import { Toaster as SonnerToaster, toast as sonnerToast } from "sonner";
 
 type ToastType = "success" | "error" | "info";
-
-interface Toast {
-  id: string;
-  message: string;
-  type: ToastType;
-}
 
 interface ToastContextType {
   toast: (message: string, type?: ToastType) => void;
@@ -24,37 +17,38 @@ export function useToast() {
 }
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
-
   const toast = useCallback((message: string, type: ToastType = "info") => {
-    const id = Date.now().toString(36);
-    setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3000);
+    if (type === "success") sonnerToast.success(message);
+    else if (type === "error") sonnerToast.error(message);
+    else sonnerToast(message);
   }, []);
 
   return (
     <ToastContext.Provider value={{ toast }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-[9999] space-y-2">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={cn(
-              "flex items-center gap-2 rounded-lg px-4 py-3 text-sm shadow-lg animate-in slide-in-from-right",
-              "bg-card border border-border",
-              t.type === "success" && "border-green-500/30",
-              t.type === "error" && "border-red-500/30",
-            )}
-          >
-            {t.type === "success" && <CheckCircle className="h-4 w-4 text-green-500" />}
-            {t.type === "error" && <AlertCircle className="h-4 w-4 text-red-500" />}
-            {t.type === "info" && <Info className="h-4 w-4 text-blue-500" />}
-            <span>{t.message}</span>
-          </div>
-        ))}
-      </div>
+      <SonnerToaster
+        position="bottom-right"
+        offset={20}
+        gap={10}
+        duration={3200}
+        visibleToasts={4}
+        closeButton
+        theme="dark"
+        toastOptions={{
+          classNames: {
+            toast:
+              "group !rounded-xl !border !border-border !bg-elevated/90 !text-foreground !shadow-2xl !backdrop-blur-xl",
+            title: "!text-sm !font-medium",
+            description: "!text-xs !text-muted-foreground",
+            success: "!border-success/35 !bg-success/10",
+            error: "!border-destructive/35 !bg-destructive/10",
+            info: "!border-secondary/35 !bg-secondary/10",
+            actionButton: "!bg-primary !text-primary-foreground !rounded-lg !text-xs !font-semibold",
+            closeButton:
+              "!border-border !bg-card !text-muted-foreground hover:!bg-accent hover:!text-foreground",
+          },
+        }}
+      />
     </ToastContext.Provider>
   );
 }

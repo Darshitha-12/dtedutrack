@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { resolvePresence } from "@/lib/presence";
+import { CALL_SIGNAL_MEDIA_TYPE } from "@/lib/call-signal";
 
 export async function GET() {
   try {
@@ -14,6 +15,8 @@ export async function GET() {
     const messages = await db.directMessage.findMany({
       where: {
         OR: [{ senderId: me }, { receiverId: me }],
+        // WebRTC signaling rides on this table; never treat it as chat activity.
+        mediaType: { not: CALL_SIGNAL_MEDIA_TYPE },
       },
       orderBy: { createdAt: "desc" },
       select: {

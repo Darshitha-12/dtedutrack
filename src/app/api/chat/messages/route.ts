@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { requireDbUser } from "@/lib/require-db-user";
 import { db } from "@/lib/db";
 import { sendChatNotification } from "@/lib/fcm";
+import { CALL_SIGNAL_MEDIA_TYPE } from "@/lib/call-signal";
 
 const sendSchema = z.object({
   partnerId: z.string().min(1),
@@ -52,6 +53,8 @@ export async function GET(req: Request) {
           { senderId: me, receiverId: partnerId },
           { senderId: partnerId, receiverId: me },
         ],
+        // WebRTC signaling rides on this table; it must never appear in chat.
+        mediaType: { not: CALL_SIGNAL_MEDIA_TYPE },
       },
       orderBy: { createdAt: "asc" },
       take: limit,

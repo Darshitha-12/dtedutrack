@@ -972,3 +972,10 @@ model ClassSession {
   @@index([userId, dayOfWeek])
   @@map("class_sessions")
 }
+
+// ============================================================
+// WEBRTC CALL SIGNALING
+// No dedicated table: signaling rides on `direct_messages` with the
+// reserved mediaType "__webrtc_signal", filtered out of the chat read
+// path. This avoids requiring a production DB migration.
+// ============================================================

@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { supabaseAdmin, isSupabaseConfigured } from "@/lib/supabase-admin";
 import { channelRoomFor } from "@/lib/supabase";
+import { CALL_SIGNAL_MEDIA_TYPE } from "@/lib/call-signal";
 
 const readSchema = z.object({
   partnerId: z.string().min(1),
@@ -26,7 +27,12 @@ export async function POST(req: Request) {
     const { partnerId } = parsed.data;
 
     const result = await db.directMessage.updateMany({
-      where: { senderId: partnerId, receiverId: me, readAt: null },
+      where: {
+        senderId: partnerId,
+        receiverId: me,
+        readAt: null,
+        mediaType: { not: CALL_SIGNAL_MEDIA_TYPE },
+      },
       data: { readAt: new Date() },
     });
 

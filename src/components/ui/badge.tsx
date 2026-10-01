@@ -3,14 +3,19 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-2xs font-semibold uppercase tracking-wide " +
+    "transition-all duration-200 ease-smooth focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
   {
     variants: {
       variant: {
-        default: "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
-        secondary: "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        destructive: "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
-        outline: "text-foreground",
+        default: "border-primary/25 bg-primary/15 text-primary",
+        secondary: "border-secondary/25 bg-secondary/15 text-secondary",
+        success: "border-success/25 bg-success/15 text-success",
+        warning: "border-warning/25 bg-warning/15 text-warning",
+        destructive: "border-destructive/25 bg-destructive/15 text-destructive",
+        muted: "border-border bg-muted text-muted-foreground",
+        outline: "border-border-strong text-foreground",
+        solid: "border-transparent bg-gradient-primary text-primary-foreground shadow-sm",
       },
     },
     defaultVariants: {
@@ -20,22 +25,23 @@ const badgeVariants = cva(
 )
 
 export interface BadgeProps
-  extends React.HTMLAttributes<HTMLDivElement>,
+  extends React.HTMLAttributes<HTMLSpanElement>,
     VariantProps<typeof badgeVariants> {}
 
 function Badge({ className, variant, ...props }: BadgeProps) {
-  return <div className={cn(badgeVariants({ variant }), className)} {...props} />
+  return <span className={cn(badgeVariants({ variant }), className)} {...props} />
 }
 
+// Semantic tokens so these read correctly in BOTH themes.
 const GRADE_STYLES: Record<string, string> = {
-  A: "border-transparent bg-emerald-500/20 text-emerald-400",
-  B: "border-transparent bg-cyan-500/20 text-cyan-400",
-  C: "border-transparent bg-amber-500/20 text-amber-400",
-  S: "border-transparent bg-red-500/20 text-red-400",
-  W: "border-transparent bg-zinc-500/20 text-zinc-400",
+  A: "border-success/25 bg-success/15 text-success",
+  B: "border-secondary/25 bg-secondary/15 text-secondary",
+  C: "border-warning/25 bg-warning/15 text-warning",
+  S: "border-destructive/25 bg-destructive/15 text-destructive",
+  W: "border-border bg-muted text-muted-foreground",
 }
 
-interface GradeBadgeProps extends React.HTMLAttributes<HTMLDivElement> {
+interface GradeBadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   grade: "A" | "B" | "C" | "S" | "W"
 }
 
