@@ -13,6 +13,9 @@ import {
   Music2,
   Search,
   Loader2,
+  Maximize2,
+  Minimize2,
+  PictureInPicture2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -84,6 +87,29 @@ function bridge(state: string, title = "") {
   }
 }
 
+function nativeKeepScreenOn(on: boolean) {
+  try {
+    const b = (window as any).BioPulseBridge
+    if (b && typeof b.setKeepScreenOn === "function") b.setKeepScreenOn(on)
+  } catch {
+    /* not in the Android shell */
+  }
+}
+
+async function lockLandscape(lock: boolean) {
+  try {
+    const so = (screen as any).orientation
+    if (!so) return
+    if (lock) {
+      if (typeof so.lock === "function") await so.lock("landscape")
+    } else if (typeof so.unlock === "function") {
+      so.unlock()
+    }
+  } catch {
+    /* orientation lock unsupported (web / not fullscreen) */
+  }
+}
+
 export default function YtPage() {
   return (
     <Suspense
@@ -112,6 +138,7 @@ function YtInner() {
   const [pasteOpen, setPasteOpen] = React.useState(false)
   const [pasteUrl, setPasteUrl] = React.useState("")
   const [copied, setCopied] = React.useState(false)
+  const [fs, setFs] = React.useState(false)
   const iframeRef = React.useRef<HTMLIFrameElement | null>(null)
   const stateRef = React.useRef<string>("idle")
   const currentId = React.useRef("")
@@ -334,6 +361,38 @@ function YtInner() {
     }
   }
 
+  // Fullscreen: rotate to landscape and keep the screen awake only while expanded.
+  React.useEffect(() => {
+    if (fs) {
+      nativeKeepScreenOn(true)
+      lockLandscape(true)
+    } else {
+      nativeKeepScreenOn(false)
+      lockLandscape(false)
+    }
+    return () => {
+      nativeKeepScreenOn(false)
+    }
+  }, [fs])
+
+  React.useEffect(() => {
+    if (!fs) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFs(false)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [fs])
+
+  // Leaving the page while expanded should not leave the rotation locked.
+  React.useEffect(() => {
+    const onHide = () => {
+      nativeKeepScreenOn(false)
+    }
+    document.addEventListener("visibilitychange", onHide)
+    return () => document.removeEventListener("visibilitychange", onHide)
+  }, [])
+
   const togglePlay = () => {
     if (!iframeRef.current || !video) return
     if (playing) {
@@ -427,9 +486,30 @@ function YtInner() {
         </Button>
       </div>
 
-      {/* Player */}
-      <Card className="p-2">
-        <div className="relative w-full aspect-video overflow-hidden rounded-lg bg-black">
+      {/* Player — inline by default, true fullscreen overlay when expanded */}
+      {fs && (
+        <button
+          type="button"
+          aria-label="Exit fullscreen"
+          onClick={() => setFs(false)}
+          className="fixed inset-0 z-[190] h-[100dvh] w-screen cursor-default bg-black/90"
+        />
+      )}
+
+      <Card
+        className={
+          fs
+            ? "fixed inset-0 z-[200] h-[100dvh] w-screen max-w-none rounded-none border-0 bg-black p-0 shadow-none"
+            : "p-2"
+        }
+      >
+        <div
+          className={
+            fs
+              ? "relative h-[100dvh] w-screen overflow-hidden bg-black"
+              : "relative w-full aspect-video overflow-hidden rounded-xl bg-black"
+          }
+        >
           {video ? (
             <>
               <iframe
@@ -445,10 +525,35 @@ function YtInner() {
                 type="button"
                 aria-label={playing ? "Pause" : "Play"}
                 onClick={togglePlay}
-                className="absolute left-3 top-3 z-10 h-10 w-10 rounded-full bg-black/70 text-white flex items-center justify-center backdrop-blur-sm"
+                className="absolute left-3 top-3 z-10 grid h-10 w-10 place-items-center rounded-full bg-black/70 text-white backdrop-blur-sm transition-transform active:scale-95"
               >
                 {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
               </button>
+              <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-label="Picture in picture"
+                  onClick={async () => {
+                    try {
+                      const d = iframeRef.current as any
+                      if (d?.requestPictureInPicture) await d.requestPictureInPicture()
+                    } catch {
+                      /* PiP unsupported */
+                    }
+                  }}
+                  className="grid h-10 w-10 place-items-center rounded-full bg-black/70 text-white backdrop-blur-sm transition-transform active:scale-95"
+                >
+                  <PictureInPicture2 className="h-5 w-5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={fs ? "Exit fullscreen" : "Fullscreen"}
+                  onClick={() => setFs((v) => !v)}
+                  className="grid h-10 w-10 place-items-center rounded-full bg-black/70 text-white backdrop-blur-sm transition-transform active:scale-95"
+                >
+                  {fs ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
+                </button>
+              </div>
             </>
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
@@ -459,16 +564,16 @@ function YtInner() {
         </div>
       </Card>
 
-      {video && (
+      {video && !fs && (
         <div className="space-y-1">
-          <p className="text-sm font-medium line-clamp-2">{nowTitle}</p>
+          <p className="text-sm font-semibold leading-snug line-clamp-2">{nowTitle}</p>
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400" />
             </span>
-            Playing in the background — lock your screen and use the pause/play buttons in the
-            notification.
+            Background playback is on — press back or lock the screen and control it from the
+            notification. Use the expand button for fullscreen.
           </p>
         </div>
       )}
