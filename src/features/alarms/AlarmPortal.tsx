@@ -17,11 +17,6 @@ function readAlarms(): { alarms: Alarm[]; fired: Record<string, number> } {
     if (!raw) return { alarms: [], fired: {} };
     const parsed = JSON.parse(raw);
     const alarms: Alarm[] = parsed.alarms ?? [];
-    for (const a of alarms) {
-      if (typeof a.sound === "string" && a.sound.startsWith("custom:")) {
-        a.sound = "chime";
-      }
-    }
     return { alarms, fired: parsed.fired ?? {} };
   } catch {
     return { alarms: [], fired: {} };

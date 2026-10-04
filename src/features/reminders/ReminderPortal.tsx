@@ -2,16 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioEngine } from "@/features/alarms/lib/audio-engine";
+import { holdBackgroundPlayback } from "@/features/alarms/lib/background-playback";
 import { notificationService } from "@/services/notification";
 import { ReminderPopup } from "@/features/reminders/components/ReminderPopup";
 import {
   loadReminders,
+  normalizeReminderSound,
   reminderMatches,
   saveReminders,
   toDateKey,
   REMINDERS_STORAGE_KEY,
 } from "@/features/reminders/types";
-import type { Reminder } from "@/features/reminders/types";
+import type { Reminder, ReminderSound } from "@/features/reminders/types";
 
 const POLL_MS = 15000;
 
@@ -64,11 +66,12 @@ export function ReminderPortal() {
   const fire = useCallback(
     (reminder: Reminder) => {
       setActive(reminder);
-      AudioEngine.play("chime");
+      AudioEngine.play(reminder.sound ?? "chime");
       startVibration();
       notificationService
         .sendBrowser(`🔔 ${reminder.title}`, reminder.note || "BioPulse reminder")
         .catch(() => {});
+      holdBackgroundPlayback(true, reminder.title);
     },
     [startVibration],
   );
@@ -89,6 +92,7 @@ export function ReminderPortal() {
   const dismiss = useCallback(() => {
     AudioEngine.stop();
     stopVibration();
+    holdBackgroundPlayback(false);
     setActive(null);
   }, [stopVibration]);
 
@@ -125,7 +129,9 @@ export function ReminderPortal() {
         checkDue();
       }
     };
-    const onTest = () => {
+    const onTest = (e: Event) => {
+      const detail = (e as CustomEvent<{ sound?: ReminderSound }>).detail;
+      const requested = normalizeReminderSound(detail?.sound);
       fire({
         id: "test",
         title: "Test reminder",
@@ -134,6 +140,7 @@ export function ReminderPortal() {
         date: "",
         days: [],
         time: "00:00",
+        sound: requested,
         enabled: true,
         lastFiredKey: "",
         createdAt: Date.now(),
@@ -162,6 +169,7 @@ export function ReminderPortal() {
       window.removeEventListener("storage", onStorage);
       AudioEngine.stop();
       stopVibration();
+      holdBackgroundPlayback(false);
       if (snoozeTimerRef.current !== null) {
         clearTimeout(snoozeTimerRef.current);
       }

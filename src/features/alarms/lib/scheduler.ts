@@ -1,10 +1,13 @@
+/** A built-in tone, or `custom:<soundId>` from the user's own audio library. */
+export type AlarmSoundValue = "chime" | "digital" | "bio" | `custom:${string}`;
+
 export interface Alarm {
   id: string;
   time: string;
   label: string;
   priority: "normal" | "high";
   subject: "none" | "biology" | "chemistry" | "physics" | "agriculture";
-  sound: "chime" | "digital" | "bio";
+  sound: AlarmSoundValue;
   tts: boolean;
   repeatDays: number[];
   enabled: boolean;
@@ -16,7 +19,7 @@ export interface CreateAlarmInput {
   label: string;
   priority: "normal" | "high";
   subject: "none" | "biology" | "chemistry" | "physics" | "agriculture";
-  sound: "chime" | "digital" | "bio";
+  sound: AlarmSoundValue;
   tts: boolean;
   repeatDays: number[];
 }

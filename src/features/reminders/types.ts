@@ -1,4 +1,9 @@
+import { CUSTOM_SOUND_PREFIX } from "@/features/alarms/lib/custom-sounds";
+
 export type ReminderMode = "once" | "daily" | "weekly";
+
+/** A built-in tone, or `custom:<soundId>` from the user's own audio library. */
+export type ReminderSound = "chime" | "digital" | "bio" | `custom:${string}`;
 
 export interface Reminder {
   id: string;
@@ -8,6 +13,7 @@ export interface Reminder {
   date: string;
   days: number[];
   time: string;
+  sound: ReminderSound;
   enabled: boolean;
   lastFiredKey: string;
   createdAt: number;
@@ -20,6 +26,7 @@ export interface CreateReminderInput {
   date?: string;
   days?: number[];
   time: string;
+  sound?: ReminderSound;
 }
 
 export const REMINDER_DAYS = [
@@ -41,6 +48,19 @@ export function toDateKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/** Accepts built-in tones plus `custom:<soundId>` references. */
+export function normalizeReminderSound(value: unknown): ReminderSound {
+  if (value === "digital" || value === "bio" || value === "chime") return value;
+  if (
+    typeof value === "string" &&
+    value.startsWith(CUSTOM_SOUND_PREFIX) &&
+    value.length > CUSTOM_SOUND_PREFIX.length
+  ) {
+    return value as ReminderSound;
+  }
+  return "chime";
+}
+
 export function createReminder(input: CreateReminderInput): Reminder {
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   return {
@@ -51,6 +71,7 @@ export function createReminder(input: CreateReminderInput): Reminder {
     date: input.date || "",
     days: input.days || [],
     time: input.time,
+    sound: normalizeReminderSound(input.sound),
     enabled: true,
     lastFiredKey: "",
     createdAt: Date.now(),
@@ -93,13 +114,15 @@ export function loadReminders(): Reminder[] {
     const list = Array.isArray(data?.reminders) ? data.reminders : [];
     // Skip malformed entries (missing/broken time) so a bad row can never
     // crash the reminder renderer and blank the app.
-    return list.filter(
-      (r: Reminder) =>
-        r &&
-        typeof r === "object" &&
-        typeof r.time === "string" &&
-        r.time.includes(":"),
-    );
+    return list
+      .filter(
+        (r: Reminder) =>
+          r &&
+          typeof r === "object" &&
+          typeof r.time === "string" &&
+          r.time.includes(":"),
+      )
+      .map((r: Reminder) => ({ ...r, sound: normalizeReminderSound(r.sound) }));
   } catch {
     return [];
   }

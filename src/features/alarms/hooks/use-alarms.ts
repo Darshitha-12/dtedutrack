@@ -1,9 +1,18 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import type { Alarm, CreateAlarmInput } from "../lib/scheduler";
+import type { Alarm, AlarmSoundValue, CreateAlarmInput } from "../lib/scheduler";
 
 export const STORAGE_KEY = "biopulse_alarms_v1";
+
+/** Accepts built-in tones plus `custom:<soundId>` references. */
+function normalizeSound(value: unknown): AlarmSoundValue {
+  if (value === "digital" || value === "bio" || value === "chime") return value;
+  if (typeof value === "string" && value.startsWith("custom:") && value.length > 7) {
+    return value as AlarmSoundValue;
+  }
+  return "chime";
+}
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -32,7 +41,7 @@ export function useAlarms() {
             subject: ["biology", "chemistry", "physics", "agriculture"].includes(a.subject)
               ? a.subject
               : "none",
-            sound: a.sound === "digital" || a.sound === "bio" ? a.sound : "chime",
+            sound: normalizeSound(a.sound),
             tts: !!a.tts,
             repeatDays: Array.isArray(a.repeatDays)
               ? a.repeatDays.map(Number).filter((n) => !Number.isNaN(n))

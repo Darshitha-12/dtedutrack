@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { AudioEngine } from "../lib/audio-engine";
+import { holdBackgroundPlayback } from "../lib/background-playback";
 import type { Alarm } from "../lib/scheduler";
 
 export function useAlarmRinger() {
@@ -79,6 +80,9 @@ export function useAlarmRinger() {
         native = false;
       }
       AudioEngine.play(alarm.sound);
+      // Keeps the Android foreground media service (and wakelock) alive so a custom
+      // MP3 keeps playing when the app is backgrounded or the screen is locked.
+      holdBackgroundPlayback(true, alarm.label);
       // The native full-screen skips launching when the web is the active
       // ringer, so the web is responsible for vibration in-app.
       startVibration();
@@ -91,6 +95,7 @@ export function useAlarmRinger() {
     AudioEngine.stop();
     stopVibration();
     releaseWakeLock();
+    holdBackgroundPlayback(false);
     setCurrentAlarm(null);
     setIsRinging(false);
   }, [stopVibration, releaseWakeLock]);
@@ -121,6 +126,7 @@ export function useAlarmRinger() {
       AudioEngine.stop();
       stopVibration();
       releaseWakeLock();
+      holdBackgroundPlayback(false);
       if (snoozeTimerRef.current !== null) {
         clearTimeout(snoozeTimerRef.current);
       }

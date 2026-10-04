@@ -93,9 +93,9 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onPause() {
-        // Keep WebView media alive: hold a mediaPlayback foreground service while playing.
+        // Keep WebView media alive: re-assert the foreground service while anything plays.
         if (MediaPlaybackService.isPlaying()) {
-            MediaPlaybackService.start(this, MediaPlaybackService.currentTitle());
+            MediaPlaybackService.ensureRunning(this);
         }
         super.onPause();
     }
@@ -125,6 +125,9 @@ public class MainActivity extends BridgeActivity {
         if (webView == null) return;
         String js =
             "(function(){try{" +
+            "if(typeof window.__bp_media==='function'){window.__bp_media('" +
+            command +
+            "');return 'js';}" +
             "if(typeof window.__bp_yt==='function'){window.__bp_yt('" +
             command +
             "');return 'js';}" +
@@ -133,7 +136,7 @@ public class MainActivity extends BridgeActivity {
             "return 'none';}catch(e){return 'err';}})()";
         webView.evaluateJavascript(js, value -> {
             if (value != null && value.contains("js")) return;
-            // The YT page was not mounted yet (e.g. app resumed from cold start) — retry later.
+            // No handler was mounted yet (e.g. app resumed from cold start) — retry later.
             mediaCommand = command;
             mediaCommandPending = true;
         });
@@ -144,6 +147,17 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void ytState(String state, String title) {
             MediaPlaybackService.update(MainActivity.this, state, title);
+        }
+
+        @JavascriptInterface
+        public void setAlarmRinging(final boolean ringing, final String label) {
+            runOnUiThread(() -> {
+                if (ringing) {
+                    MediaPlaybackService.startAlarm(MainActivity.this, label);
+                } else {
+                    MediaPlaybackService.stopAlarm(MainActivity.this);
+                }
+            });
         }
 
         @JavascriptInterface

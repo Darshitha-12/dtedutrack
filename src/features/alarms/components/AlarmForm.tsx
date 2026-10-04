@@ -7,8 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import {
   AudioEngine,
-  type AlarmSoundName,
 } from "@/features/alarms/lib/audio-engine";
+import { SoundPicker } from "@/features/alarms/components/SoundPicker";
 import type { Alarm, CreateAlarmInput } from "@/features/alarms/lib/scheduler";
 import { Bell, Play, X, Check } from "lucide-react";
 
@@ -72,7 +72,7 @@ export function AlarmForm({ editing, onSubmit, onCancel }: AlarmFormProps) {
   }, []);
 
   const testSound = useCallback(() => {
-    AudioEngine.play(input.sound as AlarmSoundName);
+    AudioEngine.play(input.sound);
     setTimeout(() => AudioEngine.stop(), 5000);
   }, [input.sound]);
 
@@ -138,47 +138,36 @@ export function AlarmForm({ editing, onSubmit, onCancel }: AlarmFormProps) {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">
-              Subject
-            </label>
-            <select
-              value={input.subject}
-              onChange={(e) =>
-                setInput((p) => ({
-                  ...p,
-                  subject: e.target.value as CreateAlarmInput["subject"],
-                }))
-              }
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-            >
-              <option value="none">None</option>
-              <option value="biology">Biology</option>
-              <option value="chemistry">Chemistry</option>
-              <option value="physics">Physics</option>
-              <option value="agriculture">Agriculture</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">
-              Sound
-            </label>
-            <select
-              value={input.sound}
-              onChange={(e) =>
-                setInput((p) => ({
-                  ...p,
-                  sound: e.target.value as CreateAlarmInput["sound"],
-                }))
-              }
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-            >
-              <option value="chime">Crystal Chimes</option>
-              <option value="digital">Digital Buzzer</option>
-              <option value="bio">Bio-Alert Sweep</option>
-            </select>
-          </div>
+        <div>
+          <label className="text-xs text-muted-foreground mb-1 block">
+            Subject
+          </label>
+          <select
+            value={input.subject}
+            onChange={(e) =>
+              setInput((p) => ({
+                ...p,
+                subject: e.target.value as CreateAlarmInput["subject"],
+              }))
+            }
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+          >
+            <option value="none">None</option>
+            <option value="biology">Biology</option>
+            <option value="chemistry">Chemistry</option>
+            <option value="physics">Physics</option>
+            <option value="agriculture">Agriculture</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="text-xs text-muted-foreground mb-1 block">
+            Sound
+          </label>
+          <SoundPicker
+            value={input.sound}
+            onChange={(sound) => setInput((p) => ({ ...p, sound }))}
+          />
         </div>
 
         <div className="flex items-center gap-3">

@@ -12,13 +12,20 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import type { Reminder, ReminderMode } from "@/features/reminders/types";
+import type { Reminder, ReminderMode, ReminderSound } from "@/features/reminders/types";
 import {
   REMINDER_DAYS,
   createReminder,
   loadReminders,
   saveReminders,
 } from "@/features/reminders/types";
+import { SoundPicker } from "@/features/alarms/components/SoundPicker";
+import {
+  SOUNDS_CHANGED_EVENT,
+  listCustomSounds,
+  soundLabel,
+  type CustomSoundMeta,
+} from "@/features/alarms/lib/custom-sounds";
 
 const MODES: { value: ReminderMode; label: string }[] = [
   { value: "once", label: "One time" },
@@ -59,6 +66,15 @@ export default function RemindersPage() {
   const [date, setDate] = useState(todayKey());
   const [time, setTime] = useState("08:00");
   const [days, setDays] = useState<number[]>([1, 3]);
+  const [sound, setSound] = useState<ReminderSound>("chime");
+  const [library, setLibrary] = useState<CustomSoundMeta[]>([]);
+
+  useEffect(() => {
+    const load = () => void listCustomSounds().then(setLibrary);
+    load();
+    window.addEventListener(SOUNDS_CHANGED_EVENT, load);
+    return () => window.removeEventListener(SOUNDS_CHANGED_EVENT, load);
+  }, []);
 
   const reload = useCallback(() => setReminders(loadReminders()), []);
 
@@ -95,6 +111,7 @@ export default function RemindersPage() {
         date: mode === "once" ? date : undefined,
         days: mode === "weekly" ? days : undefined,
         time,
+        sound,
       }),
       ...reminders,
     ];
@@ -129,7 +146,9 @@ export default function RemindersPage() {
 
   const testAlert = () => {
     showToast("Playing test alert now...", "info");
-    window.dispatchEvent(new CustomEvent("biopulse:test-reminder"));
+    window.dispatchEvent(
+      new CustomEvent("biopulse:test-reminder", { detail: { sound } }),
+    );
   };
 
   const sorted = [...reminders].sort((a, b) => a.time.localeCompare(b.time));
@@ -232,6 +251,11 @@ export default function RemindersPage() {
             />
           </div>
 
+          <div className="space-y-2">
+            <Label>Sound</Label>
+            <SoundPicker value={sound} onChange={setSound} />
+          </div>
+
           <div className="flex flex-wrap gap-2">
             <Button onClick={addReminder}>
               <Plus className="h-4 w-4 mr-2" />
@@ -276,7 +300,7 @@ export default function RemindersPage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{r.title}</p>
                   <p className="truncate text-xs text-muted-foreground">
-                    {r.time} · {repeatLabel(r)}
+                    {r.time} · {repeatLabel(r)} · {soundLabel(r.sound, library)}
                   </p>
                   {r.note && (
                     <p className="mt-0.5 truncate text-xs text-muted-foreground/80">{r.note}</p>

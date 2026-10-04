@@ -1,10 +1,20 @@
+import { customSoundId, getCustomSoundUrl } from "./custom-sounds";
+
 export type AlarmSoundName = "chime" | "digital" | "bio";
+
+/** A built-in tone, or `custom:<soundId>` pointing at the user's own audio file. */
+export type AlarmSound = AlarmSoundName | `custom:${string}`;
 
 class AudioEngineClass {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private activeOscillators: OscillatorNode[] = [];
   private loopTimer: ReturnType<typeof setTimeout> | null = null;
+  private mediaEl: HTMLAudioElement | null = null;
+  private mediaUrl: string | null = null;
+  /** Guards against a slow IndexedDB fetch starting playback after stop(). */
+  private token = 0;
+
   ensure(): void {
     if (!this.ctx) {
       this.ctx = new AudioContext();
@@ -17,14 +27,21 @@ class AudioEngineClass {
     }
   }
 
-  play(name: AlarmSoundName): void {
+  play(name: AlarmSound): void {
     this.stop();
     this.ensure();
     this.activeOscillators = [];
-    this.startLoop(name);
+
+    const customId = customSoundId(name);
+    if (customId) {
+      void this.startCustom(customId);
+      return;
+    }
+    this.startLoop(name as AlarmSoundName);
   }
 
   stop(): void {
+    this.token += 1;
     if (this.loopTimer !== null) {
       clearTimeout(this.loopTimer);
       this.loopTimer = null;
@@ -37,6 +54,69 @@ class AudioEngineClass {
       }
     }
     this.activeOscillators = [];
+
+    if (this.mediaEl) {
+      const el = this.mediaEl;
+      try {
+        el.onended = null;
+        el.pause();
+        el.currentTime = 0;
+        el.removeAttribute("src");
+        el.load();
+      } catch {
+        /* element already torn down */
+      }
+      this.mediaEl = null;
+    }
+    if (this.mediaUrl) {
+      URL.revokeObjectURL(this.mediaUrl);
+      this.mediaUrl = null;
+    }
+  }
+
+  /** True while a synth tone or a custom file is sounding. */
+  get isPlaying(): boolean {
+    return this.activeOscillators.length > 0 || this.mediaEl !== null;
+  }
+
+  /* ---------- user-supplied audio file ---------- */
+
+  private async startCustom(id: string): Promise<void> {
+    const token = ++this.token;
+    let url: string | null = null;
+    try {
+      url = await getCustomSoundUrl(id);
+    } catch {
+      url = null;
+    }
+    if (!url || token !== this.token) return;
+
+    // Reuse a live element so rapid snooze/dismiss cycles do not leak nodes.
+    let el = this.mediaEl;
+    if (!el) {
+      try {
+        el = new Audio();
+      } catch {
+        return;
+      }
+      el.preload = "auto";
+      el.loop = true;
+      this.mediaEl = el;
+    }
+    this.mediaUrl = url;
+    el.onended = () => {
+      // Some WebViews drop `loop` on blob sources; re-arm defensively.
+      if (token === this.token && el && el.paused === false) {
+        el.play().catch(() => {});
+      }
+    };
+    el.src = url;
+    el.currentTime = 0;
+    try {
+      await el.play();
+    } catch {
+      // Autoplay blocked before the first user gesture — the next test starts it.
+    }
   }
 
   cue(name: string): void {

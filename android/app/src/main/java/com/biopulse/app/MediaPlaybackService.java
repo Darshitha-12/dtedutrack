@@ -47,21 +47,25 @@ public class MediaPlaybackService extends Service {
 
     private PowerManager.WakeLock wakeLock;
 
+    /** WebView media (YouTube) state, reported through {@code ytState}. */
+    private static boolean mediaPlaying = false;
+    /** Alarm / reminder ring state, reported through {@code setAlarmRinging}. */
+    private static boolean alarmActive = false;
     private static String currentTitle = "BioPulse Player";
-    private static boolean currentPlaying = false;
 
+    private static final long WAKE_LOCK_TIMEOUT_MS = 60L * 60L * 1000L;
+
+    /** True while the foreground service must stay alive for any reason. */
     public static boolean isPlaying() {
-        return currentPlaying;
+        return mediaPlaying || alarmActive;
     }
 
     public static String currentTitle() {
         return currentTitle;
     }
 
-    /** Starts (or refreshes) the foreground service and marks playback as active. */
-    public static void start(Context ctx, String title) {
-        if (title != null && !title.trim().isEmpty()) currentTitle = title;
-        currentPlaying = true;
+    /** Starts (or refreshes) the foreground service without touching state flags. */
+    public static void ensureRunning(Context ctx) {
         Intent intent = new Intent(ctx, MediaPlaybackService.class);
         intent.setAction(ACTION_START);
         try {
@@ -76,11 +80,38 @@ public class MediaPlaybackService extends Service {
         refresh(ctx);
     }
 
-    public static void stop(Context ctx) {
+    private static void release(Context ctx) {
         try {
             ctx.stopService(new Intent(ctx, MediaPlaybackService.class));
         } catch (Exception ignored) {
         }
+    }
+
+    /** Called from the web layer when the media player starts playing. */
+    public static void start(Context ctx, String title) {
+        if (title != null && !title.trim().isEmpty()) currentTitle = title;
+        mediaPlaying = true;
+        ensureRunning(ctx);
+    }
+
+    public static void stop(Context ctx) {
+        mediaPlaying = false;
+        alarmActive = false;
+        release(ctx);
+    }
+
+    /** Holds the service (and wakelock) open while an alarm/reminder is ringing. */
+    public static void startAlarm(Context ctx, String label) {
+        currentTitle = "Alarm - " + (label == null || label.trim().isEmpty() ? "Alert" : label.trim());
+        alarmActive = true;
+        ensureRunning(ctx);
+    }
+
+    /** Releases only the alarm hold — media playback, if active, keeps the service alive. */
+    public static void stopAlarm(Context ctx) {
+        alarmActive = false;
+        if (!mediaPlaying) release(ctx);
+        else refresh(ctx);
     }
 
     /** Called from the web layer whenever the player state changes. */
@@ -90,13 +121,15 @@ public class MediaPlaybackService extends Service {
         if ("playing".equals(state)) {
             // Start immediately (rather than waiting for onPause) so a background/lock-screen
             // transition can never race ahead of the foreground service.
-            start(ctx, title);
+            mediaPlaying = true;
         } else {
-            currentPlaying = false;
-            MediaPlaybackService svc = instance.get();
-            if (svc != null) {
-                MAIN.post(() -> svc.stopSelf());
-            }
+            mediaPlaying = false;
+        }
+
+        if (isPlaying()) {
+            ensureRunning(ctx);
+        } else {
+            release(ctx);
         }
     }
 
@@ -122,6 +155,8 @@ public class MediaPlaybackService extends Service {
             if (pm == null) return;
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BioPulse:MediaPlayback");
             wakeLock.setReferenceCounted(false);
+            // Bounded so a leaked service can never drain the battery indefinitely.
+            wakeLock.acquire(WAKE_LOCK_TIMEOUT_MS);
         } catch (Exception ignored) {
         }
     }
@@ -139,17 +174,18 @@ public class MediaPlaybackService extends Service {
         String action = intent != null && intent.getAction() != null ? intent.getAction() : ACTION_START;
 
         if (ACTION_PLAY.equals(action)) {
-            currentPlaying = true;
+            mediaPlaying = true;
             MainActivity.dispatchMediaCommand("play");
         } else if (ACTION_PAUSE.equals(action)) {
-            currentPlaying = false;
+            mediaPlaying = false;
             MainActivity.dispatchMediaCommand("pause");
         } else if (ACTION_STOP.equals(action)) {
-            currentPlaying = false;
-            MainActivity.dispatchMediaCommand("pause");
+            mediaPlaying = false;
+            alarmActive = false;
+            MainActivity.dispatchMediaCommand("stop");
         }
 
-        if (!currentPlaying && ACTION_START.equals(action)) {
+        if (!isPlaying()) {
             // Nothing is playing — do not hold a foreground service open needlessly.
             stopSelf();
             return START_NOT_STICKY;
@@ -168,8 +204,10 @@ public class MediaPlaybackService extends Service {
         }
 
         if (ACTION_PAUSE.equals(action) || ACTION_STOP.equals(action)) {
-            stopSelf();
-            return START_NOT_STICKY;
+            if (!isPlaying()) {
+                stopSelf();
+                return START_NOT_STICKY;
+            }
         }
         return START_NOT_STICKY;
     }
@@ -219,16 +257,16 @@ public class MediaPlaybackService extends Service {
         NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(currentTitle)
-            .setContentText(currentPlaying ? "Playing in the background" : "Paused")
+            .setContentText(isPlaying() ? "Playing in the background" : "Paused")
             .setContentIntent(contentIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .setOngoing(currentPlaying)
+            .setOngoing(isPlaying())
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setShowWhen(false);
 
-        if (currentPlaying) {
+        if (mediaPlaying) {
             b.addAction(
                 android.R.drawable.ic_media_pause,
                 "Pause",

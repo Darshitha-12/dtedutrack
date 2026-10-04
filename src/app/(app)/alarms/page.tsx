@@ -99,7 +99,7 @@ export default function AlarmsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Smart Alarms"
-        description="Set study reminders with built-in sounds, priorities, and repeat schedules"
+        description="Set study reminders with built-in or your own MP3 sounds, priorities, and repeat schedules"
       />
 
       {notifPerm !== "granted" && (
