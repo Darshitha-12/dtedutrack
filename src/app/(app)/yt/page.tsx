@@ -398,28 +398,38 @@ function YtInner() {
   // thinking it is paused and the audio session stays dead. Nudge the embed and clear the
   // stale state cache whenever the page becomes visible again.
   React.useEffect(() => {
-    const kick = () => {
-      if (!shouldPlayRef.current || userPausedRef.current) return
+    const send = (func: string, args: unknown[] = []) => {
       try {
-        const cw = iframeRef.current?.contentWindow
-        cw?.postMessage(
-          JSON.stringify({ event: "listening", id: (Math.random() * 1e6) | 0 }),
-          "*",
-        )
-        cw?.postMessage(
-          JSON.stringify({ event: "command", func: "playVideo", args: [] }),
+        iframeRef.current?.contentWindow?.postMessage(
+          JSON.stringify({ event: "command", func, args }),
           "*",
         )
       } catch {
         /* ignore */
       }
+    }
+
+    const kick = () => {
+      if (!shouldPlayRef.current || userPausedRef.current) return
+      send("listening")
+      // The embed frequently comes back from the background muted or with a wedged audio
+      // session, so unmute + restore volume before asking it to play again.
+      send("unMute")
+      send("setVolume", [100])
+      send("playVideo")
       stateRef.current = ""
       setPlaying(true)
       bridge("playing", titleRef.current)
     }
+
     const onVisible = () => {
-      if (document.visibilityState === "visible") kick()
+      if (document.visibilityState !== "visible") return
+      // Two passes: the first re-arms the embed, the second catches the case where the audio
+      // session was still not ready when we asked.
+      kick()
+      window.setTimeout(kick, 700)
     }
+
     document.addEventListener("visibilitychange", onVisible)
     window.addEventListener("pageshow", onVisible)
     window.addEventListener("focus", onVisible)
