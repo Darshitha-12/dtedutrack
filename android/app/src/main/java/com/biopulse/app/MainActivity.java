@@ -85,6 +85,15 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onResume() {
         super.onResume();
+        // Capacitor never pairs WebView#onPause with onResume. Without it, Android marks the
+        // WebView window-invisible when we background, and on return the video pipeline comes
+        // back while the audio sink stays dead — the video plays silently until the app is
+        // killed. Re-arming the WebView here restarts the audio output.
+        try {
+            WebView webView = getBridge().getWebView();
+            if (webView != null) webView.onResume();
+        } catch (Exception ignored) {
+        }
         if (mediaCommandPending) {
             mediaCommandPending = false;
             sendMediaCommand(mediaCommand);
@@ -96,6 +105,15 @@ public class MainActivity extends BridgeActivity {
         // Keep WebView media alive: re-assert the foreground service while anything plays.
         if (MediaPlaybackService.isPlaying()) {
             MediaPlaybackService.ensureRunning(this);
+        }
+        try {
+            // onPause() does NOT stop audio or JS timers — it only tells the WebView it is no
+            // longer in the foreground, which is what makes the paired onResume() able to
+            // fully restore the audio pipeline. Never call pauseTimers() here: alarms and
+            // reminders poll from JS timers and would stop firing.
+            WebView webView = getBridge().getWebView();
+            if (webView != null) webView.onPause();
+        } catch (Exception ignored) {
         }
         super.onPause();
     }

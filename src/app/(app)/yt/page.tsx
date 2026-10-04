@@ -393,6 +393,44 @@ function YtInner() {
     return () => document.removeEventListener("visibilitychange", onHide)
   }, [])
 
+  // Coming back from the home screen / lock screen: Android restarts the WebView video
+  // pipeline but the YouTube embed never re-announces its state, so the page keeps
+  // thinking it is paused and the audio session stays dead. Nudge the embed and clear the
+  // stale state cache whenever the page becomes visible again.
+  React.useEffect(() => {
+    const kick = () => {
+      if (!shouldPlayRef.current || userPausedRef.current) return
+      try {
+        const cw = iframeRef.current?.contentWindow
+        cw?.postMessage(
+          JSON.stringify({ event: "listening", id: (Math.random() * 1e6) | 0 }),
+          "*",
+        )
+        cw?.postMessage(
+          JSON.stringify({ event: "command", func: "playVideo", args: [] }),
+          "*",
+        )
+      } catch {
+        /* ignore */
+      }
+      stateRef.current = ""
+      setPlaying(true)
+      bridge("playing", titleRef.current)
+    }
+    const onVisible = () => {
+      if (document.visibilityState === "visible") kick()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("pageshow", onVisible)
+    window.addEventListener("focus", onVisible)
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("pageshow", onVisible)
+      window.removeEventListener("focus", onVisible)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const togglePlay = () => {
     if (!iframeRef.current || !video) return
     if (playing) {
