@@ -1178,16 +1178,16 @@ export default function ChatPage() {
   });
 
   return (
-    <div className="flex h-[calc(100dvh-4rem)] flex-col overflow-hidden bg-background text-foreground md:mx-auto md:h-[calc(100dvh-2.5rem)] md:max-w-6xl md:rounded-2xl md:border md:border-border md:shadow-xl">
+    <div className="flex h-[calc(100dvh-4rem)] flex-col overflow-hidden text-foreground md:mx-auto md:h-[calc(100dvh-2.5rem)] md:max-w-6xl md:rounded-[2rem] md:border md:border-white/[0.09] md:bg-white/[0.03] md:shadow-2xl md:backdrop-blur-2xl">
       {/* OUTSIDE: header + tabs + list */}
       <div
         className={cn(
-          "flex min-h-0 w-full flex-col bg-card md:flex md:w-[32%] md:min-w-[330px] md:border-r md:border-border",
+          "flex min-h-0 w-full flex-col bg-transparent md:flex md:w-[32%] md:min-w-[330px] md:border-r md:border-white/[0.08]",
           mobilePane === "chat" ? "hidden md:flex" : "flex",
         )}
       >
         {/* Header */}
-        <div className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card/70 px-4 backdrop-blur-xl">
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/[0.07] bg-white/[0.03] px-4 backdrop-blur-xl">
           <div className="flex min-w-0 items-center gap-3">
             <Avatar src={myImage} name={myName} size={40} />
             <span className="truncate text-[15px] font-semibold">{myName}</span>
@@ -1236,7 +1236,7 @@ export default function ChatPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex h-12 items-end border-b border-border bg-card text-muted-foreground">
+        <div className="flex h-12 items-end border-b border-white/[0.07] bg-white/[0.02] px-2 text-muted-foreground">
           {(
             [
               { id: "chats", label: "Chats", icon: MessageCircle },
@@ -1248,30 +1248,27 @@ export default function ChatPage() {
               key={t.id}
               onClick={() => setTab(t.id)}
               className={cn(
-                "relative flex flex-1 items-center justify-center gap-1.5 py-3 text-sm font-semibold transition-all duration-200 ease-premium",
+                "relative flex flex-1 items-center justify-center gap-1.5 rounded-t-2xl py-3 text-sm font-bold transition-all duration-300 ease-premium",
                 tab === t.id
-                  ? "text-primary"
-                  : "text-muted-foreground hover:text-foreground",
+                  ? "bg-gradient-aurora text-white shadow-glow"
+                  : "text-muted-foreground hover:bg-white/[0.05] hover:text-foreground",
               )}
             >
-              <t.icon className={cn("h-4 w-4 transition-transform duration-200", tab === t.id && "scale-110")} />
+              <t.icon className={cn("h-4 w-4 transition-transform duration-300", tab === t.id && "scale-110")} />
               {t.label}
-              {tab === t.id && (
-                <span className="absolute inset-x-3 bottom-0 h-[3px] rounded-t-full bg-gradient-primary shadow-glow" />
-              )}
             </button>
           ))}
         </div>
 
         {/* Search */}
-        <div className="bg-card px-3 py-2">
+        <div className="bg-transparent px-3 py-3">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search or start a new chat"
-              className="h-10 w-full rounded-lg bg-muted pl-9 pr-9 text-sm text-foreground placeholder:text-muted-foreground outline-none"
+              className="h-11 w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] pl-10 pr-9 text-sm font-medium text-foreground placeholder:text-muted-foreground/70 outline-none transition-all duration-300 focus:border-violet/50 focus:bg-white/[0.07]"
             />
             {search && (
               <button
@@ -1285,7 +1282,7 @@ export default function ChatPage() {
         </div>
 
         {/* List / placeholder */}
-        <div className="min-h-0 flex-1 overflow-y-auto bg-card">
+        <div className="min-h-0 flex-1 overflow-y-auto bg-transparent">
           {tab === "chats" ? (
             filteredConversations.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center px-6 text-center">
@@ -1307,24 +1304,28 @@ export default function ChatPage() {
                   key={c.id}
                   onClick={() => openChat(c.id)}
                   className={cn(
-                    "flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors",
-                    activeId === c.id ? "bg-primary/10" : "hover:bg-muted",
+                    "relative mx-2 flex w-[calc(100%-1rem)] items-center gap-3 rounded-2xl border px-3 py-2.5 text-left transition-all duration-300 ease-premium",
+                    activeId === c.id
+                      ? "border-violet/35 bg-gradient-aurora-soft shadow-lg"
+                      : "border-transparent hover:border-white/[0.07] hover:bg-white/[0.05]",
                   )}
                 >
                   <Avatar src={c.image} name={c.name} online={c.status === "online"} size={49} />
-                  <div className="min-w-0 flex-1 border-b border-border/50 pb-2">
+                  <div className="min-w-0 flex-1 border-b border-white/[0.06] pb-2">
                     <div className="flex items-baseline justify-between gap-2">
-                      <p className="truncate text-[15px] font-medium text-foreground">{c.name}</p>
-                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                      <p className={cn("truncate text-[15px] text-foreground", activeId === c.id ? "font-extrabold" : "font-semibold")}>
+                        {c.name}
+                      </p>
+                      <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
                         {shortDate(c.lastMessageAt)}
                       </span>
                     </div>
                     <div className="mt-0.5 flex items-center justify-between gap-2">
-                      <p className={cn("truncate text-[13px]", c.unread > 0 ? "text-foreground" : "text-muted-foreground")}>
+                      <p className={cn("truncate text-[13px]", c.unread > 0 ? "font-medium text-foreground" : "text-muted-foreground")}>
                         {c.lastMessage}
                       </p>
                       {c.unread > 0 && (
-                        <span className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-medium text-white">
+                        <span className="shrink-0 rounded-full bg-gradient-aurora px-2 py-0.5 text-[11px] font-extrabold text-white shadow-glow">
                           {c.unread}
                         </span>
                       )}
@@ -1452,7 +1453,7 @@ export default function ChatPage() {
         <button
           onClick={() => setNewChatOpen(true)}
           aria-label="New chat"
-          className="absolute bottom-8 right-4 grid h-14 w-14 place-items-center rounded-full bg-primary text-white shadow-lg transition-transform hover:scale-105 active:scale-95"
+          className="absolute bottom-8 right-4 grid h-14 w-14 place-items-center rounded-2xl bg-gradient-aurora text-white shadow-glow transition-transform hover:scale-105 active:scale-95"
         >
           <MessageSquarePlus className="h-7 w-7" />
         </button>
@@ -1466,33 +1467,31 @@ export default function ChatPage() {
         )}
       >
         {!activeId ? (
-          <div className="relative flex flex-1 flex-col items-center justify-center bg-card px-6 text-center">
-            <div className="grid h-20 w-20 place-items-center rounded-full bg-muted">
-              <MessageCircle className="h-9 w-9 text-muted-foreground" />
+          <div className="relative flex flex-1 flex-col items-center justify-center bg-transparent px-6 text-center">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_500px_at_50%_0%,hsl(var(--violet)/0.16),transparent_65%)]" />
+            <div className="gradient-border relative grid h-24 w-24 place-items-center rounded-[2rem] bg-gradient-aurora shadow-glow-lg">
+              <MessageCircle className="h-10 w-10 text-white" />
             </div>
-            <h2 className="mt-4 text-lg font-medium text-foreground">Select a chat to start messaging</h2>
-            <p className="mt-1 max-w-xs text-sm text-muted-foreground">
+            <h2 className="relative mt-6 font-display text-2xl font-extrabold tracking-tight text-foreground">
+              Select a chat to start messaging
+            </h2>
+            <p className="relative mt-2 max-w-xs text-sm font-medium text-muted-foreground">
               Pick a conversation from the list, or start a new one.
             </p>
           </div>
         ) : (
           <div className="relative flex h-full flex-col">
-            {/* Top wallpaper hint (WhatsApp style) */}
+            {/* Aurora wallpaper */}
             <div
               className="pointer-events-none absolute inset-0 z-0"
-              style={{ background: "var(--background)" }}
-            />
-            <div
-              className="pointer-events-none absolute inset-0 z-0 opacity-[0.04]"
               style={{
                 backgroundImage:
-                  "radial-gradient(circle at 20% 20%, #fff 1px, transparent 1px), radial-gradient(circle at 80% 40%, #fff 1px, transparent 1px), radial-gradient(circle at 40% 70%, #fff 1px, transparent 1px), radial-gradient(circle at 90% 90%, #fff 1px, transparent 1px)",
-                backgroundSize: "180px 180px",
+                  "radial-gradient(760px 420px at 12% 8%, hsl(258 90% 60% / 0.14), transparent 62%), radial-gradient(680px 380px at 88% 22%, hsl(320 92% 62% / 0.11), transparent 62%), radial-gradient(760px 460px at 50% 100%, hsl(190 95% 52% / 0.1), transparent 62%)",
               }}
             />
 
             {/* Header */}
-            <div className="relative z-10 flex h-14 items-center gap-2 bg-card px-3">
+            <div className="relative z-10 flex h-16 items-center gap-2 border-b border-white/[0.07] bg-white/[0.05] px-3 backdrop-blur-2xl">
               <button onClick={closeChat} className="text-muted-foreground hover:text-foreground md:hidden">
                 <ArrowLeft className="h-5 w-5" />
               </button>
@@ -1503,10 +1502,10 @@ export default function ChatPage() {
                 size={40}
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[15px] font-medium text-foreground">
+                <p className="truncate text-[15px] font-bold text-foreground">
                   {activeConv?.name || activeUser?.name || "User"}
                 </p>
-                <p className="truncate text-xs text-muted-foreground">
+                <p className="truncate text-xs font-medium text-muted-foreground">
                   {lastSeenLabel(activeConv?.lastSeen || activeUser?.lastSeen || null, activeConv?.status || activeUser?.status || "offline")}
                 </p>
               </div>
@@ -1591,28 +1590,28 @@ export default function ChatPage() {
                       <div className={cn("flex", mine ? "justify-end" : "justify-start")}>
                         <div
                           className={cn(
-                            "relative max-w-[80%] animate-bubble-in rounded-2xl px-3 py-1.5 text-sm shadow-md",
+                            "relative max-w-[80%] animate-bubble-in px-4 py-2 text-[14.5px] font-medium shadow-lg backdrop-blur-sm",
                             mine
-                              ? "rounded-br-md bg-gradient-primary text-primary-foreground"
-                              : "rounded-bl-md border border-border/60 bg-card text-card-foreground",
+                              ? "rounded-3xl rounded-br-lg bg-gradient-aurora text-white shadow-glow"
+                              : "rounded-3xl rounded-bl-lg border border-white/[0.09] bg-white/[0.06] text-foreground",
                           )}
                         >
                           {mediaBubble(m, saveMedia)}
                           {m.text && (
-                            <p className="whitespace-pre-wrap break-words pr-9 text-[14.5px] leading-relaxed text-inherit">
+                            <p className="whitespace-pre-wrap break-words pr-9 leading-relaxed text-inherit">
                               {m.text}
                             </p>
                           )}
                           <div
                             className={cn(
                               "mt-0.5 flex items-center justify-end gap-1 text-[11px]",
-                              mine ? "text-primary-foreground/75" : "text-muted-foreground",
+                              mine ? "text-white/75" : "text-muted-foreground",
                             )}
                           >
                             <span>{formatTime(m.createdAt)}</span>
                             {mine &&
                               (m.readAt ? (
-                                <CheckCheck className="h-3.5 w-3.5 text-primary-foreground/90" />
+                                <CheckCheck className="h-3.5 w-3.5 text-white/90" />
                               ) : (
                                 <Check className="h-4 w-4" />
                               ))}
@@ -1704,10 +1703,10 @@ export default function ChatPage() {
                   </button>
                 </div>
               ) : (
-                <div className="flex items-center gap-2 border-t border-border bg-card px-3 py-2.5">
+                <div className="flex items-center gap-2 border-t border-white/[0.07] bg-white/[0.03] px-3 py-3 backdrop-blur-xl">
                   <button
                     onClick={() => setEmojiOpen((o) => !o)}
-                    className={cn("pressable rounded-lg p-1.5", emojiOpen ? "text-primary" : "text-muted-foreground hover:text-foreground")}
+                    className={cn("pressable grid h-11 w-11 shrink-0 place-items-center rounded-2xl transition-colors", emojiOpen ? "bg-gradient-aurora text-white" : "text-muted-foreground hover:bg-white/[0.07] hover:text-foreground")}
                     aria-label="Emoji"
                   >
                     <Smile className="h-6 w-6" />
@@ -1722,9 +1721,9 @@ export default function ChatPage() {
                       }
                     }}
                     placeholder="Type a message"
-                    className="h-11 flex-1 rounded-xl border border-transparent bg-muted/70 px-4 text-[14.5px] text-foreground placeholder:text-muted-foreground/70 outline-none transition-all duration-200 ease-smooth focus:border-primary/40 focus:bg-muted"
+                    className="h-12 flex-1 rounded-2xl border border-white/[0.08] bg-white/[0.04] px-4 text-[14.5px] font-medium text-foreground placeholder:text-muted-foreground/70 outline-none transition-all duration-300 ease-smooth focus:border-violet/50 focus:bg-white/[0.07]"
                   />
-                  <label className="pressable cursor-pointer rounded-lg p-1.5 text-muted-foreground hover:text-foreground">
+                  <label className="pressable grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-2xl text-muted-foreground transition-colors hover:bg-white/[0.07] hover:text-foreground">
                     <Paperclip className="h-6 w-6" />
                     <input
                       type="file"
@@ -1743,7 +1742,7 @@ export default function ChatPage() {
                       onClick={handleSendText}
                       disabled={sending}
                       aria-label="Send"
-                      className="pressable grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 hover:shadow-glow active:scale-95 disabled:opacity-60"
+                      className="pressable grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-gradient-aurora text-white shadow-glow transition-transform hover:scale-105 active:scale-95 disabled:opacity-60"
                     >
                       {sending ? (
                         <Loader2 className="h-5 w-5 animate-spin" />
@@ -1755,7 +1754,7 @@ export default function ChatPage() {
                     <button
                       onClick={startRecording}
                       aria-label="Record voice note"
-                      className="pressable grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-primary text-primary-foreground shadow-lg hover:shadow-glow"
+                      className="pressable grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-gradient-aurora text-white shadow-glow"
                     >
                       <Mic className="h-5 w-5" />
                     </button>

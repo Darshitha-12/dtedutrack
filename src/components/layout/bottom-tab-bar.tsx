@@ -31,13 +31,12 @@ export function BottomTabBar() {
     <nav
       aria-label="Bottom navigation"
       className={cn(
-        "fixed inset-x-0 bottom-0 z-40 block border-t border-border/70 bg-card/95 shadow-2xl backdrop-blur-2xl",
-        "lg:hidden",
-        "supports-[backdrop-filter]:bg-card/85",
-        "pb-[env(safe-area-inset-bottom)]"
+        "fixed inset-x-0 bottom-0 z-40 block lg:hidden",
+        "px-4 pb-[calc(env(safe-area-inset-bottom)+14px)] pt-3",
+        "pointer-events-none"
       )}
     >
-      <div className="grid h-16 grid-cols-5 items-center px-2">
+      <div className="gradient-border pointer-events-auto mx-auto flex h-[68px] max-w-md items-center justify-around rounded-[26px] border border-white/[0.09] bg-[hsl(var(--card))]/85 px-2 shadow-2xl backdrop-blur-2xl">
         {BOTTOM_TABS.map((t) => {
           const active = trimmed === t.href || trimmed.startsWith(t.href + "/")
           const Icon = t.icon
@@ -47,37 +46,31 @@ export function BottomTabBar() {
               key={t.href}
               href={t.href}
               aria-current={active ? "page" : undefined}
-              className="group relative flex flex-col items-center justify-center gap-0.5 text-center"
+              className="group relative flex flex-1 flex-col items-center justify-center gap-1"
             >
               <span
                 className={cn(
-                  "relative flex items-center justify-center rounded-xl px-3 py-1.5 transition-all duration-200 ease-premium",
-                  active ? "bg-primary/12" : "hover:bg-accent/60"
+                  "relative grid h-11 w-11 place-items-center rounded-2xl transition-all duration-300 ease-spring",
+                  active
+                    ? "bg-gradient-aurora text-white shadow-glow"
+                    : "bg-white/[0.05] text-muted-foreground group-hover:-translate-y-0.5 group-hover:bg-white/10 group-hover:text-foreground"
                 )}
               >
-                <Icon
-                  className={cn(
-                    "h-[20px] w-[20px] shrink-0 transition-transform duration-200 ease-spring",
-                    active ? "scale-110 text-primary" : "text-muted-foreground group-hover:scale-110"
-                  )}
-                />
+                <Icon className="h-5 w-5 shrink-0" />
                 {showBadge && (
-                  <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] animate-scale-in items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-bold text-primary-foreground shadow-glow ring-1 ring-background">
+                  <span className="absolute -right-1 -top-1 flex h-5 min-w-[20px] animate-scale-in items-center justify-center rounded-full bg-gradient-to-br from-rose-400 to-fuchsia-500 px-1 text-[10px] font-extrabold text-white shadow-md ring-2 ring-[hsl(var(--card))]">
                     {totalUnread > 99 ? "99+" : totalUnread}
                   </span>
                 )}
               </span>
               <span
                 className={cn(
-                  "text-2xs font-medium tracking-tight transition-colors duration-150",
-                  active ? "text-primary" : "text-muted-foreground"
+                  "text-[10px] font-bold tracking-tight transition-colors duration-200",
+                  active ? "text-foreground" : "text-muted-foreground/80"
                 )}
               >
                 {t.label}
               </span>
-              {active && (
-                <span className="absolute top-0 h-0.5 w-10 rounded-full bg-gradient-primary shadow-glow" />
-              )}
             </Link>
           )
         })}

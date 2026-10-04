@@ -56,6 +56,12 @@ const config: Config = {
         "border-strong": "hsl(var(--border-strong) / <alpha-value>)",
         input: "hsl(var(--input) / <alpha-value>)",
         ring: "hsl(var(--ring) / <alpha-value>)",
+        violet: {
+          DEFAULT: "hsl(var(--violet) / <alpha-value>)",
+          soft: "hsl(var(--violet) / 0.16)",
+        },
+        fuchsia: { DEFAULT: "hsl(var(--fuchsia) / <alpha-value>)" },
+        cyan: { DEFAULT: "hsl(var(--cyan) / <alpha-value>)" },
         bio: { DEFAULT: "#10B981", light: "#34D399", dark: "#059669" },
         chem: { DEFAULT: "#06B6D4", light: "#22D3EE", dark: "#0891B2" },
         phy: { DEFAULT: "#8B5CF6", light: "#A78BFA", dark: "#7C3AED" },
@@ -97,7 +103,13 @@ const config: Config = {
         "gradient-primary-hover":
           "linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--secondary)) 60%, hsl(var(--primary)) 100%)",
         "gradient-surface": "linear-gradient(180deg, hsl(var(--elevated)) 0%, hsl(var(--card)) 100%)",
-        "gradient-brand": "linear-gradient(135deg, #10B981 0%, #06B6D4 50%, #8B5CF6 100%)",
+        "gradient-brand": "linear-gradient(135deg, #8B5CF6 0%, #D946EF 50%, #22D3EE 100%)",
+        "gradient-aurora":
+          "linear-gradient(120deg, hsl(var(--violet)) 0%, hsl(var(--fuchsia)) 50%, hsl(var(--cyan)) 100%)",
+        "gradient-aurora-soft":
+          "linear-gradient(120deg, hsl(var(--violet) / 0.22) 0%, hsl(var(--fuchsia) / 0.12) 50%, hsl(var(--cyan) / 0.2) 100%)",
+        "gradient-sheen":
+          "linear-gradient(180deg, hsl(0 0% 100% / 0.09) 0%, transparent 60%)",
         "gradient-shimmer":
           "linear-gradient(90deg, transparent 0%, hsl(var(--foreground) / 0.07) 50%, transparent 100%)",
         "grid-pattern":

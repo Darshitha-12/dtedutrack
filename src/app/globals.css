@@ -3,95 +3,110 @@
 @tailwind utilities;
 
 @layer base {
+  /* ============================================================
+     AURORA DESIGN SYSTEM
+     A deliberately different identity from the previous dark-green
+     theme: deep indigo canvas, violet -> fuchsia -> cyan aurora
+     accents, oversized radii, glass panels with gradient edges.
+     ============================================================ */
   :root {
-    --background: 165 32% 4%;
-    --foreground: 155 22% 95%;
+    --background: 240 32% 5%;
+    --foreground: 250 30% 97%;
 
-    --card: 165 28% 7%;
-    --card-foreground: 155 22% 95%;
-    --popover: 165 30% 8%;
-    --popover-foreground: 155 22% 95%;
+    --card: 240 26% 8%;
+    --card-foreground: 250 30% 97%;
+    --popover: 242 30% 7%;
+    --popover-foreground: 250 30% 97%;
 
-    --surface: 165 26% 6%;
-    --surface-2: 165 24% 9%;
-    --elevated: 165 26% 10%;
+    --surface: 240 24% 7%;
+    --surface-2: 240 22% 11%;
+    --elevated: 242 26% 13%;
 
-    --primary: 158 76% 42%;
+    --primary: 258 90% 66%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 187 72% 44%;
-    --secondary-foreground: 0 0% 100%;
+    --secondary: 190 95% 55%;
+    --secondary-foreground: 240 40% 8%;
+    --accent: 255 24% 17%;
+    --accent-foreground: 250 30% 97%;
 
-    --muted: 165 18% 13%;
-    --muted-foreground: 160 9% 58%;
-    --accent: 163 28% 16%;
-    --accent-foreground: 155 22% 95%;
+    --muted: 250 18% 14%;
+    --muted-foreground: 250 14% 68%;
 
-    --destructive: 350 84% 58%;
+    --destructive: 348 92% 62%;
     --destructive-foreground: 0 0% 100%;
-    --success: 152 68% 44%;
+    --success: 158 84% 48%;
     --success-foreground: 0 0% 100%;
-    --warning: 38 92% 55%;
+    --warning: 36 96% 60%;
     --warning-foreground: 30 60% 10%;
 
-    --border: 165 18% 16%;
-    --border-strong: 165 18% 24%;
-    --input: 165 18% 18%;
-    --ring: 158 76% 42%;
+    --violet: 258 90% 66%;
+    --fuchsia: 320 92% 66%;
+    --cyan: 190 95% 55%;
 
-    --radius: 0.875rem;
+    --border: 250 20% 16%;
+    --border-strong: 250 22% 26%;
+    --input: 250 20% 18%;
+    --ring: 258 90% 70%;
 
-    --shadow-xs: 0 1px 2px 0 hsl(165 40% 2% / 0.4);
-    --shadow-sm: 0 1px 3px 0 hsl(165 40% 2% / 0.45), 0 1px 2px -1px hsl(165 40% 2% / 0.4);
-    --shadow-md: 0 4px 12px -2px hsl(165 40% 2% / 0.5), 0 2px 6px -2px hsl(165 40% 2% / 0.4);
-    --shadow-lg: 0 12px 28px -6px hsl(165 40% 2% / 0.6), 0 4px 10px -4px hsl(165 40% 2% / 0.45);
-    --shadow-xl: 0 24px 48px -12px hsl(165 40% 2% / 0.7), 0 8px 16px -8px hsl(165 40% 2% / 0.5);
-    --shadow-2xl: 0 40px 80px -20px hsl(165 40% 2% / 0.78), 0 12px 28px -12px hsl(165 40% 2% / 0.55);
+    --radius: 1.25rem;
+
+    --shadow-xs: 0 1px 2px hsl(250 50% 2% / 0.5);
+    --shadow-sm: 0 2px 6px hsl(250 50% 2% / 0.5);
+    --shadow-md: 0 8px 24px -4px hsl(250 60% 2% / 0.6);
+    --shadow-lg: 0 18px 44px -8px hsl(250 60% 2% / 0.7);
+    --shadow-xl: 0 32px 68px -12px hsl(250 60% 2% / 0.8);
+    --shadow-2xl: 0 48px 96px -16px hsl(250 60% 2% / 0.88);
 
     --font-sans: "Inter var", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
     --font-display: "Inter var", "Inter", system-ui, -apple-system, sans-serif;
   }
 
   .light {
-    --background: 160 24% 98%;
-    --foreground: 168 32% 10%;
+    --background: 250 60% 99%;
+    --foreground: 245 40% 12%;
 
     --card: 0 0% 100%;
-    --card-foreground: 168 32% 10%;
+    --card-foreground: 245 40% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 168 32% 10%;
+    --popover-foreground: 245 40% 12%;
 
-    --surface: 160 20% 98%;
-    --surface-2: 160 18% 95%;
+    --surface: 250 50% 98%;
+    --surface-2: 250 40% 95%;
     --elevated: 0 0% 100%;
 
-    --primary: 158 72% 33%;
+    --primary: 258 84% 58%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 190 78% 32%;
+    --secondary: 192 90% 34%;
     --secondary-foreground: 0 0% 100%;
 
-    --muted: 160 16% 94%;
-    --muted-foreground: 165 12% 38%;
-    --accent: 158 30% 94%;
-    --accent-foreground: 168 32% 10%;
+    --accent: 255 60% 95%;
+    --accent-foreground: 245 40% 12%;
 
-    --destructive: 350 74% 46%;
+    --muted: 250 30% 94%;
+    --muted-foreground: 248 12% 44%;
+
+    --destructive: 348 78% 52%;
     --destructive-foreground: 0 0% 100%;
-    --success: 152 62% 32%;
+    --success: 158 70% 38%;
     --success-foreground: 0 0% 100%;
-    --warning: 34 90% 44%;
+    --warning: 34 94% 46%;
     --warning-foreground: 0 0% 100%;
 
-    --border: 165 16% 88%;
-    --border-strong: 165 16% 78%;
-    --input: 165 16% 90%;
-    --ring: 158 72% 33%;
+    --violet: 258 84% 58%;
+    --fuchsia: 320 84% 56%;
+    --cyan: 192 90% 34%;
 
-    --shadow-xs: 0 1px 2px 0 hsl(165 20% 40% / 0.06);
-    --shadow-sm: 0 1px 3px 0 hsl(165 20% 40% / 0.1), 0 1px 2px -1px hsl(165 20% 40% / 0.08);
-    --shadow-md: 0 4px 12px -2px hsl(165 20% 40% / 0.12), 0 2px 6px -2px hsl(165 20% 40% / 0.08);
-    --shadow-lg: 0 12px 28px -6px hsl(165 20% 40% / 0.16), 0 4px 10px -4px hsl(165 20% 40% / 0.1);
-    --shadow-xl: 0 24px 48px -12px hsl(165 20% 40% / 0.18), 0 8px 16px -8px hsl(165 20% 40% / 0.12);
-    --shadow-2xl: 0 40px 80px -20px hsl(165 20% 40% / 0.2), 0 12px 28px -12px hsl(165 20% 40% / 0.14);
+    --border: 250 30% 90%;
+    --border-strong: 250 26% 78%;
+    --input: 250 30% 92%;
+    --ring: 258 84% 62%;
+
+    --shadow-xs: 0 1px 2px hsl(250 40% 40% / 0.06);
+    --shadow-sm: 0 2px 8px hsl(250 40% 40% / 0.08);
+    --shadow-md: 0 8px 24px -4px hsl(250 40% 40% / 0.12);
+    --shadow-lg: 0 18px 44px -8px hsl(250 40% 40% / 0.16);
+    --shadow-xl: 0 32px 68px -12px hsl(250 40% 40% / 0.2);
+    --shadow-2xl: 0 48px 96px -16px hsl(250 40% 40% / 0.24);
   }
 
   * {
@@ -105,30 +120,43 @@
   }
 
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply text-foreground antialiased;
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(1100px 620px at 8% -8%, hsl(258 90% 60% / 0.22), transparent 62%),
+      radial-gradient(900px 560px at 96% 4%, hsl(320 92% 62% / 0.16), transparent 60%),
+      radial-gradient(1000px 700px at 60% 108%, hsl(190 95% 52% / 0.14), transparent 62%);
+    background-attachment: fixed;
     min-height: 100dvh;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
     text-rendering: optimizeLegibility;
   }
 
-  /* Typography scale — tighter, more premium display tracking */
+  .light body {
+    background-image:
+      radial-gradient(1100px 620px at 8% -8%, hsl(258 90% 62% / 0.14), transparent 62%),
+      radial-gradient(900px 560px at 96% 4%, hsl(320 92% 64% / 0.11), transparent 60%),
+      radial-gradient(1000px 700px at 60% 108%, hsl(192 90% 54% / 0.1), transparent 62%);
+  }
+
+  /* Typography — noticeably heavier and tighter for a bolder identity */
   h1,
   h2,
   h3,
   h4 {
-    @apply font-display tracking-[-0.022em];
+    @apply font-display;
+    letter-spacing: -0.032em;
+    font-weight: 700;
   }
 
   h1 {
-    letter-spacing: -0.03em;
+    letter-spacing: -0.042em;
   }
 
-  /* Focus ring — consistent + accessible everywhere */
   :focus-visible {
-    @apply outline-none ring-2 ring-ring/70 ring-offset-2 ring-offset-background;
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 
-  /* Remove default number spinners for a cleaner look */
   input[type="number"]::-webkit-outer-spin-button,
   input[type="number"]::-webkit-inner-spin-button {
     -webkit-appearance: none;
@@ -139,63 +167,132 @@
   }
 
   ::selection {
-    @apply bg-primary/30 text-foreground;
+    @apply bg-primary/40 text-foreground;
   }
 }
 
 @layer components {
-  /* ---- Surfaces ---- */
+  /* ---- Signature surfaces ---------------------------------------- */
+
+  /* Frosted panel with a subtle top highlight. */
   .glass {
-    @apply bg-card/70 backdrop-blur-2xl border border-border/60;
-  }
-  .glass-hover {
-    @apply transition-all duration-300 ease-premium hover:bg-accent/40 hover:border-primary/30;
-  }
-  .glass-strong {
-    @apply bg-elevated/85 backdrop-blur-2xl border border-border-strong/70 shadow-xl;
-  }
-  .surface-card {
-    @apply bg-card border border-border rounded-2xl shadow-md;
-  }
-  .surface-elevated {
-    @apply bg-elevated border border-border-strong/60 rounded-2xl shadow-lg;
+    @apply border border-white/[0.07] bg-white/[0.035] backdrop-blur-2xl;
   }
 
-  /* ---- Gradients & glows ---- */
+  .glass-strong {
+    @apply border border-white/[0.09] bg-white/[0.06] shadow-2xl backdrop-blur-2xl;
+  }
+
+  .light .glass {
+    @apply border-black/[0.06] bg-white/70;
+  }
+  .light .glass-strong {
+    @apply border-black/[0.07] bg-white shadow-xl;
+  }
+
+  /* Gradient hairline border via mask — the core "aurora" look. */
+  .gradient-border {
+    position: relative;
+    isolation: isolate;
+  }
+  .gradient-border::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      140deg,
+      hsl(var(--violet) / 0.9),
+      hsl(var(--fuchsia) / 0.55) 45%,
+      hsl(var(--cyan) / 0.75)
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Bento tile — the app's default container. */
+  .surface-card {
+    @apply relative overflow-hidden rounded-3xl border border-white/[0.07] bg-white/[0.035] shadow-md backdrop-blur-xl transition-all duration-300 ease-premium;
+  }
+  .surface-card:hover {
+    @apply -translate-y-0.5 border-white/[0.13] shadow-xl;
+  }
+
+  .surface-elevated {
+    @apply rounded-3xl border border-white/[0.09] bg-elevated/80 shadow-xl backdrop-blur-2xl;
+  }
+
+  .light .surface-card {
+    @apply border-black/[0.06] bg-white shadow-md;
+  }
+  .light .surface-card:hover {
+    @apply -translate-y-0.5 border-black/[0.12] shadow-lg;
+  }
+  .light .surface-elevated {
+    @apply border-black/[0.07] bg-white shadow-lg;
+  }
+
+  /* ---- Gradients & glows ---------------------------------------- */
   .text-gradient {
-    @apply bg-gradient-to-r from-bio to-chem bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-violet-400 via-fuchsia-400 to-cyan-300 bg-clip-text text-transparent;
   }
   .text-gradient-warm {
-    @apply bg-gradient-to-r from-agri to-math bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-amber-300 via-orange-400 to-rose-400 bg-clip-text text-transparent;
   }
   .text-gradient-brand {
-    @apply bg-gradient-brand bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-violet-400 to-cyan-300 bg-clip-text text-transparent;
   }
+
+  .glow-primary {
+    box-shadow: 0 0 32px hsl(var(--violet) / 0.45);
+  }
+  /* Legacy glow names kept so existing pages still look right */
   .glow-bio {
-    box-shadow: 0 0 24px hsl(158 76% 42% / 0.28);
+    box-shadow: 0 0 32px hsl(var(--violet) / 0.4);
   }
   .glow-chem {
-    box-shadow: 0 0 24px hsl(187 72% 44% / 0.28);
+    box-shadow: 0 0 32px hsl(var(--cyan) / 0.4);
   }
   .glow-rose {
-    box-shadow: 0 0 24px hsl(350 84% 58% / 0.28);
+    box-shadow: 0 0 32px hsl(var(--fuchsia) / 0.4);
   }
   .glow-amber {
-    box-shadow: 0 0 24px hsl(38 92% 55% / 0.28);
+    box-shadow: 0 0 32px hsl(var(--warning) / 0.4);
   }
 
-  /* ---- Interactive affordances ---- */
+  /* ---- Layout helpers ------------------------------------------- */
+  .bento {
+    @apply grid gap-4;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+  .bento-hero {
+    @apply relative overflow-hidden rounded-[2rem] border border-white/[0.08] bg-gradient-to-br from-violet-500/25 via-fuchsia-500/10 to-cyan-400/20 p-7;
+  }
+
+  /* ---- Interactive affordances ----------------------------------- */
   .pressable {
-    @apply transition-transform duration-200 ease-premium active:scale-[0.97];
+    @apply transition-transform duration-200 ease-premium active:scale-95;
   }
   .hover-lift {
-    @apply transition-all duration-300 ease-premium hover:-translate-y-0.5 hover:shadow-lg;
+    @apply transition-all duration-300 ease-premium hover:-translate-y-1 hover:shadow-xl;
   }
   .tap-highlight {
-    @apply transition-colors duration-200 ease-smooth hover:bg-accent/50;
+    @apply transition-colors duration-200 hover:bg-white/[0.06];
+  }
+  .glass-hover {
+    @apply transition-all duration-300 ease-premium hover:border-primary/40 hover:bg-white/[0.07];
   }
 
-  /* ---- Scrollbars ---- */
+  /* ---- Scrollbars ------------------------------------------------ */
   .scrollbar-slim {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--border-strong)) transparent;
@@ -207,48 +304,50 @@
     display: none;
   }
 
-  /* ---- Skeleton shimmer ---- */
+  /* ---- Skeleton shimmer ------------------------------------------ */
   .skeleton {
-    @apply relative overflow-hidden bg-muted/60 rounded-md;
+    @apply relative overflow-hidden rounded-2xl bg-white/[0.05];
   }
   .skeleton::after {
     content: "";
-    @apply absolute inset-0 -translate-x-full bg-gradient-shimmer;
+    @apply absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent;
     animation: shimmer 1.8s infinite;
   }
+  .light .skeleton {
+    @apply bg-black/[0.05];
+  }
 
-  /* ---- Decorative patterns ---- */
+  /* ---- Decorative patterns -------------------------------------- */
   .bg-dots {
-    background-image: radial-gradient(circle at center, hsl(var(--foreground) / 0.07) 1px, transparent 1px);
-    background-size: 22px 22px;
+    background-image: radial-gradient(circle at center, hsl(var(--foreground) / 0.09) 1px, transparent 1px);
+    background-size: 24px 24px;
   }
   .bg-grid {
     background-image:
       linear-gradient(hsl(var(--border) / 0.5) 1px, transparent 1px),
       linear-gradient(90deg, hsl(var(--border) / 0.5) 1px, transparent 1px);
-    background-size: 32px 32px;
+    background-size: 40px 40px;
+    mask-image: radial-gradient(ellipse at center, black 30%, transparent 78%);
+  }
+  .light .bg-grid {
+    mask-image: none;
   }
 
-  /* ---- Focus ring helper ---- */
+  /* ---- Misc ------------------------------------------------------ */
   .focus-ring {
     @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
   }
-
-  /* ---- Ring progress (Pomodoro) ---- */
   .ring-progress {
     transition: stroke-dashoffset 0.45s cubic-bezier(0.4, 0, 0.2, 1);
   }
-
-  /* ---- Avatar presence ring ---- */
   .avatar-ring {
     @apply rounded-full ring-2 ring-offset-2 ring-offset-background;
   }
 }
 
-/* Custom scrollbar (WebKit) */
 ::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -264,7 +363,6 @@
   background-clip: content-box;
 }
 
-/* Reduced motion — respect accessibility preference */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

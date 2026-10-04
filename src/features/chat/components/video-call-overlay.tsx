@@ -468,22 +468,22 @@ export function VideoCallOverlay({
             showRemote ? "pointer-events-none opacity-0" : "opacity-100"
           )}
         >
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.18),transparent_60%),radial-gradient(ellipse_at_bottom,rgba(6,182,212,0.14),transparent_60%)]" />
-          <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/20 to-black/80" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,hsl(var(--violet)/0.22),transparent_62%),radial-gradient(ellipse_at_bottom,hsl(var(--cyan)/0.16),transparent_62%),radial-gradient(ellipse_at_center,hsl(var(--fuchsia)/0.12),transparent_70%)]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/30 to-black/85" />
 
           <div className="relative flex h-full flex-col items-center justify-center gap-6 px-6 text-center">
             {/* Avatar with pulsing rings */}
             <div className="relative">
               {state !== "ended" && (
                 <>
-                  <span className="absolute inset-0 animate-ring-expand rounded-full border-2 border-primary/40" />
+                  <span className="absolute inset-0 animate-ring-expand rounded-full border-2 border-violet-400/50" />
                   <span
-                    className="absolute inset-0 animate-ring-expand rounded-full border-2 border-primary/30"
+                    className="absolute inset-0 animate-ring-expand rounded-full border-2 border-fuchsia-400/40"
                     style={{ animationDelay: "0.6s" }}
                   />
                 </>
               )}
-              <div className="relative grid h-28 w-28 place-items-center rounded-full bg-gradient-primary text-4xl font-bold text-primary-foreground shadow-2xl">
+              <div className="relative grid h-28 w-28 place-items-center rounded-full bg-gradient-aurora text-4xl font-extrabold text-white shadow-glow-lg">
                 {peer?.avatar ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -498,7 +498,7 @@ export function VideoCallOverlay({
             </div>
 
             <div className="space-y-1.5">
-              <h2 className="font-display text-2xl font-semibold tracking-tight text-white">
+              <h2 className="font-display text-3xl font-extrabold tracking-tight text-white">
                 {peerName}
               </h2>
               <p className="text-sm text-white/60">
@@ -527,7 +527,7 @@ export function VideoCallOverlay({
                   <span
                     key={i}
                     className={cn(
-                      "w-1 rounded-full bg-primary",
+                      "w-1 rounded-full bg-gradient-to-t from-violet-400 to-cyan-300",
                       i % 3 === 0 ? "animate-wave-1" : i % 3 === 1 ? "animate-wave-2" : "animate-wave-3"
                     )}
                     style={{ height: "100%" }}
@@ -550,7 +550,7 @@ export function VideoCallOverlay({
                 </button>
                 <button
                   onClick={accept}
-                  className="pressable grid h-16 w-16 place-items-center rounded-full bg-success text-white shadow-2xl transition-transform hover:scale-105 hover:shadow-[0_0_40px_hsl(var(--success)/0.6)]"
+                  className="pressable grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-success to-emerald-400 text-white shadow-2xl transition-transform hover:scale-105 hover:shadow-[0_0_40px_hsl(var(--success)/0.6)]"
                   aria-label="Accept call"
                 >
                   <svg viewBox="0 0 24 24" className="h-7 w-7 rotate-[135deg] fill-current">

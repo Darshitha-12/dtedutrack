@@ -19,15 +19,15 @@ function PageHeader({ title, description, action, className, eyebrow }: PageHead
       )}
     >
       <div className="min-w-0">
-        {eyebrow && <div className="mb-1.5 flex items-center gap-2">{eyebrow}</div>}
-        <h1 className="font-display text-2xl font-bold tracking-[-0.03em] text-foreground sm:text-[28px]">
+        {eyebrow && <div className="mb-2.5 flex items-center gap-2">{eyebrow}</div>}
+        <h1 className="font-display text-[26px] font-extrabold leading-[1.1] tracking-[-0.035em] text-foreground sm:text-[34px]">
           {title}
         </h1>
         {description && (
-          <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>
+          <p className="mt-2 max-w-2xl text-sm font-medium leading-relaxed text-muted-foreground">{description}</p>
         )}
       </div>
-      {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
+      {action && <div className="flex shrink-0 items-center gap-2.5">{action}</div>}
     </div>
   )
 }

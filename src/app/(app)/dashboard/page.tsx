@@ -441,26 +441,26 @@ export default function DashboardPage() {
 
   const statCards = [
     {
-      icon: <Bell className="h-5 w-5 text-blue-500" />,
-      iconBg: "bg-blue-500/10",
+      icon: <Bell className="h-5 w-5 text-cyan" />,
+      iconBg: "bg-cyan/15",
       label: "Active Alarms",
       value: String(stats.activeAlarms),
     },
     {
-      icon: <Clock className="h-5 w-5 text-green-500" />,
-      iconBg: "bg-green-500/10",
+      icon: <Clock className="h-5 w-5 text-violet-300" />,
+      iconBg: "bg-violet-500/15",
       label: "Study This Week",
       value: fmtWork(stats.weeklyMinutes),
     },
     {
-      icon: <Flame className="h-5 w-5 text-orange-500" />,
-      iconBg: "bg-orange-500/10",
+      icon: <Flame className="h-5 w-5 text-fuchsia-400" />,
+      iconBg: "bg-fuchsia-500/15",
       label: "Day Streak",
       value: String(stats.dayStreak),
     },
     {
-      icon: <BookOpen className="h-5 w-5 text-purple-500" />,
-      iconBg: "bg-purple-500/10",
+      icon: <BookOpen className="h-5 w-5 text-violet-300" />,
+      iconBg: "bg-violet-500/15",
       label: "Topics Covered",
       value: String(stats.topicsCovered),
     },
@@ -468,36 +468,43 @@ export default function DashboardPage() {
 
   return (
     <div className="container mx-auto px-4 py-8 space-y-6">
-      {/* 1. Welcome Header Card */}
-      <Card className="p-6 bg-gradient-to-r from-primary/10 to-primary/5">
-        <div className="flex items-center justify-between">
+      {/* 1. Aurora Bento Hero */}
+      <div className="gradient-border relative overflow-hidden rounded-[2rem] bg-gradient-aurora-soft p-7 shadow-2xl">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-fuchsia/25 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-20 -left-10 h-56 w-56 rounded-full bg-cyan/25 blur-3xl" />
+        <div className="relative flex items-center justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold">
+            <p className="mb-2 text-2xs font-extrabold uppercase tracking-[0.24em] text-violet/90">
+              BioPulse Command Center
+            </p>
+            <h1 className="font-display text-[28px] font-extrabold leading-[1.08] tracking-[-0.04em] sm:text-[36px]">
               {ready ? (
                 `Welcome back, ${getDisplayName()}! 👋`
               ) : (
-                <SkeletonText className="h-7 w-64" />
+                <SkeletonText className="h-8 w-72" />
               )}
             </h1>
-            <p className="text-muted-foreground mt-1">
+            <p className="mt-2 text-sm font-medium text-muted-foreground">
               {ready ? (
                 profile?.examYear
                   ? `${profile.currentLevel} • Exam ${profile.examYear}`
                   : "Ready to study?"
               ) : (
-                <SkeletonText className="h-4 w-40 mt-1" />
+                <SkeletonText className="h-4 w-40" />
               )}
             </p>
           </div>
           <div className="flex items-center gap-3 shrink-0">
             <div className="text-right">
-              <p className="text-sm font-medium">Profile Complete</p>
+              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Profile Complete
+              </p>
               {ready ? (
-                <p className="text-2xl font-bold text-primary">
+                <p className="text-gradient text-3xl font-extrabold tabular-nums">
                   {getProfileCompleteness()}%
                 </p>
               ) : (
-                <SkeletonText className="h-7 w-14 ml-auto mt-1" />
+                <SkeletonText className="h-8 w-16 ml-auto mt-1" />
               )}
             </div>
             {ready ? (
@@ -510,7 +517,7 @@ export default function DashboardPage() {
                     stroke="currentColor"
                     strokeWidth="4"
                     fill="none"
-                    className="text-muted"
+                    className="text-white/15"
                   />
                   <circle
                     cx="32"
@@ -519,8 +526,9 @@ export default function DashboardPage() {
                     stroke="currentColor"
                     strokeWidth="4"
                     fill="none"
+                    strokeLinecap="round"
                     strokeDasharray={`${(getProfileCompleteness() / 100) * 176} 176`}
-                    className="text-primary"
+                    className="text-violet-300"
                   />
                 </svg>
               </div>
@@ -529,7 +537,7 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
-      </Card>
+      </div>
 
       {/* 2. Live Exam Countdown Card — fixed-height segments, always visible */}
       <Card
@@ -589,14 +597,18 @@ export default function DashboardPage() {
             {cdSegments.map((s) => (
               <div
                 key={s.label}
-                className="min-w-0 rounded-md bg-muted/50 px-0.5 sm:px-1 py-2 text-center"
+                className="min-w-0 rounded-2xl border border-white/[0.08] bg-white/[0.05] px-0.5 sm:px-2 py-2.5 text-center backdrop-blur-sm"
               >
                 {ready ? (
-                  <p className="text-base sm:text-xl font-bold tabular-nums truncate">{s.value}</p>
+                  <p className="text-lg sm:text-2xl font-extrabold tabular-nums truncate text-gradient-brand">
+                    {s.value}
+                  </p>
                 ) : (
                   <SkeletonText className="h-6 w-8 mx-auto" />
                 )}
-                <p className="text-[10px] leading-tight text-muted-foreground truncate">{s.label}</p>
+                <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider leading-tight text-muted-foreground/80 truncate">
+                  {s.label}
+                </p>
               </div>
             ))}
           </div>
@@ -626,24 +638,28 @@ export default function DashboardPage() {
       </Card>
 
       {/* 4–7. Stat cards — fixed grid, fixed order, always rendered */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {statCards.map((sc) => (
-          <Card key={sc.label} className="p-4 min-h-[4.5rem]">
+          <Card
+            key={sc.label}
+            interactive
+            className="group min-h-[5.5rem] p-5"
+          >
             <div className="flex items-center gap-3">
               <div
-                className={`h-10 w-10 rounded-lg flex items-center justify-center shrink-0 ${sc.iconBg}`}
+                className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-white/[0.08] ${sc.iconBg} transition-transform duration-300 ease-spring group-hover:scale-110`}
               >
                 {sc.icon}
               </div>
               <div className="min-w-0">
                 {ready ? (
-                  <p className="text-2xl font-bold tabular-nums truncate">
+                  <p className="text-gradient-brand text-[28px] font-extrabold leading-none tabular-nums truncate">
                     {sc.value}
                   </p>
                 ) : (
                   <SkeletonText className="h-7 w-16" />
                 )}
-                <p className="text-xs text-muted-foreground">{sc.label}</p>
+                <p className="mt-1 text-xs font-semibold text-muted-foreground">{sc.label}</p>
               </div>
             </div>
           </Card>

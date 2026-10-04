@@ -21,12 +21,12 @@ function AppShell({ children }: { children: React.ReactNode }) {
         <div className="min-h-dvh">
           <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
           <Topbar onMenuClick={() => setSidebarOpen(true)} />
-          <main className={isChat ? "lg:pl-64" : "lg:pl-64 pb-24 lg:pb-10"}>
+          <main className={isChat ? "lg:pl-[280px]" : "lg:pl-[280px] pb-32 lg:pb-12"}>
             <div
               className={
                 isChat
                   ? ""
-                  : "mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8"
+                  : "mx-auto max-w-7xl px-4 py-7 sm:px-6 lg:px-8"
               }
             >
               <div key={pathname} className={isChat ? "" : "animate-fade-in"}>

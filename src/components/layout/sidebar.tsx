@@ -115,112 +115,125 @@ function SidebarContent({ pathname, onClose }: { pathname: string; onClose?: () 
 
   return (
     <div className="flex h-full flex-col">
-      {/* Brand */}
-      <div className="flex h-16 shrink-0 items-center gap-2.5 border-b border-border px-4">
+      {/* Brand — oversized aurora mark */}
+      <div className="relative shrink-0 px-5 pb-4 pt-6">
         <Link
           href="/dashboard"
           onClick={onClose}
-          className="group flex min-w-0 flex-1 items-center gap-2.5"
+          className="group flex items-center gap-3"
         >
-          <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-primary text-lg shadow-md transition-transform duration-300 ease-spring group-hover:scale-105">
+          <span className="relative grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-gradient-aurora text-xl shadow-glow-lg transition-transform duration-500 ease-spring group-hover:scale-110 group-hover:rotate-6">
             <span className="leading-none">🧬</span>
           </span>
-          <span className="text-gradient truncate font-display text-lg font-bold tracking-tight">
-            BioPulse
+          <span className="min-w-0">
+            <span className="text-gradient block font-display text-xl font-extrabold leading-none tracking-tight">
+              BioPulse
+            </span>
+            <span className="mt-1 block text-2xs font-semibold uppercase tracking-[0.22em] text-muted-foreground/70">
+              Command Center
+            </span>
           </span>
         </Link>
         {onClose && (
           <button
             onClick={onClose}
             aria-label="Close menu"
-            className="pressable shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground lg:hidden"
+            className="pressable absolute right-4 top-5 rounded-xl p-2 text-muted-foreground hover:bg-white/10 hover:text-foreground lg:hidden"
           >
             <X className="h-5 w-5" />
           </button>
         )}
       </div>
 
-      {/* User card */}
-      <div className="border-b border-border p-3">
-        <div className="flex items-center gap-3 rounded-xl bg-surface-2/50 p-2.5">
-          <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-primary text-sm font-bold text-primary-foreground shadow-sm">
+      {/* User card — aurora gradient card */}
+      <div className="px-4 pb-4">
+        <div className="gradient-border relative flex items-center gap-3 overflow-hidden rounded-3xl bg-gradient-aurora-soft p-3">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-gradient-aurora text-base font-extrabold text-white shadow-lg">
             {initial}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-foreground">
+            <p className="truncate text-sm font-bold text-foreground">
               {user?.name || "Student"}
             </p>
-            <p className="truncate text-xs text-muted-foreground">{user?.email || ""}</p>
+            <p className="truncate text-2xs text-muted-foreground">{user?.email || ""}</p>
           </div>
         </div>
       </div>
 
       {/* Nav */}
-      <nav className="scrollbar-slim flex-1 space-y-1 overflow-y-auto px-3 py-3">
+      <nav className="scrollbar-slim flex-1 space-y-5 overflow-y-auto px-3 pb-4">
         {NAV_SECTIONS.map((section, si) => (
           <React.Fragment key={si}>
-            {section.separator && <div className="my-3 border-t border-border/70" />}
+            {section.separator && <div className="mx-3 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />}
             {section.title && (
-              <p className="px-3 pb-1.5 pt-1 text-2xs font-bold uppercase tracking-[0.14em] text-muted-foreground/70">
+              <p className="px-3 pb-2 text-2xs font-extrabold uppercase tracking-[0.2em] text-violet/80">
                 {section.title}
               </p>
             )}
-            {section.items.map((item) => {
-              const trimmed = pathname.replace(/\/+$/, "")
-              const isActive = trimmed === item.href || trimmed.startsWith(item.href + "/")
-              const Icon = item.icon
-              const unread = item.href === "/chat" ? totalUnread : 0
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={onClose}
-                  aria-current={isActive ? "page" : undefined}
-                  className={cn(
-                    "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium",
-                    "transition-all duration-200 ease-premium",
-                    isActive
-                      ? "bg-primary/12 text-primary shadow-[inset_0_1px_0_0_hsl(var(--primary)/0.25)]"
-                      : "text-muted-foreground hover:bg-accent/50 hover:translate-x-0.5 hover:text-foreground"
-                  )}
-                >
-                  {isActive && (
-                    <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary shadow-glow" />
-                  )}
-                  <Icon
+            <div className="space-y-1">
+              {section.items.map((item) => {
+                const trimmed = pathname.replace(/\/+$/, "")
+                const isActive = trimmed === item.href || trimmed.startsWith(item.href + "/")
+                const Icon = item.icon
+                const unread = item.href === "/chat" ? totalUnread : 0
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={onClose}
+                    aria-current={isActive ? "page" : undefined}
                     className={cn(
-                      "h-[18px] w-[18px] shrink-0 transition-transform duration-200 ease-spring",
-                      isActive ? "text-primary" : "text-muted-foreground/80 group-hover:scale-110"
+                      "group relative flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-semibold",
+                      "transition-all duration-300 ease-premium",
+                      isActive
+                        ? "text-white shadow-glow"
+                        : "text-muted-foreground hover:translate-x-1 hover:bg-white/[0.06] hover:text-foreground"
                     )}
-                  />
-                  <span className="flex-1 truncate">{t(item.labelKey)}</span>
-                  {unread > 0 && (
-                    <span className="min-w-[20px] rounded-full bg-primary px-1.5 py-0.5 text-center text-[10px] font-bold text-primary-foreground shadow-sm">
-                      {unread > 99 ? "99+" : unread}
+                  >
+                    {isActive && (
+                      <span className="absolute inset-0 -z-10 rounded-2xl bg-gradient-aurora" />
+                    )}
+                    <span
+                      className={cn(
+                        "grid h-8 w-8 shrink-0 place-items-center rounded-xl transition-all duration-300 ease-spring",
+                        isActive
+                          ? "bg-white/20 text-white"
+                          : "bg-white/[0.05] text-muted-foreground group-hover:scale-110 group-hover:bg-white/10 group-hover:text-foreground"
+                      )}
+                    >
+                      <Icon className="h-[17px] w-[17px]" />
                     </span>
-                  )}
-                </Link>
-              )
-            })}
+                    <span className="flex-1 truncate">{t(item.labelKey)}</span>
+                    {unread > 0 && (
+                      <span className="min-w-[22px] rounded-full bg-gradient-aurora px-2 py-0.5 text-center text-[10px] font-extrabold text-white shadow-md">
+                        {unread > 99 ? "99+" : unread}
+                      </span>
+                    )}
+                  </Link>
+                )
+              })}
+            </div>
           </React.Fragment>
         ))}
       </nav>
 
       {/* Footer */}
-      <div className="space-y-1 border-t border-border p-3">
+      <div className="space-y-1 border-t border-white/[0.07] p-3">
         <button
           onClick={() => setLocale(locale === "si" ? "en" : "si")}
-          className="tap-highlight flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground"
+          className="group flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-semibold text-muted-foreground transition-all duration-300 hover:bg-white/[0.06] hover:text-foreground"
         >
-          <Globe className="h-[18px] w-[18px] shrink-0" />
+          <Globe className="h-[18px] w-[18px] shrink-0 transition-transform duration-300 group-hover:rotate-180" />
           <span className="flex-1 text-left">{locale === "si" ? "EN" : "සිංහල"}</span>
-          <span className="text-2xs font-bold uppercase text-muted-foreground/60">{locale}</span>
+          <span className="rounded-lg bg-white/[0.07] px-2 py-0.5 text-2xs font-extrabold uppercase text-muted-foreground">
+            {locale}
+          </span>
         </button>
         <button
           onClick={() => signOut({ callbackUrl: "/login" })}
-          className="tap-highlight flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          className="group flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-semibold text-muted-foreground transition-all duration-300 hover:bg-destructive/15 hover:text-destructive"
         >
-          <LogOut className="h-[18px] w-[18px] shrink-0" />
+          <LogOut className="h-[18px] w-[18px] shrink-0 transition-transform duration-300 group-hover:translate-x-1" />
           <span>{t("sidebar.logout")}</span>
         </button>
       </div>
@@ -233,8 +246,8 @@ function Sidebar({ open, onClose }: SidebarProps) {
 
   return (
     <>
-      {/* Desktop rail */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-border bg-card/80 backdrop-blur-2xl lg:flex">
+      {/* Desktop rail — floating glass panel */}
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[280px] flex-col border-r border-white/[0.07] bg-white/[0.025] backdrop-blur-2xl lg:flex">
         <SidebarContent pathname={pathname} />
       </aside>
 
@@ -242,10 +255,10 @@ function Sidebar({ open, onClose }: SidebarProps) {
       {open && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div
-            className="absolute inset-0 animate-fade-in bg-background/75 backdrop-blur-sm"
+            className="absolute inset-0 animate-fade-in bg-black/70 backdrop-blur-md"
             onClick={onClose}
           />
-          <div className="absolute inset-y-0 left-0 w-[280px] animate-slide-in border-r border-border bg-card shadow-2xl">
+          <div className="absolute inset-y-0 left-0 w-[300px] animate-slide-in border-r border-white/10 bg-[hsl(var(--popover))] shadow-2xl">
             <SidebarContent pathname={pathname} onClose={onClose} />
           </div>
         </div>
