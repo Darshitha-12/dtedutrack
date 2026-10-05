@@ -96,6 +96,18 @@ function nativeKeepScreenOn(on: boolean) {
   }
 }
 
+/** Feeds the notification progress bar (and, via native, the background keepalive clock). */
+function nativeProgress(positionSeconds: number, durationSeconds: number) {
+  try {
+    const b = (window as any).BioPulseBridge
+    if (b && typeof b.ytProgress === "function") {
+      b.ytProgress(positionSeconds, durationSeconds)
+    }
+  } catch {
+    /* not in the Android shell */
+  }
+}
+
 async function lockLandscape(lock: boolean) {
   try {
     const so = (screen as any).orientation
@@ -145,7 +157,9 @@ function YtInner() {
   const titleRef = React.useRef("Video")
   const shouldPlayRef = React.useRef(false)
   const userPausedRef = React.useRef(false)
-  const postCmdRef = React.useRef<(cmd: string) => void>(() => {})
+  const postCmdRef =
+    React.useRef<(cmd: string, args?: unknown[]) => void>(() => {})
+  const lastProgressRef = React.useRef<{ pos: number; dur: number } | null>(null)
 
   const loadSaved = React.useCallback(() => {
     try {
@@ -255,12 +269,12 @@ function YtInner() {
   }
 
   React.useEffect(() => {
-    postCmdRef.current = (cmd: string) => {
+    postCmdRef.current = (cmd: string, args: unknown[] = []) => {
       const f = iframeRef.current
       if (!f) return
       try {
         f.contentWindow?.postMessage(
-          JSON.stringify({ event: "command", func: cmd, args: [] }),
+          JSON.stringify({ event: "command", func: cmd, args }),
           "*",
         )
       } catch {
@@ -274,6 +288,17 @@ function YtInner() {
       } else if (action === "pause") {
         shouldPlayRef.current = false
         userPausedRef.current = true
+      } else if (action === "keepalive") {
+        // Pushed from the native foreground service every couple of seconds. Background JS
+        // timers are throttled to about once a minute, which is far too slow to stop YouTube
+        // from dropping its audio track once the app leaves the foreground.
+        if (!shouldPlayRef.current || userPausedRef.current) return
+        postCmdRef.current("unMute")
+        postCmdRef.current("setVolume", [100])
+        postCmdRef.current("playVideo")
+        const p = lastProgressRef.current
+        if (p) nativeProgress(p.pos, p.dur)
+        return
       }
       postCmdRef.current(action)
     }
@@ -286,6 +311,13 @@ function YtInner() {
         let st: number | undefined
         if (d.event === "infoDelivery" && d.info && typeof d.info.playerState === "number") {
           st = d.info.playerState
+          // infoDelivery also carries the playhead — use it for the notification progress bar.
+          const pos = Number(d.info.currentTime)
+          const dur = Number(d.info.duration)
+          if (Number.isFinite(pos) && Number.isFinite(dur) && dur > 0) {
+            lastProgressRef.current = { pos, dur }
+            nativeProgress(pos, dur)
+          }
         } else if (d.event === "onStateChange") {
           st = typeof d.data === "number" ? d.data : d.state
         }

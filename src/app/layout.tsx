@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next"
 import { Inter } from "next/font/google"
 import { AuthProvider } from "@/components/auth-provider"
 import { PwaRegister } from "@/components/pwa-register"
+import { BUILD_STAMP } from "@/lib/build-stamp"
 import "./globals.css"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -36,7 +37,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark" data-build={BUILD_STAMP}>
       <body className={inter.className}>
         <PwaRegister />
         <AuthProvider>{children}</AuthProvider>

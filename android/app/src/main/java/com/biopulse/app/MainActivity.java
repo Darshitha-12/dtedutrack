@@ -164,6 +164,15 @@ public class MainActivity extends BridgeActivity {
         }
 
         @JavascriptInterface
+        public void ytProgress(final double positionSeconds, final double durationSeconds) {
+            if (!Double.isFinite(positionSeconds) || !Double.isFinite(durationSeconds)) return;
+            MediaPlaybackService.reportProgress(
+                (long) (positionSeconds * 1000.0),
+                (long) (durationSeconds * 1000.0)
+            );
+        }
+
+        @JavascriptInterface
         public void setAlarmRinging(final boolean ringing, final String label) {
             runOnUiThread(() -> {
                 if (ringing) {

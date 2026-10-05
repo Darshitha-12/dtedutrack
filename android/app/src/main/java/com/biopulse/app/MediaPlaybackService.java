@@ -13,6 +13,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.util.Log;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -37,6 +38,7 @@ public class MediaPlaybackService extends Service {
     public static final String ACTION_PAUSE = "com.biopulse.app.media.PAUSE";
 
     private static final String CHANNEL_ID = "biopulse_media";
+    private static final String TAG = "BioPulseMedia";
     private static final int NOTIF_ID = 0x8A11;
     private static final int REQ_PLAY = 11;
     private static final int REQ_PAUSE = 12;
@@ -44,6 +46,66 @@ public class MediaPlaybackService extends Service {
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static WeakReference<MediaPlaybackService> instance = new WeakReference<>(null);
+
+    /**
+     * Delay before actually releasing the service.
+     *
+     * A stop request that lands while a {@code startForegroundService()} is still in flight
+     * cancels the start intent before the service ever runs, and Android then aborts the
+     * process with {@code RemoteServiceException} because startForeground() was never called.
+     * Deferring the release lets the pending start be promoted instead.
+     */
+    private static final long RELEASE_DELAY_MS = 1500L;
+
+    private static final Runnable RELEASE_TASK = () -> {
+        releaseScheduled = false;
+        if (!isPlaying()) {
+            MediaPlaybackService svc = instance.get();
+            Context ctx = svc != null ? svc.getApplicationContext() : null;
+            if (ctx != null) release(ctx);
+        }
+    };
+
+    private static boolean releaseScheduled = false;
+
+    /** True once the service has been promoted and before it is destroyed. */
+    private static volatile boolean foreground = false;
+
+    /**
+     * Playback position reported by the page, in milliseconds.
+     *
+     * The web layer cannot drive this on its own: background JS timers are throttled to roughly
+     * one tick per minute, so the 1s keepalive in the YT page stops nudging the embed and the
+     * audio drops out while the app is backgrounded. A ticker running inside this foreground
+     * service (which holds a wakelock) pushes the keepalive instead, and the reported position
+     * feeds the notification progress bar.
+     */
+    private static long positionMs = 0;
+    private static long durationMs = 0;
+    private static int progressReports = 0;
+
+    private static final long KEEPALIVE_INTERVAL_MS = 2000L;
+    private static final Runnable KEEPALIVE_TASK = new Runnable() {
+        @Override
+        public void run() {
+            if (!mediaPlaying) return;
+            MediaPlaybackService svc = instance.get();
+            if (svc == null) return;
+            MainActivity.dispatchMediaCommand("keepalive");
+            svc.tickProgress();
+            MAIN.postDelayed(this, KEEPALIVE_INTERVAL_MS);
+        }
+    };
+
+    /** Called from the page whenever the player reports its position. */
+    public static void reportProgress(long position, long duration) {
+        positionMs = Math.max(0, position);
+        durationMs = Math.max(0, duration);
+        progressReports++;
+        if (progressReports % 10 == 1) {
+            Log.i(TAG, "progress " + positionMs + "/" + durationMs);
+        }
+    }
 
     private PowerManager.WakeLock wakeLock;
 
@@ -66,6 +128,18 @@ public class MediaPlaybackService extends Service {
 
     /** Starts (or refreshes) the foreground service without touching state flags. */
     public static void ensureRunning(Context ctx) {
+        // A start is on its way, so cancel any pending release.
+        releaseScheduled = false;
+        MAIN.removeCallbacks(RELEASE_TASK);
+
+        // Both the web keepalive and the native ticker report state every second or two. Once the
+        // service is promoted, re-issuing startForegroundService() only churns ActivityManager
+        // and widens the race window, so just refresh the notification.
+        if (foreground) {
+            refresh(ctx);
+            return;
+        }
+
         Intent intent = new Intent(ctx, MediaPlaybackService.class);
         intent.setAction(ACTION_START);
         try {
@@ -74,17 +148,26 @@ public class MediaPlaybackService extends Service {
             } else {
                 ctx.startService(intent);
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
             // Background start restrictions — playback still works while the app is visible.
+            Log.w(TAG, "startForegroundService rejected", e);
         }
         refresh(ctx);
     }
 
     private static void release(Context ctx) {
+        foreground = false;
         try {
             ctx.stopService(new Intent(ctx, MediaPlaybackService.class));
         } catch (Exception ignored) {
         }
+    }
+
+    /** Defers the release so an in-flight startForegroundService() can still be promoted. */
+    private static void scheduleRelease(Context ctx) {
+        releaseScheduled = true;
+        MAIN.removeCallbacks(RELEASE_TASK);
+        MAIN.postDelayed(RELEASE_TASK, RELEASE_DELAY_MS);
     }
 
     /** Called from the web layer when the media player starts playing. */
@@ -97,7 +180,7 @@ public class MediaPlaybackService extends Service {
     public static void stop(Context ctx) {
         mediaPlaying = false;
         alarmActive = false;
-        release(ctx);
+        scheduleRelease(ctx);
     }
 
     /** Holds the service (and wakelock) open while an alarm/reminder is ringing. */
@@ -110,8 +193,13 @@ public class MediaPlaybackService extends Service {
     /** Releases only the alarm hold — media playback, if active, keeps the service alive. */
     public static void stopAlarm(Context ctx) {
         alarmActive = false;
-        if (!mediaPlaying) release(ctx);
-        else refresh(ctx);
+        if (!mediaPlaying) {
+            scheduleRelease(ctx);
+        } else {
+            releaseScheduled = false;
+            MAIN.removeCallbacks(RELEASE_TASK);
+            refresh(ctx);
+        }
     }
 
     /** Called from the web layer whenever the player state changes. */
@@ -126,10 +214,18 @@ public class MediaPlaybackService extends Service {
             mediaPlaying = false;
         }
 
+        if (mediaPlaying) {
+            ensureRunning(ctx);
+        } else {
+            MAIN.removeCallbacks(KEEPALIVE_TASK);
+            positionMs = 0;
+            durationMs = 0;
+        }
+
         if (isPlaying()) {
             ensureRunning(ctx);
         } else {
-            release(ctx);
+            scheduleRelease(ctx);
         }
     }
 
@@ -137,6 +233,13 @@ public class MediaPlaybackService extends Service {
         MediaPlaybackService svc = instance.get();
         if (svc == null) return;
         MAIN.post(() -> svc.postNotification());
+    }
+
+    /** Nudges the embed and advances the notification progress bar. */
+    private void tickProgress() {
+        if (!mediaPlaying) return;
+        if (durationMs > 0) positionMs = Math.min(durationMs, positionMs + KEEPALIVE_INTERVAL_MS);
+        postNotification();
     }
 
     @Override
@@ -196,6 +299,7 @@ public class MediaPlaybackService extends Service {
                 startForeground(NOTIF_ID, notification);
                 return true;
             } catch (Exception ignoredAgain) {
+                Log.e(TAG, "startForeground failed", ignoredAgain);
                 return false;
             }
         }
@@ -221,15 +325,22 @@ public class MediaPlaybackService extends Service {
         // startForegroundService() call and this delivery, and skipping the promotion on that
         // path is what used to crash the app.
         boolean promoted = promoteToForeground();
+        Log.i(TAG, "onStartCommand action=" + action + " promoted=" + promoted + " playing=" + isPlaying());
 
         if (!promoted || !isPlaying()) {
-            // Nothing worth keeping — drop the foreground state we just claimed.
+            // Nothing worth keeping. Release asynchronously so a concurrent start request is
+            // never cancelled mid-flight.
             stopSelf();
+            if (!isPlaying()) releaseScheduled = true;
             return START_NOT_STICKY;
         }
 
         // Refresh the notification so the title/actions match the reconciled state.
         postNotification();
+        // Drive the embed from here: background JS timers are throttled far too heavily to keep
+        // YouTube's audio alive on their own.
+        MAIN.removeCallbacks(KEEPALIVE_TASK);
+        if (mediaPlaying) MAIN.postDelayed(KEEPALIVE_TASK, KEEPALIVE_INTERVAL_MS);
         return START_NOT_STICKY;
     }
 
@@ -256,6 +367,15 @@ public class MediaPlaybackService extends Service {
         channel.setShowBadge(false);
         channel.setSound(null, null);
         nm.createNotificationChannel(channel);
+    }
+
+    private static String formatTime(long ms) {
+        long total = Math.max(0, ms) / 1000L;
+        long h = total / 3600L;
+        long m = (total % 3600L) / 60L;
+        long s = total % 60L;
+        if (h > 0) return String.format("%d:%02d:%02d", h, m, s);
+        return String.format("%d:%02d", m, s);
     }
 
     private PendingIntent actionIntent(String action, int requestCode) {
@@ -287,13 +407,24 @@ public class MediaPlaybackService extends Service {
             .setSilent(true)
             .setShowWhen(false);
 
+        if (mediaPlaying && durationMs > 0) {
+            int pos = (int) Math.min(positionMs, durationMs);
+            b.setProgress((int) durationMs, pos, false);
+        } else {
+            b.setProgress(0, 0, false);
+        }
+
         if (mediaPlaying) {
+            if (durationMs > 0) {
+                b.setSubText(formatTime(positionMs) + " / " + formatTime(durationMs));
+            }
             b.addAction(
                 android.R.drawable.ic_media_pause,
                 "Pause",
                 actionIntent(ACTION_PAUSE, REQ_PAUSE)
             );
         } else {
+            b.setSubText(null);
             b.addAction(android.R.drawable.ic_media_play, "Play", actionIntent(ACTION_PLAY, REQ_PLAY));
         }
         b.addAction(android.R.drawable.ic_delete, "Stop", actionIntent(ACTION_STOP, REQ_STOP));
@@ -303,6 +434,9 @@ public class MediaPlaybackService extends Service {
 
     @Override
     public void onDestroy() {
+        foreground = false;
+        MAIN.removeCallbacks(KEEPALIVE_TASK);
+        MAIN.removeCallbacks(RELEASE_TASK);
         releaseWakeLock();
         instance = new WeakReference<>(null);
         try {

@@ -17,7 +17,7 @@ export function MediaCommandBridge() {
         yt(command);
         return;
       }
-      if (command === "play") return;
+      if (command === "play" || command === "keepalive") return;
       AudioEngine.stop();
       holdBackgroundPlayback(false);
       window.dispatchEvent(new CustomEvent("biopulse:media-stop"));
