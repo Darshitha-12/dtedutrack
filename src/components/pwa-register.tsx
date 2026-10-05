@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { BUILD_STAMP } from "@/lib/build-stamp";
 import { OFFLINE_ROUTES } from "@/lib/offline-routes";
+import { isNativeApp } from "@/lib/native-shell";
 
 const STAMP_KEY = "bp_build_stamp";
 
@@ -19,6 +20,29 @@ export function PwaRegister() {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
     if (process.env.NODE_ENV !== "production") return;
+
+    // No service worker inside the Android app. Measured twice on a Galaxy A01 Core (Android 10,
+    // WebView 156): a worker that answers navigations leaves the WebView stuck at
+    // readyState "loading" with an empty document, and a worker that only passes them through
+    // fails the navigation outright ("Web page not available"). Both leave the user with an
+    // unusable app, which is far worse than having no offline mode, so the APK runs without one
+    // and any worker left over from an earlier install is removed.
+    if (isNativeApp()) {
+      void (async () => {
+        try {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((r) => r.unregister()));
+          if ("caches" in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((k) => caches.delete(k)));
+          }
+          window.localStorage.setItem(STAMP_KEY, BUILD_STAMP);
+        } catch {
+          /* ignore */
+        }
+      })();
+      return;
+    }
 
     let active = true;
     const onMessage = (e: MessageEvent) => {
