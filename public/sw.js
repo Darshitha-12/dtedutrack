@@ -64,14 +64,43 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))),
-      )
-      .then(() => self.clients.claim()),
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+      // Make sure the new cache is usable BEFORE retiring the old one. If we are offline the
+      // shell cannot be fetched, and deleting the previous cache anyway would leave the user with
+      // nothing cached at all — the offline screen with no way back into the app.
+      if (!(await cache.match("/"))) {
+        try {
+          const fresh = await fetch("/", { cache: "reload" });
+          if (fresh && fresh.ok) await cache.put("/", fresh);
+        } catch {
+          /* offline: keep the previous caches */
+        }
+      }
+      if (!(await cache.match("/"))) return; // nothing usable yet, keep every old cache
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)));
+      await self.clients.claim();
+    })(),
   );
 });
+
+/** Looks in every cache, not just the current one, so a version bump can never strand the user. */
+async function matchAnyCache(request) {
+  const direct = await caches.match(request);
+  if (direct) return direct;
+  try {
+    const keys = await caches.keys();
+    for (const key of keys) {
+      const cache = await caches.open(key);
+      const hit = await cache.match(request, { ignoreSearch: false });
+      if (hit) return hit;
+    }
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
 
 function fallbackResponse() {
   return caches.match(OFFLINE_FALLBACK).then(
@@ -82,16 +111,6 @@ function fallbackResponse() {
         { headers: { "Content-Type": "text/html; charset=utf-8" } },
       ),
   );
-}
-
-function refreshNavigation(req) {
-  fetch(req)
-    .then(async (response) => {
-      if (!response || !response.ok) return;
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put(req, response);
-    })
-    .catch(() => {});
 }
 
 self.addEventListener("fetch", (event) => {
@@ -123,9 +142,12 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(async () => {
-          const cached = await caches.match(request);
+          const cached = await matchAnyCache(request);
           if (cached) return cached;
-          const shell = await caches.match("/");
+          // Next.js client-side routing asks for RSC payloads, not documents. Serve the app
+          // shell for those so an offline deep link still boots instead of showing the
+          // offline page.
+          const shell = await matchAnyCache("/");
           if (shell) return shell;
           return fallbackResponse();
         }),
