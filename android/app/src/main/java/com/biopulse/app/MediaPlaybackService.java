@@ -236,6 +236,10 @@ public class MediaPlaybackService extends Service {
         alarmActive = true;
         ensureRunning(ctx);
         postAlarmNotification(ctx);
+        // The web layer owns the sound (custom MP3s live in its IndexedDB) and the ring UI, so ask
+        // it to start. This is the path an OS-fired alarm takes, where no timer in the page ever
+        // got the chance to run.
+        MainActivity.dispatchMediaCommand("ringAlarm");
     }
 
     /** Releases only the alarm hold — media playback, if active, keeps the service alive. */

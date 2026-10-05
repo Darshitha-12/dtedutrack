@@ -15,12 +15,23 @@ export function MediaCommandBridge() {
       // Handled before the YouTube routing: while a video is open every command used to be sent
       // to the player, so a Dismiss button on the alarm notification would have been swallowed by
       // it and the alarm would keep ringing.
-      if (command === "dismissAlarm") {
+            if (command === "dismissAlarm") {
         AudioEngine.stop();
         holdBackgroundPlayback(false);
         window.dispatchEvent(new CustomEvent("biopulse:alarm-dismiss"));
         return;
       }
+
+      // The OS woke the app to ring an alarm. Stop whatever else was making noise first so the
+      // alarm tone is not buried under a video, then hand over to the alarm portal. Same ordering
+      // rule as the in-app trigger.
+      if (command === "ringAlarm") {
+        AudioEngine.stop();
+        window.dispatchEvent(new CustomEvent("biopulse:alarm-ring"));
+        return;
+      }
+
+
       const yt = (window as unknown as { __bp_yt?: (c: string) => void }).__bp_yt;
       if (typeof yt === "function") {
         yt(command);

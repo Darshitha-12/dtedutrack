@@ -10,6 +10,7 @@ import {
   nextOccurrenceFor,
 } from "@/features/alarms/lib/scheduler";
 import type { Alarm } from "@/features/alarms/lib/scheduler";
+import { publishNextAlarm } from "@/features/alarms/lib/native-alarm-scheduler";
 
 function readAlarms(): { alarms: Alarm[]; fired: Record<string, number> } {
   try {
@@ -52,13 +53,9 @@ function preArmNative(alarms: Alarm[]) {
 }
 
 function pushNativeAlarms(alarms: Alarm[]) {
-  try {
-    const bridge = (window as any).BioPulseBridge;
-    if (!bridge || typeof bridge.sync !== "function") return;
-    bridge.sync(JSON.stringify({ alarms }));
-  } catch {
-    // ignore
-  }
+  // The OS owns the wake-up, so it needs to know the next time an alarm is due. Timers in a
+  // backgrounded WebView are throttled far too heavily to be trusted with this.
+  publishNextAlarm(alarms);
 }
 
 export function AlarmPortal() {
@@ -104,16 +101,42 @@ export function AlarmPortal() {
     };
     const onDismissAll = () => dismiss();
 
+    // The OS woke the app up. `checkDue` only matches alarms inside the current minute, but an OS
+    // alarm routinely lands a few seconds late, so allow a small window before giving up rather
+    // than dropping the alarm the user set.
+    const onNativeRing = () => {
+      const { alarms } = readAlarms();
+      const now = Date.now();
+      const due = alarms.find((a) => {
+        if (!a.enabled) return false;
+        const next = nextOccurrenceFor(a);
+        if (!next) return false;
+        const delta = next.getTime() - now;
+        return delta <= 0 && delta > -120_000;
+      });
+      if (due) {
+        const dedup = { ...firedRef.current };
+        dedup[getDedupKey(due, new Date(now))] = now;
+        firedRef.current = dedup;
+        writeFired(dedup);
+        triggerAlarm(due);
+      }
+      // Whatever happened, hand the OS the following alarm so a long series keeps working.
+      checkDue();
+    };
+
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("biopulse:test-alarm", onTest);
     window.addEventListener("biopulse:alarms-dismiss", onDismissAll);
+    window.addEventListener("biopulse:alarm-ring", onNativeRing);
     return () => {
       clearInterval(id);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("biopulse:test-alarm", onTest);
       window.removeEventListener("biopulse:alarms-dismiss", onDismissAll);
+      window.removeEventListener("biopulse:alarm-ring", onNativeRing);
     };
   }, [checkDue, dismiss, triggerAlarm]);
 

@@ -36,12 +36,28 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
-        <!-- Keeps WebView media (YouTube) playing in the background / with the screen locked,
-             and shows lock-screen play-pause controls. -->
-        <service
-            android:name=".MediaPlaybackService"
-            android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
+    <!-- The alarm is woken by the OS, not by a timer inside the app, so it still rings when the
+         app has been killed or the device restarted. -->
+    <receiver
+        android:name=".AlarmScheduler$AlarmReceiver"
+        android:exported="false" />
+
+    <receiver
+        android:name=".AlarmScheduler$BootReceiver"
+        android:exported="true">
+        <intent-filter>
+            <action android:name="android.intent.action.BOOT_COMPLETED" />
+            <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        </intent-filter>
+    </receiver>
+
+    <!-- Keeps WebView media (YouTube) playing in the background / with the screen locked,
+         and shows lock-screen play-pause controls. -->
+    <service
+        android:name=".MediaPlaybackService"
+        android:exported="false"
+        android:foregroundServiceType="mediaPlayback" />
+
     </application>
 
     <!-- Permissions -->
@@ -61,6 +77,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Lets the alarm be an exact OS alarm rather than an approximate one on Android 12+.
+         Declared as not required because the scheduler falls back to an inexact alarm when the
+         user has not granted it. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <!-- Lets a ringing alarm take over the lock screen instead of only showing a silent
          notification. From Android 14 this permission is granted automatically to apps that

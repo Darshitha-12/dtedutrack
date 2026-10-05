@@ -282,6 +282,31 @@ public class MainActivity extends BridgeActivity {
                 }
             });
         }
+
+        /**
+         * Hands the next alarm time to the OS so it rings even when the app is not running. The
+         * page only ever schedules one alarm ahead, which is all that is needed: it republishes the
+         * following alarm the moment this one is acknowledged.
+         *
+         * @param epochMillis absolute wall-clock time the alarm is due, 0 to cancel.
+         */
+        @JavascriptInterface
+        public void scheduleAlarm(final double epochMillis, final String label) {
+            final long at = (long) epochMillis;
+            runOnUiThread(() -> {
+                if (at <= 0L) {
+                    AlarmScheduler.cancel(MainActivity.this);
+                } else {
+                    AlarmScheduler.schedule(MainActivity.this, at, label);
+                }
+            });
+        }
+
+        /** Lets the page force an immediate ring, e.g. while testing or after a manual "ring now". */
+        @JavascriptInterface
+        public void ringAlarmNow(final String label) {
+            runOnUiThread(() -> MediaPlaybackService.startAlarm(MainActivity.this, label));
+        }
     }
 
     /** Extends the Capacitor client so camera/mic permissions and dialogs keep working. */

@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import type { Alarm, AlarmSoundValue, CreateAlarmInput } from "../lib/scheduler";
+import { publishNextAlarm } from "../lib/native-alarm-scheduler";
 
 export const STORAGE_KEY = "biopulse_alarms_v1";
 
@@ -75,6 +76,17 @@ export function useAlarms() {
       saveAlarms();
     }
   }, [alarms, fired, saveAlarms]);
+
+  // Republish the next alarm to the OS whenever the list changes, and once when the app starts.
+  // Without this the Android app has no alarm of its own and a reminder set here would only ever
+  // ring while the app happened to be open in the foreground.
+  useEffect(() => {
+    if (alarms.length === 0) {
+      publishNextAlarm([]);
+      return;
+    }
+    publishNextAlarm(alarms);
+  }, [alarms]);
 
   const addAlarm = useCallback((input: CreateAlarmInput) => {
     const alarm: Alarm = {
