@@ -85,6 +85,7 @@ public class MediaPlaybackService extends Service {
     private static int progressReports = 0;
 
     private static final long KEEPALIVE_INTERVAL_MS = 2000L;
+    private static int keepaliveTicks = 0;
     private static final Runnable KEEPALIVE_TASK = new Runnable() {
         @Override
         public void run() {
@@ -93,6 +94,11 @@ public class MediaPlaybackService extends Service {
             if (svc == null) return;
             MainActivity.dispatchMediaCommand("keepalive");
             svc.tickProgress();
+            // Heartbeat: proves the service loop is alive, so a missing "progress" line means the
+            // WebView renderer froze rather than the service dying.
+            if (++keepaliveTicks % 15 == 0) {
+                Log.i(TAG, "keepalive heartbeat pos=" + positionMs + "/" + durationMs);
+            }
             MAIN.postDelayed(this, KEEPALIVE_INTERVAL_MS);
         }
     };
@@ -434,6 +440,7 @@ public class MediaPlaybackService extends Service {
 
     @Override
     public void onDestroy() {
+        Log.i(TAG, "onDestroy playing=" + mediaPlaying + " pos=" + positionMs);
         foreground = false;
         MAIN.removeCallbacks(KEEPALIVE_TASK);
         MAIN.removeCallbacks(RELEASE_TASK);
