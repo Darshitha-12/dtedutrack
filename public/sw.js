@@ -5,8 +5,11 @@
  * yesterday's code after a deploy. The cache is now only an offline fallback. In the background
  * the fresh copy is stored so a later offline visit still works.
  */
-const CACHE_NAME = "biopulse-v10";
+const CACHE_NAME = "biopulse-v11";
 const OFFLINE_FALLBACK = "/offline.html";
+
+/** How long a navigation waits on the network before the cached page is used instead. */
+const NETWORK_TIMEOUT_MS = 6000;
 
 // Core static assets to precache on install.
 const PRECACHE = [
@@ -171,8 +174,18 @@ self.addEventListener("fetch", (event) => {
   // and fall back to the cached copy (then the bundled offline page) when unreachable.
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
-        .then(async (response) => {
+      (async () => {
+        // Do NOT hand the navigation request straight to fetch(). In an Android WebView a
+        // `mode: "navigate"` fetch never settles: the page stays at readyState "loading" forever
+        // with an empty document and never renders, even with a working connection. Rebuilding the
+        // same GET as a normal request keeps the cookies and headers but sidesteps that path.
+        const netRequest = new Request(request.url, {
+          method: "GET",
+          headers: request.headers,
+          credentials: request.credentials,
+          redirect: "follow",
+        });
+        const network = fetch(netRequest, { cache: "no-store" }).then(async (response) => {
           if (!response || !response.ok) throw new Error("bad response");
           try {
             const cache = await caches.open(CACHE_NAME);
@@ -181,8 +194,15 @@ self.addEventListener("fetch", (event) => {
             /* cache write must never break the page load */
           }
           return response;
-        })
-        .catch(async () => {
+        });
+        // A slow connection must not strand the user on a blank screen: fall back to the cache.
+        const timeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("network timeout")), NETWORK_TIMEOUT_MS),
+        );
+
+        try {
+          return await Promise.race([network, timeout]);
+        } catch {
           const cached = await matchAnyCache(request);
           if (cached) return cached;
           // Next.js client-side routing asks for RSC payloads, not documents. Serve the app
@@ -191,7 +211,8 @@ self.addEventListener("fetch", (event) => {
           const shell = await matchAnyCache("/");
           if (shell) return shell;
           return fallbackResponse();
-        }),
+        }
+      })(),
     );
     return;
   }

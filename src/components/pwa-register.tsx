@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import { BUILD_STAMP } from "@/lib/build-stamp";
 import { OFFLINE_ROUTES } from "@/lib/offline-routes";
-import { isNativeApp } from "@/lib/native-shell";
 
 const STAMP_KEY = "bp_build_stamp";
 
@@ -20,27 +19,6 @@ export function PwaRegister() {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
     if (process.env.NODE_ENV !== "production") return;
-
-    // Inside the Android app the worker must not run at all — see lib/native-shell.ts for the
-    // measurement. Older versions of the app shipped a registration that is still active on the
-    // device, so tear it down and drop its caches, otherwise the APK keeps serving itself the
-    // offline page from the previous version.
-    if (isNativeApp()) {
-      void (async () => {
-        try {
-          const regs = await navigator.serviceWorker.getRegistrations();
-          await Promise.all(regs.map((r) => r.unregister()));
-          if ("caches" in window) {
-            const keys = await caches.keys();
-            await Promise.all(keys.map((k) => caches.delete(k)));
-          }
-          window.localStorage.setItem(STAMP_KEY, BUILD_STAMP);
-        } catch {
-          /* ignore */
-        }
-      })();
-      return;
-    }
 
     let active = true;
     const onMessage = (e: MessageEvent) => {
