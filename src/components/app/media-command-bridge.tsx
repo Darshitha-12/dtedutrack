@@ -12,6 +12,15 @@ import { holdBackgroundPlayback } from "@/features/alarms/lib/background-playbac
 export function MediaCommandBridge() {
   useEffect(() => {
     const handler = (command: string) => {
+      // Handled before the YouTube routing: while a video is open every command used to be sent
+      // to the player, so a Dismiss button on the alarm notification would have been swallowed by
+      // it and the alarm would keep ringing.
+      if (command === "dismissAlarm") {
+        AudioEngine.stop();
+        holdBackgroundPlayback(false);
+        window.dispatchEvent(new CustomEvent("biopulse:alarm-dismiss"));
+        return;
+      }
       const yt = (window as unknown as { __bp_yt?: (c: string) => void }).__bp_yt;
       if (typeof yt === "function") {
         yt(command);

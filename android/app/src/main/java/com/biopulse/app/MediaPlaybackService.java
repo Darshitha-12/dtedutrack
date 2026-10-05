@@ -36,9 +36,25 @@ public class MediaPlaybackService extends Service {
     public static final String ACTION_STOP = "com.biopulse.app.media.STOP";
     public static final String ACTION_PLAY = "com.biopulse.app.media.PLAY";
     public static final String ACTION_PAUSE = "com.biopulse.app.media.PAUSE";
+    public static final String ACTION_DISMISS_ALARM = "com.biopulse.app.media.DISMISS_ALARM";
 
     private static final String CHANNEL_ID = "biopulse_media";
     private static final String TAG = "BioPulseMedia";
+
+    /**
+     * Alarms get their own channel and their own notification.
+     *
+     * Reusing the media channel meant alarms inherited IMPORTANCE_LOW plus a silenced builder, so
+     * they never vibrated and never produced a lock-screen popup — a ringing alarm that cannot be
+     * seen or felt is useless. A separate IMPORTANCE_HIGH channel also keeps the user able to tune
+     * alarms independently of playback.
+     */
+    private static final String ALARM_CHANNEL_ID = "biopulse_alarms";
+    private static final int ALARM_NOTIF_ID = 0x8A22;
+    private static final int REQ_DISMISS_ALARM = 14;
+    private static final int REQ_ALARM_OPEN = 15;
+    /** Repeat: two short pulses, a gap, then a longer one — the standard "wake up" pattern. */
+    private static final long[] ALARM_VIBRATE = {0L, 400L, 250L, 400L, 250L, 900L};
     private static final int NOTIF_ID = 0x8A11;
     private static final int REQ_PLAY = 11;
     private static final int REQ_PAUSE = 12;
@@ -210,6 +226,7 @@ public class MediaPlaybackService extends Service {
         mediaPlaying = false;
         alarmActive = false;
         playbackRequested = false;
+        cancelAlarmNotification(ctx);
         scheduleRelease(ctx);
     }
 
@@ -218,11 +235,13 @@ public class MediaPlaybackService extends Service {
         currentTitle = "Alarm - " + (label == null || label.trim().isEmpty() ? "Alert" : label.trim());
         alarmActive = true;
         ensureRunning(ctx);
+        postAlarmNotification(ctx);
     }
 
     /** Releases only the alarm hold — media playback, if active, keeps the service alive. */
     public static void stopAlarm(Context ctx) {
         alarmActive = false;
+        cancelAlarmNotification(ctx);
         if (!mediaPlaying) {
             scheduleRelease(ctx);
         } else {
@@ -359,7 +378,20 @@ public class MediaPlaybackService extends Service {
             mediaPlaying = false;
             alarmActive = false;
             playbackRequested = false;
+            cancelAlarmNotification(this);
             MainActivity.dispatchMediaCommand("stop");
+        } else if (ACTION_DISMISS_ALARM.equals(action)) {
+            // Dismiss from the notification: stop the ringing UI, drop the alarm hold and take the
+            // lock-screen popup away. Media playback, if it is running, is left alone.
+            alarmActive = false;
+            cancelAlarmNotification(this);
+            MainActivity.dispatchMediaCommand("dismissAlarm");
+            if (mediaPlaying) {
+                refresh(this);
+            } else {
+                scheduleRelease(this);
+            }
+            return START_NOT_STICKY;
         }
 
         // Promote first, reconcile afterwards. Playback state can flip between the
@@ -398,16 +430,101 @@ public class MediaPlaybackService extends Service {
     private void createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        if (nm == null || nm.getNotificationChannel(CHANNEL_ID) != null) return;
+        if (nm == null) return;
+        if (nm.getNotificationChannel(CHANNEL_ID) == null) {
+            NotificationChannel channel = new NotificationChannel(
+                CHANNEL_ID,
+                "Media playback",
+                NotificationManager.IMPORTANCE_LOW
+            );
+            channel.setDescription("Keeps videos playing while BioPulse is in the background");
+            channel.setShowBadge(false);
+            channel.setSound(null, null);
+            nm.createNotificationChannel(channel);
+        }
+        createAlarmChannel(nm);
+    }
+
+    /**
+     * Alarm channel: high importance so it produces a heads-up popup and vibrates, with no
+     * notification sound because the alarm tone itself is synthesised by Web Audio — a channel
+     * sound would play on top of it.
+     */
+    private static void createAlarmChannel(NotificationManager nm) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        NotificationChannel existing = nm.getNotificationChannel(ALARM_CHANNEL_ID);
+        if (existing != null) {
+            // An older install may have created this channel at a lower importance; the importance
+            // of a channel cannot be raised after creation, so replace it.
+            if (existing.getImportance() >= NotificationManager.IMPORTANCE_HIGH) return;
+            nm.deleteNotificationChannel(ALARM_CHANNEL_ID);
+        }
         NotificationChannel channel = new NotificationChannel(
-            CHANNEL_ID,
-            "Media playback",
-            NotificationManager.IMPORTANCE_LOW
+            ALARM_CHANNEL_ID,
+            "Alarms & reminders",
+            NotificationManager.IMPORTANCE_HIGH
         );
-        channel.setDescription("Keeps videos playing while BioPulse is in the background");
-        channel.setShowBadge(false);
+        channel.setDescription("Wakes you when an alarm or reminder fires");
+        channel.enableVibration(true);
+        channel.setVibrationPattern(ALARM_VIBRATE);
         channel.setSound(null, null);
+        channel.setBypassDnd(false);
+        channel.setShowBadge(true);
         nm.createNotificationChannel(channel);
+    }
+
+    private static void postAlarmNotification(Context ctx) {
+        NotificationManager nm = (NotificationManager) ctx.getSystemService(NOTIFICATION_SERVICE);
+        if (nm == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        createAlarmChannel(nm);
+
+        Intent open = new Intent(ctx, MainActivity.class);
+        open.setAction(Intent.ACTION_MAIN);
+        open.addCategory(Intent.CATEGORY_LAUNCHER);
+        open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+            | Intent.FLAG_ACTIVITY_NEW_TASK);
+        int openFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) openFlags |= PendingIntent.FLAG_IMMUTABLE;
+        PendingIntent contentIntent = PendingIntent.getActivity(ctx, REQ_ALARM_OPEN, open, openFlags);
+
+        NotificationCompat.Builder b = new NotificationCompat.Builder(ctx, ALARM_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setContentTitle(currentTitle)
+            .setContentText("Tap to open BioPulse")
+            .setContentIntent(contentIntent)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            // The lock-screen takeover. Without this the alarm is just another row in the shade.
+            .setFullScreenIntent(contentIntent, true)
+            .setVibrate(ALARM_VIBRATE)
+            .setDefaults(0)
+            .setSilent(false)
+            .setAutoCancel(false)
+            .setOngoing(true)
+            .setShowWhen(true)
+            .setUsesChronometer(true)
+            .setWhen(System.currentTimeMillis());
+
+        b.addAction(
+            android.R.drawable.ic_menu_close_clear_cancel,
+            "Dismiss",
+            actionIntent(ctx, ACTION_DISMISS_ALARM, REQ_DISMISS_ALARM)
+        );
+
+        try {
+            nm.notify(ALARM_NOTIF_ID, b.build());
+        } catch (Exception e) {
+            Log.e(TAG, "alarm notification failed", e);
+        }
+    }
+
+    private static void cancelAlarmNotification(Context ctx) {
+        try {
+            NotificationManager nm = (NotificationManager) ctx.getSystemService(NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancel(ALARM_NOTIF_ID);
+        } catch (Exception ignored) {
+        }
     }
 
     private static String formatTime(long ms) {
@@ -420,11 +537,15 @@ public class MediaPlaybackService extends Service {
     }
 
     private PendingIntent actionIntent(String action, int requestCode) {
-        Intent intent = new Intent(this, MediaPlaybackService.class);
+        return actionIntent(this, action, requestCode);
+    }
+
+    private static PendingIntent actionIntent(Context ctx, String action, int requestCode) {
+        Intent intent = new Intent(ctx, MediaPlaybackService.class);
         intent.setAction(action);
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
-        return PendingIntent.getService(this, requestCode, intent, flags);
+        return PendingIntent.getService(ctx, requestCode, intent, flags);
     }
 
     private Notification buildNotification() {

@@ -121,6 +121,14 @@ export function useAlarmRinger() {
     dismiss();
   }, [dismiss]);
 
+  // Dismiss requested from the lock-screen notification. This has to run through the same path as
+  // the in-app Dismiss button, otherwise the ring UI would stay on screen behind the notification.
+  useEffect(() => {
+    const onDismiss = () => dismiss();
+    window.addEventListener("biopulse:alarm-dismiss", onDismiss);
+    return () => window.removeEventListener("biopulse:alarm-dismiss", onDismiss);
+  }, [dismiss]);
+
   useEffect(() => {
     return () => {
       AudioEngine.stop();

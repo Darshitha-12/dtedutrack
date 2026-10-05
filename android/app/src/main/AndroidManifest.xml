@@ -62,6 +62,11 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Lets a ringing alarm take over the lock screen instead of only showing a silent
+         notification. From Android 14 this permission is granted automatically to apps that
+         post CATEGORY_ALARM notifications, which is what the alarm notification uses. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
     <!-- Declared non-required so the app still installs on camera-less devices -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
