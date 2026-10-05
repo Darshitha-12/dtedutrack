@@ -47,18 +47,25 @@ const PRECACHE = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches
-      .open(CACHE_NAME)
-      .then((cache) =>
-        Promise.allSettled(
-          PRECACHE.map((url) =>
-            cache.add(url).catch(() => {
-              /* individual failures must not abort install */
-            }),
-          ),
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+      // The shell is what every offline navigation falls back to, so always fetch it fresh
+      // rather than trusting whatever a previous worker left behind.
+      try {
+        const fresh = await fetch("/", { cache: "reload" });
+        if (fresh && fresh.ok) await cache.put("/", fresh);
+      } catch {
+        /* offline during install: the precache below will fill in what it can */
+      }
+      await Promise.allSettled(
+        PRECACHE.map((url) =>
+          cache.add(url).catch(() => {
+            /* individual failures must not abort install */
+          }),
         ),
-      )
-      .then(() => self.skipWaiting()),
+      );
+      await self.skipWaiting();
+    })(),
   );
 });
 
