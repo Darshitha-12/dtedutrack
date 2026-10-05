@@ -16,6 +16,7 @@ import {
   Maximize2,
   Minimize2,
   PictureInPicture2,
+  Smartphone,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -542,6 +543,24 @@ function YtInner() {
     }
   }
 
+  const openInYouTubeApp = () => {
+    const id = currentId.current || video?.id
+    if (!id) return
+    const list = video?.list ? `&list=${encodeURIComponent(video.list)}` : ""
+    // The embedded player pauses itself whenever the page is hidden, which is why background
+    // audio dies when switching apps in a mobile browser. Handing off to the official app gives
+    // real background playback (and proper lock-screen controls).
+    const target = `youtube://watch?v=${id}${list}`
+    const started = Date.now()
+    window.location.href = target
+    // If no app handled the deep link, fall back to the website instead of a dead tap.
+    setTimeout(() => {
+      if (Date.now() - started < 2500) {
+        window.open(`https://www.youtube.com/watch?v=${id}${list}`, "_blank", "noopener")
+      }
+    }, 1200)
+  }
+
   const onPastePlay = () => {
     const parsed = extractVideo(pasteUrl)
     if (!parsed) return
@@ -681,7 +700,16 @@ function YtInner() {
                 </button>
                 <button
                   type="button"
-                  aria-label={fs ? "Exit fullscreen" : "Fullscreen"}
+                  aria-label="Listen in the YouTube app"
+                  title="Background audio: play in the YouTube app"
+                  onClick={openInYouTubeApp}
+                  className="grid h-10 w-10 place-items-center rounded-full bg-black/70 text-white backdrop-blur-sm transition-transform active:scale-95"
+                >
+                  <Smartphone className="h-5 w-5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Fullscreen"
                   onClick={() => setFs((v) => !v)}
                   className="grid h-10 w-10 place-items-center rounded-full bg-black/70 text-white backdrop-blur-sm transition-transform active:scale-95"
                 >
