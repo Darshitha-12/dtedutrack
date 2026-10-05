@@ -16,7 +16,13 @@ export function isNativeApp(): boolean {
   const w = window as unknown as {
     Capacitor?: { isNative?: () => boolean };
     CapacitorBridge?: unknown;
+    BioPulseBridge?: unknown;
   };
+  // `BioPulseBridge` is injected by MainActivity via addJavascriptInterface, so its presence is
+  // proof we are inside the APK. The `Capacitor` globals are *not* reliable here: with
+  // server.url pointing at the deployed site the bundle's Capacitor runtime never populates them,
+  // which silently re-enabled the worker inside the app.
+  if (w.BioPulseBridge) return true;
   try {
     if (typeof w.Capacitor?.isNative === "function") return w.Capacitor.isNative();
   } catch {
