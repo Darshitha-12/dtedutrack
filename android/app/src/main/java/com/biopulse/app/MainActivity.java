@@ -131,25 +131,29 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void sendMediaCommand(String command) {
-        WebView webView = getBridge().getWebView();
-        if (webView == null) return;
-        String js =
-            "(function(){try{" +
-            "if(typeof window.__bp_media==='function'){window.__bp_media('" +
-            command +
-            "');return 'js';}" +
-            "if(typeof window.__bp_yt==='function'){window.__bp_yt('" +
-            command +
-            "');return 'js';}" +
-            "if(typeof window.BioPulseBridge!=='undefined'){window.BioPulseBridge.__ready&&window.BioPulseBridge.__ready();" +
-            "return 'native';}" +
-            "return 'none';}catch(e){return 'err';}})()";
-        webView.evaluateJavascript(js, value -> {
-            if (value != null && value.contains("js")) return;
-            // No handler was mounted yet (e.g. app resumed from cold start) — retry later.
-            mediaCommand = command;
-            mediaCommandPending = true;
-        });
+        try {
+            WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+            if (webView == null) return;
+            String js =
+                "(function(){try{" +
+                "if(typeof window.__bp_media==='function'){window.__bp_media('" +
+                command +
+                "');return 'js';}" +
+                "if(typeof window.__bp_yt==='function'){window.__bp_yt('" +
+                command +
+                "');return 'js';}" +
+                "if(typeof window.BioPulseBridge!=='undefined'){window.BioPulseBridge.__ready&&window.BioPulseBridge.__ready();" +
+                "return 'native';}" +
+                "return 'none';}catch(e){return 'err';}})()";
+            webView.evaluateJavascript(js, value -> {
+                if (value != null && value.contains("js")) return;
+                // No handler was mounted yet (e.g. app resumed from cold start) — retry later.
+                mediaCommand = command;
+                mediaCommandPending = true;
+            });
+        } catch (Exception ignored) {
+            // WebView torn down mid-dispatch — nothing to control.
+        }
     }
 
     private class JsBridge {

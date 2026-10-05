@@ -169,6 +169,38 @@ public class MediaPlaybackService extends Service {
         wakeLock = null;
     }
 
+    /**
+     * Promotes to foreground immediately. Android 12+ aborts the process with
+     * {@code RemoteServiceException} if {@code startForegroundService()} is not followed by
+     * {@code startForeground()} promptly, so this must run before any state check — including
+     * on the paths that end in {@code stopSelf()}.
+     */
+    private boolean promoteToForeground() {
+        Notification notification;
+        try {
+            notification = buildNotification();
+        } catch (Exception ignored) {
+            return false;
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+            } else {
+                startForeground(NOTIF_ID, notification);
+            }
+            return true;
+        } catch (Exception ignored) {
+            // Type-specific promotion can be rejected (missing permission on some OEM builds) —
+            // retry untyped so the startForegroundService() contract is still satisfied.
+            try {
+                startForeground(NOTIF_ID, notification);
+                return true;
+            } catch (Exception ignoredAgain) {
+                return false;
+            }
+        }
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent != null && intent.getAction() != null ? intent.getAction() : ACTION_START;
@@ -185,30 +217,19 @@ public class MediaPlaybackService extends Service {
             MainActivity.dispatchMediaCommand("stop");
         }
 
-        if (!isPlaying()) {
-            // Nothing is playing — do not hold a foreground service open needlessly.
+        // Promote first, reconcile afterwards. Playback state can flip between the
+        // startForegroundService() call and this delivery, and skipping the promotion on that
+        // path is what used to crash the app.
+        boolean promoted = promoteToForeground();
+
+        if (!promoted || !isPlaying()) {
+            // Nothing worth keeping — drop the foreground state we just claimed.
             stopSelf();
             return START_NOT_STICKY;
         }
 
-        Notification notification = buildNotification();
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
-            } else {
-                startForeground(NOTIF_ID, notification);
-            }
-        } catch (Exception ignored) {
-            stopSelf();
-            return START_NOT_STICKY;
-        }
-
-        if (ACTION_PAUSE.equals(action) || ACTION_STOP.equals(action)) {
-            if (!isPlaying()) {
-                stopSelf();
-                return START_NOT_STICKY;
-            }
-        }
+        // Refresh the notification so the title/actions match the reconciled state.
+        postNotification();
         return START_NOT_STICKY;
     }
 
