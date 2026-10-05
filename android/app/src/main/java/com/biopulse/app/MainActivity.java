@@ -1,9 +1,12 @@
 package com.biopulse.app;
 
 import android.Manifest;
+import android.app.PictureInPictureParams;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.util.Log;
+import android.util.Rational;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
@@ -31,6 +34,10 @@ import java.lang.ref.WeakReference;
  *    {@code window.BioPulseBridge.ytState(state, title)}.
  * 2. Native fullscreen video — {@code onShowCustomView} puts the player in a dedicated
  *    overlay with the system bars hidden and the screen rotated to landscape.
+ * 3. Auto picture-in-picture — leaving the app mid-playback drops the activity into PiP so the
+ *    WebView window stays VISIBLE. That matters because the YouTube embed suspends itself (and
+ *    then ignores programmatic {@code playVideo}) as soon as its document reports hidden, which
+ *    is why plain background playback kept going silent.
  */
 public class MainActivity extends BridgeActivity {
 
@@ -71,6 +78,14 @@ public class MainActivity extends BridgeActivity {
         // after the screen turns off).
         webView.setBackgroundColor(Color.parseColor("#07061A"));
 
+        // Android freezes/throttles the WebView's renderer process once the app is no longer
+        // visible, which kills the YouTube iframe's audio track the moment the user leaves the
+        // app. Marking the renderer important keeps it scheduled so background playback survives.
+        try {
+            webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
+        } catch (Throwable ignored) {
+        }
+
         webView.addJavascriptInterface(new JsBridge(), "BioPulseBridge");
         webView.setWebChromeClient(new FullscreenChromeClient(getBridge()));
 
@@ -108,6 +123,66 @@ public class MainActivity extends BridgeActivity {
             MediaPlaybackService.ensureRunning(this);
         }
         super.onPause();
+    }
+
+    /**
+     * Fired when the user leaves via Home/Recents (not for programmatic finishes). Dropping into
+     * PiP here is the only sanctioned way to keep a WebView-hosted video audible in the
+     * background: the activity window remains visible, so the embed never sees itself as hidden.
+     */
+    @Override
+    public void onUserLeaveHint() {
+        if (MediaPlaybackService.isPlaying()) {
+            enterPip();
+        }
+        super.onUserLeaveHint();
+    }
+
+    private void enterPip() {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+            if (isInPictureInPictureMode()) return;
+            if (!getPackageManager().hasSystemFeature(
+                    android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+                return;
+            }
+            // 16:9 matches the player; anything else gets letterboxed by the system.
+            PictureInPictureParams.Builder b =
+                    new PictureInPictureParams.Builder()
+                            .setAspectRatio(new Rational(16, 9));
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                b.setAutoEnterEnabled(true);
+                b.setSeamlessResizeEnabled(true);
+            }
+            enterPictureInPictureMode(b.build());
+            Log.i("BioPulseMedia", "entered PiP for background audio");
+        } catch (Throwable t) {
+            Log.w("BioPulseMedia", "PiP refused", t);
+        }
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean inPipMode, Configuration newConfig) {
+        super.onPictureInPictureModeChanged(inPipMode, newConfig);
+        Log.i("BioPulseMedia", "onPictureInPictureModeChanged " + inPipMode);
+        // Leaving PiP (user closed the window or tapped restore) must not strand the service.
+        if (!inPipMode && !MediaPlaybackService.isPlaying()) {
+            MediaPlaybackService.stop(this);
+        }
+    }
+
+    @Override
+    public void onTrimMemory(int level) {
+        // Distinguishes "Activity destroyed under memory pressure" from "renderer frozen" when
+        // background playback drops — both look identical from the user's side.
+        Log.i("BioPulse", "onTrimMemory level=" + level + " playing=" + MediaPlaybackService.isPlaying());
+        super.onTrimMemory(level);
+    }
+
+    @Override
+    public void onLowMemory() {
+        Log.i("BioPulse", "onLowMemory playing=" + MediaPlaybackService.isPlaying());
+        super.onLowMemory();
     }
 
     @Override
@@ -170,6 +245,12 @@ public class MainActivity extends BridgeActivity {
                 (long) (positionSeconds * 1000.0),
                 (long) (durationSeconds * 1000.0)
             );
+        }
+
+        /** Diagnostics from the player page — surfaced under the BioPulseMedia tag. */
+        @JavascriptInterface
+        public void log(final String message) {
+            Log.i("BioPulseMedia", "web: " + message);
         }
 
         @JavascriptInterface

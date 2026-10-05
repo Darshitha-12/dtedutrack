@@ -108,6 +108,13 @@ function nativeProgress(positionSeconds: number, durationSeconds: number) {
   }
 }
 
+function nativeDebug(msg: string) {
+  try {
+    const b = (window as any).BioPulseBridge
+    if (b && typeof b.log === "function") b.log(msg)
+  } catch {}
+}
+
 async function lockLandscape(lock: boolean) {
   try {
     const so = (screen as any).orientation
@@ -157,6 +164,8 @@ function YtInner() {
   const titleRef = React.useRef("Video")
   const shouldPlayRef = React.useRef(false)
   const userPausedRef = React.useRef(false)
+  const seekingRef = React.useRef(false)
+  const lastResumeKickRef = React.useRef(0)
   const postCmdRef =
     React.useRef<(cmd: string, args?: unknown[]) => void>(() => {})
   const lastProgressRef = React.useRef<{ pos: number; dur: number } | null>(null)
@@ -317,6 +326,25 @@ function YtInner() {
           if (Number.isFinite(pos) && Number.isFinite(dur) && dur > 0) {
             lastProgressRef.current = { pos, dur }
             nativeProgress(pos, dur)
+          }
+          // The embed pauses itself once the app leaves the foreground, but infoDelivery keeps
+          // flowing. Recover right here instead of waiting for the (heavily throttled) keepalive
+          // timer — background timers can be a minute apart, which is long enough for YouTube to
+          // drop the audio track entirely.
+          if (
+            st !== 1 &&
+            shouldPlayRef.current &&
+            !userPausedRef.current &&
+            !seekingRef.current
+          ) {
+            const now = Date.now()
+            if (now - lastResumeKickRef.current > 3000) {
+              lastResumeKickRef.current = now
+              nativeDebug("resume kick, state=" + st + " pos=" + pos)
+              postCmdRef.current("unMute")
+              postCmdRef.current("setVolume", [100])
+              postCmdRef.current("playVideo")
+            }
           }
         } else if (d.event === "onStateChange") {
           st = typeof d.data === "number" ? d.data : d.state
