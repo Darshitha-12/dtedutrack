@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { OFFLINE_ROUTES } from "@/lib/offline-routes";
+import { isNativeApp } from "@/lib/native-shell";
 import {
   Palette,
   Globe,
@@ -82,10 +83,12 @@ export default function SettingsPage() {
   const [userEmail, setUserEmail] = useState("");
   const [offlineCount, setOfflineCount] = useState<number | null>(null);
   const [warming, setWarming] = useState(false);
+  const offlineSupported = !isNativeApp();
 
   // Offline support depends entirely on what has been cached while online, so make it visible
   // and downloadable on demand instead of a silent mechanism that mysteriously fails.
   useEffect(() => {
+    if (isNativeApp()) return;
     const count = async () => {
       if (!("caches" in window)) {
         setOfflineCount(null);
@@ -300,7 +303,8 @@ export default function SettingsPage() {
 
       <div className="max-w-3xl mx-auto space-y-6">
         {/* Offline Card */}
-        <Card className="p-6">
+        {offlineSupported && (
+          <Card className="p-6">
           <div className="flex items-center gap-3 mb-4">
             <Download className="h-5 w-5 text-primary" />
             <h2 className="text-lg font-semibold">Offline access</h2>
@@ -316,7 +320,8 @@ export default function SettingsPage() {
           <Button type="button" onClick={saveForOffline} disabled={warming}>
             {warming ? "Saving…" : "Save pages for offline"}
           </Button>
-        </Card>
+          </Card>
+        )}
 
         {/* Appearance Card */}
         <Card className="p-6">
