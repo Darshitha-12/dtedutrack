@@ -12,6 +12,18 @@ class AudioEngineClass {
   private loopTimer: ReturnType<typeof setTimeout> | null = null;
   private mediaEl: HTMLAudioElement | null = null;
   private mediaUrl: string | null = null;
+  /**
+   * Custom sounds are played through Web Audio rather than an <audio> element.
+   *
+   * Measured on the Galaxy A01 Core (Android 10, WebView 156): once the activity is stopped the
+   * page becomes hidden, and Chromium then freezes every media element — a paused-and-resumed
+   * <audio> element never advances and `play()` never settles. The AudioContext keeps running, so
+   * an alarm that fires while the phone is locked has to be synthesised by Web Audio to be heard
+   * at all. Built-in tones already used this path; custom files now share it.
+   */
+  private bufferSource: AudioBufferSourceNode | null = null;
+  private bufferCache = new Map<string, AudioBuffer>();
+  private bufferUrl: string | null = null;
   /** Guards against a slow IndexedDB fetch starting playback after stop(). */
   private token = 0;
 
@@ -55,6 +67,23 @@ class AudioEngineClass {
     }
     this.activeOscillators = [];
 
+    if (this.bufferSource) {
+      try {
+        this.bufferSource.onended = null;
+        this.bufferSource.stop();
+      } catch {
+        /* already stopped */
+      }
+      this.bufferSource = null;
+    }
+    // The decoded AudioBuffer outlives the object URL, so the URL is released as soon as it has
+    // been read. Previously stop() revoked the URL that playback was still using, which meant a
+    // custom sound could only ever be heard once.
+    if (this.bufferUrl) {
+      URL.revokeObjectURL(this.bufferUrl);
+      this.bufferUrl = null;
+    }
+
     if (this.mediaEl) {
       const el = this.mediaEl;
       try {
@@ -76,21 +105,66 @@ class AudioEngineClass {
 
   /** True while a synth tone or a custom file is sounding. */
   get isPlaying(): boolean {
-    return this.activeOscillators.length > 0 || this.mediaEl !== null;
+    return this.activeOscillators.length > 0 || this.bufferSource !== null || this.mediaEl !== null;
   }
 
   /* ---------- user-supplied audio file ---------- */
 
   private async startCustom(id: string): Promise<void> {
     const token = ++this.token;
-    let url: string | null = null;
-    try {
-      url = await getCustomSoundUrl(id);
-    } catch {
-      url = null;
-    }
-    if (!url || token !== this.token) return;
+    this.ensure();
 
+    let buffer = this.bufferCache.get(id);
+    if (!buffer) {
+      let url: string | null = null;
+      try {
+        url = await getCustomSoundUrl(id);
+      } catch {
+        url = null;
+      }
+      if (!url || token !== this.token) return;
+
+      try {
+        this.bufferUrl = url;
+        const res = await fetch(url);
+        const bytes = await res.arrayBuffer();
+        if (token !== this.token) return;
+        buffer = await this.ctx!.decodeAudioData(bytes);
+        this.bufferCache.set(id, buffer);
+      } catch {
+        // A codec WebView cannot decode, or the file is gone. Fall back to a media element so the
+        // alarm is still audible while the app is in the foreground.
+        if (token === this.token) this.startCustomViaMediaElement(url);
+        return;
+      } finally {
+        if (this.bufferUrl === url) {
+          URL.revokeObjectURL(url);
+          this.bufferUrl = null;
+        }
+      }
+    }
+    if (!buffer || token !== this.token || !this.ctx || !this.masterGain) return;
+
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    source.connect(this.masterGain);
+    source.onended = () => {
+      // Some WebViews drop `loop` on decoded buffers; re-arm defensively.
+      if (token === this.token) {
+        try {
+          source.start();
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    source.start();
+    this.bufferSource = source;
+  }
+
+  /** Foreground-only fallback for files the Web Audio decoder rejects. */
+  private startCustomViaMediaElement(url: string): void {
     // Reuse a live element so rapid snooze/dismiss cycles do not leak nodes.
     let el = this.mediaEl;
     if (!el) {
@@ -106,14 +180,14 @@ class AudioEngineClass {
     this.mediaUrl = url;
     el.onended = () => {
       // Some WebViews drop `loop` on blob sources; re-arm defensively.
-      if (token === this.token && el && el.paused === false) {
+      if (el && el.paused === false) {
         el.play().catch(() => {});
       }
     };
     el.src = url;
     el.currentTime = 0;
     try {
-      await el.play();
+      void el.play();
     } catch {
       // Autoplay blocked before the first user gesture — the next test starts it.
     }
