@@ -23,13 +23,24 @@
     .logo { font-size: 56px; }
     h1 { margin: 16px 0 8px; font-size: 22px; }
     p { margin: 0; color: #9fb9ae; line-height: 1.6; }
+    button {
+      margin-top: 20px; padding: 12px 22px; border: 0; border-radius: 10px;
+      background: #2dd4bf; color: #05231d; font-size: 15px; font-weight: 600;
+      font-family: inherit; cursor: pointer;
+    }
+    button:active { transform: scale(0.97); }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="logo">🧬</div>
     <h1>BioPulse</h1>
-    <p>You're currently offline. Connect to the internet — or open the app once while online to cache it for offline use.</p>
+    <p>You're offline right now. Pages you have already opened still work. Reconnect to load new ones.</p>
+    <button type="button" onclick="location.reload()">Try again</button>
   </div>
+  <script>
+    // Coming back online should take the user straight to the app, not this screen.
+    window.addEventListener("online", function () { location.reload(); });
+  </script>
 </body>
 </html>

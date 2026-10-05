@@ -5,6 +5,25 @@ import { BUILD_STAMP } from "@/lib/build-stamp";
 
 const STAMP_KEY = "bp_build_stamp";
 
+/** Routes worth having offline. Kept in sync with the service worker's precache list. */
+const OFFLINE_ROUTES = [
+  "/dashboard",
+  "/alarms",
+  "/reminders",
+  "/focus",
+  "/planner",
+  "/notes",
+  "/flashcards",
+  "/past-papers",
+  "/exam-marks",
+  "/mistakes",
+  "/questions",
+  "/analytics",
+  "/downloads",
+  "/profile",
+  "/settings",
+];
+
 /**
  * Keeps the cached app in sync with the deploy the browser is actually running.
  *
@@ -33,6 +52,23 @@ export function PwaRegister() {
       }
     };
     navigator.serviceWorker.addEventListener("message", onMessage);
+
+    // Once the user is actually inside the app (i.e. signed in), ask the worker to cache the
+    // study pages so they keep working without a connection.
+    const warm = () => {
+      if (window.location.pathname === "/login") return;
+      navigator.serviceWorker.ready
+        .then((reg) => {
+          const worker = reg.active || navigator.serviceWorker.controller;
+          worker?.postMessage({ type: "WARM_CACHE", urls: OFFLINE_ROUTES });
+        })
+        .catch(() => {});
+    };
+    if (document.readyState === "complete") {
+      window.setTimeout(warm, 2500);
+    } else {
+      window.addEventListener("load", () => window.setTimeout(warm, 2500), { once: true });
+    }
 
     const hardReset = async () => {
       try {

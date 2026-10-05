@@ -120,6 +120,40 @@ function fallbackResponse() {
   );
 }
 
+/**
+ * Warms the cache after sign-in. The APK ships no bundled pages (the site is server-rendered, so
+ * a static export is not possible), which means offline support depends entirely on what has been
+ * visited while online. The page asks for this as soon as the user is actually inside the app, so
+ * the study material works on a train or a campus dead spot.
+ */
+self.addEventListener("message", (event) => {
+  const data = event.data;
+  if (!data || data.type !== "WARM_CACHE") return;
+  const urls = Array.isArray(data.urls) ? data.urls : [];
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+      await Promise.allSettled(
+        urls.map(async (url) => {
+          try {
+            // Auth-gated pages redirect to /login when the session is missing; caching that
+            // redirect would replace a real page with the sign-in screen, so skip those.
+            const res = await fetch(url, { credentials: "include" });
+            if (!res || !res.ok || res.redirected) return;
+            if (res.headers.get("content-type")?.includes("text/html")) {
+              await cache.put(url, res);
+            }
+          } catch {
+            /* offline: skip */
+          }
+        }),
+      );
+      const clients = await self.clients.matchAll({ type: "window" });
+      clients.forEach((c) => c.postMessage({ type: "CACHE_WARMED" }));
+    })(),
+  );
+});
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
