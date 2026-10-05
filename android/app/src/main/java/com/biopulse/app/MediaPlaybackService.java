@@ -89,7 +89,7 @@ public class MediaPlaybackService extends Service {
     private static final Runnable KEEPALIVE_TASK = new Runnable() {
         @Override
         public void run() {
-            if (!mediaPlaying) return;
+            if (!mediaPlaying && !playbackRequested) return;
             MediaPlaybackService svc = instance.get();
             if (svc == null) return;
             MainActivity.dispatchMediaCommand("keepalive");
@@ -117,6 +117,13 @@ public class MediaPlaybackService extends Service {
 
     /** WebView media (YouTube) state, reported through {@code ytState}. */
     private static boolean mediaPlaying = false;
+    /**
+     * Sticky "the user wants audio" flag, set from user gestures and cleared only by them. The
+     * embed pauses itself whenever the app is backgrounded, so {@link #mediaPlaying} flips to
+     * false exactly when background audio matters most; without this the service would tear itself
+     * down and picture-in-picture would never engage.
+     */
+    private static boolean playbackRequested = false;
     /** Alarm / reminder ring state, reported through {@code setAlarmRinging}. */
     private static boolean alarmActive = false;
     private static String currentTitle = "BioPulse Player";
@@ -126,6 +133,22 @@ public class MediaPlaybackService extends Service {
     /** True while the foreground service must stay alive for any reason. */
     public static boolean isPlaying() {
         return mediaPlaying || alarmActive;
+    }
+
+    /** True while the user wants to hear audio, even if the embed has paused itself. */
+    public static boolean hasPlaybackIntent() {
+        return playbackRequested || mediaPlaying || alarmActive;
+    }
+
+    /** Reported from the player page on real user gestures only. */
+    public static void setPlaybackIntent(Context ctx, boolean active) {
+        playbackRequested = active;
+        Log.i(TAG, "playbackIntent=" + active);
+        if (!active) {
+            if (!alarmActive) scheduleRelease(ctx);
+        } else {
+            ensureRunning(ctx);
+        }
     }
 
     public static String currentTitle() {
@@ -186,6 +209,7 @@ public class MediaPlaybackService extends Service {
     public static void stop(Context ctx) {
         mediaPlaying = false;
         alarmActive = false;
+        playbackRequested = false;
         scheduleRelease(ctx);
     }
 
@@ -216,6 +240,7 @@ public class MediaPlaybackService extends Service {
             // Start immediately (rather than waiting for onPause) so a background/lock-screen
             // transition can never race ahead of the foreground service.
             mediaPlaying = true;
+            playbackRequested = true;
         } else {
             mediaPlaying = false;
         }
@@ -224,8 +249,16 @@ public class MediaPlaybackService extends Service {
             ensureRunning(ctx);
         } else {
             MAIN.removeCallbacks(KEEPALIVE_TASK);
-            positionMs = 0;
-            durationMs = 0;
+            // Keep the playhead so the notification can resume where it left off, but hold the
+            // service open while the user still wants audio: the embed pausing itself in the
+            // background must not look like the user hitting stop.
+            if (playbackRequested) {
+                ensureRunning(ctx);
+            } else {
+                positionMs = 0;
+                durationMs = 0;
+                scheduleRelease(ctx);
+            }
         }
 
         if (isPlaying()) {
@@ -320,10 +353,12 @@ public class MediaPlaybackService extends Service {
             MainActivity.dispatchMediaCommand("play");
         } else if (ACTION_PAUSE.equals(action)) {
             mediaPlaying = false;
+            playbackRequested = false;
             MainActivity.dispatchMediaCommand("pause");
         } else if (ACTION_STOP.equals(action)) {
             mediaPlaying = false;
             alarmActive = false;
+            playbackRequested = false;
             MainActivity.dispatchMediaCommand("stop");
         }
 

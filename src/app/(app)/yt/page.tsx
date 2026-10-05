@@ -87,6 +87,21 @@ function bridge(state: string, title = "") {
   }
 }
 
+/**
+ * Tells native the user wants audio to keep playing, independent of what the embed is currently
+ * doing. The embed pauses itself whenever the app is backgrounded, so a plain "is it playing?"
+ * flag flips to false exactly when background audio matters most — and native would then skip
+ * picture-in-picture and tear the service down. Only real user intent clears this.
+ */
+function playbackIntent(active: boolean) {
+  try {
+    const b = (window as any).BioPulseBridge
+    if (b && typeof b.playbackIntent === "function") b.playbackIntent(active)
+  } catch {
+    /* not in the Android shell */
+  }
+}
+
 function nativeKeepScreenOn(on: boolean) {
   try {
     const b = (window as any).BioPulseBridge
@@ -235,6 +250,7 @@ function YtInner() {
     shouldPlayRef.current = true
     userPausedRef.current = false
     bridge("playing", t)
+    playbackIntent(true)
   }
 
   const doSearch = async (q = query) => {
@@ -274,6 +290,7 @@ function YtInner() {
       userPausedRef.current = false
       shouldPlayRef.current = false
       bridge("idle", titleRef.current)
+      playbackIntent(false)
     }
   }
 
@@ -294,9 +311,15 @@ function YtInner() {
       if (action === "play") {
         shouldPlayRef.current = true
         userPausedRef.current = false
+        playbackIntent(true)
       } else if (action === "pause") {
         shouldPlayRef.current = false
         userPausedRef.current = true
+        playbackIntent(false)
+      } else if (action === "stop") {
+        shouldPlayRef.current = false
+        userPausedRef.current = true
+        playbackIntent(false)
       } else if (action === "keepalive") {
         // Pushed from the native foreground service every couple of seconds. Background JS
         // timers are throttled to about once a minute, which is far too slow to stop YouTube
@@ -361,6 +384,7 @@ function YtInner() {
     return () => {
       window.removeEventListener("message", onMsg)
       bridge("idle")
+      playbackIntent(false)
       delete (window as any).__bp_yt
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -508,11 +532,13 @@ function YtInner() {
       shouldPlayRef.current = false
       postCmdRef.current("pauseVideo")
       bridge("paused", titleRef.current)
+      playbackIntent(false)
     } else {
       userPausedRef.current = false
       shouldPlayRef.current = true
       postCmdRef.current("playVideo")
       bridge("playing", titleRef.current)
+      playbackIntent(true)
     }
   }
 

@@ -132,7 +132,9 @@ public class MainActivity extends BridgeActivity {
      */
     @Override
     public void onUserLeaveHint() {
-        if (MediaPlaybackService.isPlaying()) {
+        boolean wants = MediaPlaybackService.hasPlaybackIntent();
+        Log.i("BioPulseMedia", "onUserLeaveHint intent=" + wants + " playing=" + MediaPlaybackService.isPlaying());
+        if (wants) {
             enterPip();
         }
         super.onUserLeaveHint();
@@ -251,6 +253,12 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void log(final String message) {
             Log.i("BioPulseMedia", "web: " + message);
+        }
+
+        /** User-driven "keep the audio coming" signal; survives the embed pausing itself. */
+        @JavascriptInterface
+        public void playbackIntent(final boolean active) {
+            MediaPlaybackService.setPlaybackIntent(MainActivity.this, active);
         }
 
         @JavascriptInterface
