@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import { OFFLINE_ROUTES } from "@/lib/offline-routes";
 import {
   Palette,
   Globe,
@@ -27,6 +28,7 @@ import {
   MessageSquare,
   Hash,
   Clock,
+  Download,
 } from "lucide-react";
 
 interface SettingsData {
@@ -78,6 +80,74 @@ export default function SettingsPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
   const [userEmail, setUserEmail] = useState("");
+  const [offlineCount, setOfflineCount] = useState<number | null>(null);
+  const [warming, setWarming] = useState(false);
+
+  // Offline support depends entirely on what has been cached while online, so make it visible
+  // and downloadable on demand instead of a silent mechanism that mysteriously fails.
+  useEffect(() => {
+    const count = async () => {
+      if (!("caches" in window)) {
+        setOfflineCount(null);
+        return;
+      }
+      try {
+        const keys = await caches.keys();
+        let pages = 0;
+        for (const key of keys) {
+          const cache = await caches.open(key);
+          const entries = await cache.keys();
+          pages += entries.filter((r) => r.mode === "navigate").length;
+        }
+        setOfflineCount(pages);
+      } catch {
+        setOfflineCount(null);
+      }
+    };
+    void count();
+  }, []);
+
+  const saveForOffline = async () => {
+    if (!("serviceWorker" in navigator)) {
+      showToast("This browser cannot save pages for offline use.", "error");
+      return;
+    }
+    setWarming(true);
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const worker = reg.active || navigator.serviceWorker.controller;
+      if (!worker) throw new Error("no worker");
+      await new Promise<void>((resolve) => {
+        const onDone = (e: MessageEvent) => {
+          if (e.data && e.data.type === "CACHE_WARMED") {
+            navigator.serviceWorker.removeEventListener("message", onDone);
+            resolve();
+          }
+        };
+        navigator.serviceWorker.addEventListener("message", onDone);
+        worker.postMessage({
+          type: "WARM_CACHE",
+          urls: OFFLINE_ROUTES,
+        });
+        // Never leave the button spinning forever if the worker cannot answer.
+        window.setTimeout(resolve, 20000);
+      });
+      setOfflineCount((prev) => (prev == null ? prev : prev));
+      showToast("Saved your pages for offline use.", "success");
+      const keys = await caches.keys();
+      let pages = 0;
+      for (const key of keys) {
+        const cache = await caches.open(key);
+        const entries = await cache.keys();
+        pages += entries.filter((r) => r.mode === "navigate").length;
+      }
+      setOfflineCount(pages);
+    } catch {
+      showToast("Could not save pages. Check your connection and try again.", "error");
+    } finally {
+      setWarming(false);
+    }
+  };
 
   useEffect(() => {
     fetchSettings();
@@ -229,6 +299,25 @@ export default function SettingsPage() {
       <PageHeader title="Settings" description="Customize your BioPulse experience" />
 
       <div className="max-w-3xl mx-auto space-y-6">
+        {/* Offline Card */}
+        <Card className="p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <Download className="h-5 w-5 text-primary" />
+            <h2 className="text-lg font-semibold">Offline access</h2>
+          </div>
+          <p className="text-sm text-muted-foreground mb-4">
+            Save your study pages to this device so they still open without internet.{" "}
+            {offlineCount == null
+              ? "This browser cannot save pages offline."
+              : offlineCount > 0
+                ? `${offlineCount} page${offlineCount === 1 ? "" : "s"} saved on this device.`
+                : "No pages saved yet."}
+          </p>
+          <Button type="button" onClick={saveForOffline} disabled={warming}>
+            {warming ? "Saving…" : "Save pages for offline"}
+          </Button>
+        </Card>
+
         {/* Appearance Card */}
         <Card className="p-6">
           <div className="flex items-center gap-3 mb-6">

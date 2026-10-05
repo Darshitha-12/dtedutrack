@@ -2,27 +2,9 @@
 
 import { useEffect } from "react";
 import { BUILD_STAMP } from "@/lib/build-stamp";
+import { OFFLINE_ROUTES } from "@/lib/offline-routes";
 
 const STAMP_KEY = "bp_build_stamp";
-
-/** Routes worth having offline. Kept in sync with the service worker's precache list. */
-const OFFLINE_ROUTES = [
-  "/dashboard",
-  "/alarms",
-  "/reminders",
-  "/focus",
-  "/planner",
-  "/notes",
-  "/flashcards",
-  "/past-papers",
-  "/exam-marks",
-  "/mistakes",
-  "/questions",
-  "/analytics",
-  "/downloads",
-  "/profile",
-  "/settings",
-];
 
 /**
  * Keeps the cached app in sync with the deploy the browser is actually running.
@@ -91,11 +73,20 @@ export function PwaRegister() {
       /* ignore */
     }
 
-    if (stored && stored !== BUILD_STAMP) {
-      // A deploy we have not seen before. Record it first, otherwise every reload would reset
-      // again and the app could never finish loading.
+    // At most one reset per session. Without this guard a browser that refuses to persist
+    // localStorage would reset on every single load and the app could never finish starting.
+    const sessionKey = STAMP_KEY + "_reset";
+    let alreadyReset = false;
+    try {
+      alreadyReset = window.sessionStorage.getItem(sessionKey) === BUILD_STAMP;
+    } catch {
+      /* ignore */
+    }
+
+    if (stored && stored !== BUILD_STAMP && !alreadyReset) {
       try {
         window.localStorage.setItem(STAMP_KEY, BUILD_STAMP);
+        window.sessionStorage.setItem(sessionKey, BUILD_STAMP);
       } catch {
         /* ignore */
       }
