@@ -38,6 +38,43 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark" data-build={BUILD_STAMP}>
+      <head>
+        {/*
+          Navigation watchdog.
+
+          Pages are server-rendered and streamed, so a slow connection can stall the response
+          halfway through. The document then never finishes parsing: the page is left at
+          readyState "loading" with an empty body and no error, and nothing ever recovers it —
+          the app looks permanently broken with no way out except force-closing it.
+
+          This reloads once if that happens. It lives in <head> as an inline script so it runs
+          before the stalled body does, and the sessionStorage guard stops it looping if the
+          retry stalls too.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{
+  var KEY="bp_nav_watchdog";
+  var LIMIT=15000;
+  function stuck(){
+    if(document.readyState!=="loading")return false;
+    var b=document.body;
+    // A body with real content means the page rendered and only late assets are pending.
+    return !b||b.childElementCount===0;
+  }
+  setTimeout(function(){
+    if(!stuck())return;
+    var n=Number(sessionStorage.getItem(KEY)||"0");
+    if(n>=2){sessionStorage.removeItem(KEY);return;}
+    sessionStorage.setItem(KEY,String(n+1));
+    location.reload();
+  },LIMIT);
+  // Cleared as soon as the document is usable again.
+  document.addEventListener("DOMContentLoaded",function(){sessionStorage.removeItem(KEY);});
+}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body className={inter.className}>
         <PwaRegister />
         <AuthProvider>{children}</AuthProvider>
