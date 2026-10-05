@@ -169,6 +169,14 @@ function YtInner() {
   const [searching, setSearching] = React.useState(false)
   const [searched, setSearched] = React.useState("")
   const [searchErr, setSearchErr] = React.useState("")
+  const [pipHint, setPipHint] = React.useState("")
+  // The Android shell has a real foreground service + notification; the browser does not, so the
+  // guidance shown under the player has to differ.
+  const [inApp, setInApp] = React.useState(false)
+
+  React.useEffect(() => {
+    setInApp(Boolean((window as any).BioPulseBridge?.ytState))
+  }, [])
   const [saved, setSaved] = React.useState<SavedVideo[]>([])
   const [pasteOpen, setPasteOpen] = React.useState(false)
   const [pasteUrl, setPasteUrl] = React.useState("")
@@ -549,16 +557,31 @@ function YtInner() {
     const list = video?.list ? `&list=${encodeURIComponent(video.list)}` : ""
     // The embedded player pauses itself whenever the page is hidden, which is why background
     // audio dies when switching apps in a mobile browser. Handing off to the official app gives
-    // real background playback (and proper lock-screen controls).
+    // real background playback (and proper lock-screen controls). The app needs a tap on its own
+    // play button before audio starts — deep links cannot autoplay.
     const target = `youtube://watch?v=${id}${list}`
     const started = Date.now()
     window.location.href = target
-    // If no app handled the deep link, fall back to the website instead of a dead tap.
+    // Only fall back to the website if we never actually left the page. Without this guard the
+    // timer also fires after returning from the app and dumps a stray browser tab.
     setTimeout(() => {
-      if (Date.now() - started < 2500) {
+      if (document.visibilityState === "visible" && Date.now() - started < 2500) {
         window.open(`https://www.youtube.com/watch?v=${id}${list}`, "_blank", "noopener")
       }
     }, 1200)
+  }
+
+  const enterWebPip = async () => {
+    try {
+      const d = iframeRef.current as any
+      if (!d?.requestPictureInPicture) throw new Error("unsupported")
+      await d.requestPictureInPicture()
+      setPipHint("")
+    } catch {
+      setPipHint(
+        "This browser cannot float the video. For background audio use the phone button to open it in the YouTube app.",
+      )
+    }
   }
 
   const onPastePlay = () => {
@@ -686,14 +709,8 @@ function YtInner() {
                 <button
                   type="button"
                   aria-label="Picture in picture"
-                  onClick={async () => {
-                    try {
-                      const d = iframeRef.current as any
-                      if (d?.requestPictureInPicture) await d.requestPictureInPicture()
-                    } catch {
-                      /* PiP unsupported */
-                    }
-                  }}
+                  title="Keeps the video floating so the audio keeps playing"
+                  onClick={enterWebPip}
                   className="grid h-10 w-10 place-items-center rounded-full bg-black/70 text-white backdrop-blur-sm transition-transform active:scale-95"
                 >
                   <PictureInPicture2 className="h-5 w-5" />
@@ -734,10 +751,17 @@ function YtInner() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400" />
             </span>
-            Background playback is on — press back or lock the screen and control it from the
-            notification. Use the expand button for fullscreen.
+            {inApp
+              ? "Background playback is on — leave the app or lock the screen and control it from the notification."
+              : "Browser tip: YouTube stops this player when the page is hidden. Tap the ⧉ button to float the video, or the 📱 button to open it in the YouTube app, then press play there."}
           </p>
         </div>
+      )}
+
+      {pipHint && (
+        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-600">
+          {pipHint}
+        </p>
       )}
 
       {/* Search results */}
