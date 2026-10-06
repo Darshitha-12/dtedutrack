@@ -343,7 +343,7 @@ public class MediaPlaybackService extends Service {
         }
     }
 
-    private static void stopNativeAlarmTone() {
+    public static void stopNativeAlarmTone() {
         MediaPlayer mp = sNativeTone;
         sNativeTone = null;
         if (mp == null) return;

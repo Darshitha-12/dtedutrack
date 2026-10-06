@@ -41,6 +41,16 @@ class AudioEngineClass {
     }
   }
 
+  /**
+   * Called once the engine is actually producing sound.
+   *
+   * <p>The native side rings a fallback tone so an alarm is still audible when the WebView is gone.
+   * This is how it learns that the page has taken over, so the two never sound at the same time.
+   * A custom file reports late — after it has been decoded — which is the point: until then the
+   * fallback is the only thing making noise.
+   */
+  onSoundStarted: (() => void) | null = null;
+
   play(name: AlarmSound): void {
     this.stop();
     this.ensure();
@@ -52,6 +62,7 @@ class AudioEngineClass {
       return;
     }
     this.startLoop(name as AlarmSoundName);
+    this.onSoundStarted?.();
   }
 
   /**
@@ -180,6 +191,7 @@ class AudioEngineClass {
     };
     source.start();
     this.bufferSource = source;
+    this.onSoundStarted?.();
   }
 
   /** Foreground-only fallback for files the Web Audio decoder rejects. */
@@ -219,6 +231,7 @@ class AudioEngineClass {
     el.currentTime = 0;
     try {
       await el.play();
+      this.onSoundStarted?.();
     } catch {
       // Autoplay blocked before the first user gesture — the next test starts it.
     }

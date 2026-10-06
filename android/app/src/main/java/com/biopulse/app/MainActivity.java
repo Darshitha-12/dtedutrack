@@ -303,6 +303,14 @@ public class MainActivity extends BridgeActivity {
             MediaPlaybackService.previewTone(MainActivity.this);
         }
 
+        /**
+         * Stands the native fallback tone down once the page has started playing the chosen sound.
+         */
+        @JavascriptInterface
+        public void stopNativeTone() {
+            MediaPlaybackService.stopNativeAlarmTone();
+        }
+
         /** User-driven "keep the audio coming" signal; survives the embed pausing itself. */
         @JavascriptInterface
         public void playbackIntent(final boolean active) {

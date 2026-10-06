@@ -80,6 +80,13 @@ export function useAlarmRinger() {
         native = false;
       }
       AudioEngine.play(alarm.sound);
+      // The page is making sound itself now, so stand the native fallback tone down — otherwise it
+      // rings underneath the chosen sound for as long as the alarm lasts. The engine calls this once
+      // a custom file has actually decoded, so a failed decode leaves the fallback playing.
+      AudioEngine.onSoundStarted = () => {
+        AudioEngine.onSoundStarted = null;
+        getBridge()?.stopNativeTone?.();
+      };
       // Keeps the Android foreground media service (and wakelock) alive so a custom
       // MP3 keeps playing when the app is backgrounded or the screen is locked.
       holdBackgroundPlayback(true, alarm.label);
