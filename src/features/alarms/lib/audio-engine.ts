@@ -161,15 +161,24 @@ class AudioEngineClass {
       } catch {
         bytes = null;
       }
-      if (!bytes || token !== this.token) return;
+      if (!bytes) {
+        // The sound is gone from storage — it can happen if a save was lost. Ring the default
+        // tone instead of leaving the alarm silent.
+        if (token === this.token) this.startLoop("chime");
+        return;
+      }
+      if (token !== this.token) return;
 
       try {
         buffer = await this.ctx!.decodeAudioData(bytes);
         this.bufferCache.set(id, buffer);
       } catch {
         // A codec WebView cannot decode, or the file is gone. Fall back to a media element so the
-        // alarm is still audible while the app is in the foreground.
-        if (token === this.token) await this.startCustomViaMediaElement(id);
+        // alarm is still audible while the app is in the foreground, and to a built-in tone if even
+        // that cannot play.
+        if (token !== this.token) return;
+        const played = await this.startCustomViaMediaElement(id);
+        if (!played && token === this.token) this.startLoop("chime");
         return;
       }
     }
@@ -194,15 +203,15 @@ class AudioEngineClass {
     this.onSoundStarted?.();
   }
 
-  /** Foreground-only fallback for files the Web Audio decoder rejects. */
-  private async startCustomViaMediaElement(id: string): Promise<void> {
+  /** Foreground-only fallback for files the Web Audio decoder rejects. Returns whether it started. */
+  private async startCustomViaMediaElement(id: string): Promise<boolean> {
     // Reuse a live element so rapid snooze/dismiss cycles do not leak nodes.
     let el = this.mediaEl;
     if (!el) {
       try {
         el = new Audio();
       } catch {
-        return;
+        return false;
       }
       el.preload = "auto";
       el.loop = true;
@@ -218,7 +227,7 @@ class AudioEngineClass {
     } catch {
       url = null;
     }
-    if (!url) return;
+    if (!url) return false;
     if (this.mediaUrl && this.mediaUrl !== url) URL.revokeObjectURL(this.mediaUrl);
     this.mediaUrl = url;
     el.onended = () => {
@@ -232,8 +241,10 @@ class AudioEngineClass {
     try {
       await el.play();
       this.onSoundStarted?.();
+      return true;
     } catch {
       // Autoplay blocked before the first user gesture — the next test starts it.
+      return false;
     }
   }
 

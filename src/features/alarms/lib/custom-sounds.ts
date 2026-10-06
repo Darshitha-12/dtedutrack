@@ -99,7 +99,15 @@ function openDb(): Promise<IDBDatabase | null> {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => resolve(null);
     request.onblocked = () => resolve(null);
-  }).catch(() => null);
+  })
+    .catch(() => null)
+    .then((db) => {
+      // A failure must not be remembered. Caching a null here made every later save fall back to
+      // the in-memory map, which is empty again after a reload — so a sound could be added,
+      // shown in the picker, and then vanish while alarms kept pointing at its id.
+      if (!db) dbPromise = null;
+      return db;
+    });
 
   return dbPromise;
 }
@@ -115,15 +123,25 @@ function tx<T>(
           resolve(null);
           return;
         }
+        let transaction: IDBTransaction;
         let request: IDBRequest<T>;
         try {
-          request = run(db.transaction(STORE, mode).objectStore(STORE));
+          transaction = db.transaction(STORE, mode);
+          request = run(transaction.objectStore(STORE));
         } catch {
           resolve(null);
           return;
         }
         request.onsuccess = () => resolve(request.result ?? null);
         request.onerror = () => resolve(null);
+        // For writes, the request succeeding only means the store accepted the value; the data is
+        // on disk once the transaction commits. Awaiting that is what stops a save from being
+        // lost when the page is reloaded straight afterwards.
+        if (mode === "readwrite") {
+          transaction.oncomplete = () => resolve(request.result ?? null);
+          transaction.onabort = () => resolve(null);
+          transaction.onerror = () => resolve(null);
+        }
       }),
   );
 }
@@ -255,6 +273,15 @@ export async function addCustomSound(file: File): Promise<CustomSoundMeta> {
     memory.set(id, record);
   } else {
     await tx("readwrite", (store) => store.put(record) as IDBRequest<IDBValidKey>);
+    // Read it back before reporting success. A sound that only ever existed in memory looked
+    // perfectly fine in the picker and then played nothing, so an unverifiable save has to be
+    // treated as a failure the user can see.
+    const stored = await getCustomSoundBlob(id);
+    if (!stored) {
+      memory.delete(id);
+      throw new Error("The sound could not be saved on this device.");
+    }
+    record.size = stored.size;
   }
 
   notifyChanged();
