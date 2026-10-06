@@ -140,8 +140,9 @@ export function SoundPicker<T extends string = string>({
           setError(`"${meta.name}" is no longer available.`);
           return;
         }
-        revokeSoundUrl(meta.id);
-        previewSound(`${CUSTOM_SOUND_PREFIX}${meta.id}`);
+        // The engine reads the stored bytes itself, so no object URL is needed here — and revoking
+      // the shared one would leave the cache pointing at a dead URL.
+      previewSound(`${CUSTOM_SOUND_PREFIX}${meta.id}`);
       } catch {
         setError(`Cannot play "${meta.name}" on this device.`);
       }

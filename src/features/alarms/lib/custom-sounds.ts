@@ -268,6 +268,24 @@ export async function getCustomSoundBlob(id: string): Promise<Blob | null> {
   return row?.blob ?? null;
 }
 
+/**
+ * Raw bytes of a stored sound.
+ *
+ * <p>Preferred by the audio engine over an object URL: decoding straight from the bytes means the
+ * engine never has to hold — or revoke — a URL that the shared cache also hands to `<audio>`
+ * elements. Revoking a URL the cache still owns left it pointing at dead bytes, so every playback
+ * after the first was silent.
+ */
+export async function getCustomSoundBytes(id: string): Promise<ArrayBuffer | null> {
+  const blob = await getCustomSoundBlob(id);
+  if (!blob) return null;
+  try {
+    return await blob.arrayBuffer();
+  } catch {
+    return null;
+  }
+}
+
 /** Object URL for <audio>/<source>, cached until the sound is deleted. */
 export async function getCustomSoundUrl(id: string): Promise<string | null> {
   const cached = urlCache.get(id);

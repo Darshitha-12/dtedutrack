@@ -1,4 +1,4 @@
-import { customSoundId, getCustomSoundUrl } from "./custom-sounds";
+import { customSoundId, getCustomSoundBlob, getCustomSoundBytes } from "./custom-sounds";
 
 export type AlarmSoundName = "chime" | "digital" | "bio";
 
@@ -23,6 +23,8 @@ class AudioEngineClass {
    */
   private bufferSource: AudioBufferSourceNode | null = null;
   private bufferCache = new Map<string, AudioBuffer>();
+  // Only ever set for the media-element fallback, and owned by this class alone. Decoding uses raw
+  // bytes so no shared/cached object URL is involved.
   private bufferUrl: string | null = null;
   /** Guards against a slow IndexedDB fetch starting playback after stop(). */
   private token = 0;
@@ -139,31 +141,25 @@ class AudioEngineClass {
 
     let buffer = this.bufferCache.get(id);
     if (!buffer) {
-      let url: string | null = null;
+      // Decode straight from the stored bytes. An object URL was used here before, and it was
+      // revoked as soon as decoding finished — but the same URL is cached and shared with
+      // <audio> elements, so the second playback onwards was handed dead bytes and went silent.
+      let bytes: ArrayBuffer | null = null;
       try {
-        url = await getCustomSoundUrl(id);
+        bytes = await getCustomSoundBytes(id);
       } catch {
-        url = null;
+        bytes = null;
       }
-      if (!url || token !== this.token) return;
+      if (!bytes || token !== this.token) return;
 
       try {
-        this.bufferUrl = url;
-        const res = await fetch(url);
-        const bytes = await res.arrayBuffer();
-        if (token !== this.token) return;
         buffer = await this.ctx!.decodeAudioData(bytes);
         this.bufferCache.set(id, buffer);
       } catch {
         // A codec WebView cannot decode, or the file is gone. Fall back to a media element so the
         // alarm is still audible while the app is in the foreground.
-        if (token === this.token) this.startCustomViaMediaElement(url);
+        if (token === this.token) await this.startCustomViaMediaElement(id);
         return;
-      } finally {
-        if (this.bufferUrl === url) {
-          URL.revokeObjectURL(url);
-          this.bufferUrl = null;
-        }
       }
     }
     if (!buffer || token !== this.token || !this.ctx || !this.masterGain) return;
@@ -187,7 +183,7 @@ class AudioEngineClass {
   }
 
   /** Foreground-only fallback for files the Web Audio decoder rejects. */
-  private startCustomViaMediaElement(url: string): void {
+  private async startCustomViaMediaElement(id: string): Promise<void> {
     // Reuse a live element so rapid snooze/dismiss cycles do not leak nodes.
     let el = this.mediaEl;
     if (!el) {
@@ -200,6 +196,18 @@ class AudioEngineClass {
       el.loop = true;
       this.mediaEl = el;
     }
+    // Build a URL the engine owns outright. Revoking the shared cached URL here raced the
+    // element's own load and left it pointing at nothing, which is why this fallback was always
+    // silent too.
+    let url: string | null = null;
+    try {
+      const blob = await getCustomSoundBlob(id);
+      if (blob) url = URL.createObjectURL(blob);
+    } catch {
+      url = null;
+    }
+    if (!url) return;
+    if (this.mediaUrl && this.mediaUrl !== url) URL.revokeObjectURL(this.mediaUrl);
     this.mediaUrl = url;
     el.onended = () => {
       // Some WebViews drop `loop` on blob sources; re-arm defensively.
@@ -210,7 +218,7 @@ class AudioEngineClass {
     el.src = url;
     el.currentTime = 0;
     try {
-      void el.play();
+      await el.play();
     } catch {
       // Autoplay blocked before the first user gesture — the next test starts it.
     }
