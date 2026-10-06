@@ -16,6 +16,7 @@ import {
   type CustomSoundMeta,
 } from "@/features/alarms/lib/custom-sounds";
 import { AudioEngine, type AlarmSound } from "@/features/alarms/lib/audio-engine";
+import { nativeBridge } from "@/lib/native-shell";
 import { Music, Plus, Play, Square, Trash2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -43,7 +44,6 @@ export function SoundPicker<T extends string = string>({
   const [status, setStatus] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const previewElRef = useRef<HTMLAudioElement | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -65,12 +65,8 @@ export function SoundPicker<T extends string = string>({
   }, [refresh]);
 
   useEffect(() => {
-    return () => {
-      if (previewElRef.current) {
-        previewElRef.current.pause();
-        previewElRef.current = null;
-      }
-    };
+    // Leaving the picker should not leave a preview running.
+    return () => AudioEngine.stop();
   }, []);
 
   const totalBytes = sounds.reduce((sum, s) => sum + s.size, 0);
@@ -101,41 +97,56 @@ export function SoundPicker<T extends string = string>({
   );
 
   const stopPreview = useCallback(() => {
-    if (previewElRef.current) {
-      previewElRef.current.pause();
-      previewElRef.current.currentTime = 0;
-      previewElRef.current = null;
-    }
+    AudioEngine.stop();
     setPreviewing(null);
   }, []);
+
+  /**
+ * Plays a sample so the user hears the sound the moment they pick it.
+ *
+ * <p>Routed through the audio engine — the same code path an alarm uses — rather than a bare
+ * `Audio` element, so a custom sound behaves here exactly as it will when the alarm goes off.
+ */
+  const previewSound = useCallback((sound: string) => {
+    stopPreview();
+    try {
+      // Web Audio stays muted without audio focus on this WebView, so ask the native side to hold
+      // alarm focus for the length of the preview.
+      nativeBridge()?.previewSound?.();
+    } catch {
+      /* browser build: no focus to ask for */
+    }
+    AudioEngine.preview(sound as AlarmSound);
+    setPreviewing(sound);
+    // The engine stops itself; this only clears the button state to match.
+    const builtIn = !sound.startsWith(CUSTOM_SOUND_PREFIX);
+    setTimeout(() => {
+      setPreviewing((cur) => (cur === sound ? null : cur));
+    }, builtIn ? 2500 : 6000);
+  }, [stopPreview]);
 
   const preview = useCallback(
     async (meta: CustomSoundMeta) => {
       setError(null);
       const same = previewing === meta.id;
-      stopPreview();
-      if (same) return;
+      if (same) {
+        stopPreview();
+        AudioEngine.stop();
+        return;
+      }
       try {
         const url = await getCustomSoundUrl(meta.id);
         if (!url) {
           setError(`"${meta.name}" is no longer available.`);
           return;
         }
-        const el = new Audio(url);
-        el.preload = "auto";
-        el.volume = 0.7;
-        previewElRef.current = el;
-        setPreviewing(meta.id);
-        await el.play();
-        el.onended = () => {
-          setPreviewing((cur) => (cur === meta.id ? null : cur));
-          if (previewElRef.current === el) previewElRef.current = null;
-        };
+        revokeSoundUrl(meta.id);
+        previewSound(`${CUSTOM_SOUND_PREFIX}${meta.id}`);
       } catch {
         setError(`Cannot play "${meta.name}" on this device.`);
       }
     },
-    [previewing, stopPreview],
+    [previewing, previewSound, stopPreview],
   );
 
   const remove = useCallback(
@@ -157,7 +168,11 @@ export function SoundPicker<T extends string = string>({
     <div className={cn("space-y-2", className)}>
       <select
         value={value}
-        onChange={(e) => onChange(e.target.value as T)}
+        onChange={(e) => {
+          const next = e.target.value as T;
+          onChange(next);
+          previewSound(next as string);
+        }}
         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
       >
         <optgroup label="Built-in">

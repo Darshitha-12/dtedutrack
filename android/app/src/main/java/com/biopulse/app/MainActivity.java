@@ -290,6 +290,19 @@ public class MainActivity extends BridgeActivity {
             Log.i("BioPulseMedia", "web: " + message);
         }
 
+        /**
+         * Lets a sound selected in the picker be heard straight away.
+         *
+         * <p>The page renders the preview with Web Audio, and on this WebView an AudioTrack built
+         * that way stays muted while the app holds no audio focus — selecting a sound produced no
+         * sound at all. Grabbing focus for the length of the preview is what makes it audible, and
+         * it is released again afterwards so a preview never keeps the alarm focus.
+         */
+        @JavascriptInterface
+        public void previewSound() {
+            MediaPlaybackService.previewTone(MainActivity.this);
+        }
+
         /** User-driven "keep the audio coming" signal; survives the embed pausing itself. */
         @JavascriptInterface
         public void playbackIntent(final boolean active) {

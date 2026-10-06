@@ -258,6 +258,30 @@ public class MediaPlaybackService extends Service {
         MainActivity.dispatchMediaCommand("ringAlarm");
     }
 
+    /**
+     * Holds alarm-stream audio focus for a few seconds so a short UI preview is audible.
+     *
+ * <p>Previews are rendered by the page with Web Audio, which this WebView mutes unless the app owns
+ * audio focus. A ringing alarm grabs focus on its own; this is the equivalent for a tap on a sound
+ * in the picker, and it gives the focus back on its own so a preview can never hold onto it.
+ */
+    public static void previewTone(Context ctx) {
+        sPreviewCtx = ctx.getApplicationContext();
+        requestAudioFocusForAlarm(ctx);
+        MAIN.removeCallbacks(RELEASE_PREVIEW_FOCUS);
+        MAIN.postDelayed(RELEASE_PREVIEW_FOCUS, PREVIEW_FOCUS_MS);
+    }
+
+    private static Context sPreviewCtx;
+
+    private static final Runnable RELEASE_PREVIEW_FOCUS = () -> {
+        if (!alarmActive && sPreviewCtx != null) {
+            abandonAudioFocusForAlarm(sPreviewCtx);
+        }
+    };
+
+    private static final long PREVIEW_FOCUS_MS = 4000L;
+
     // ---- native alarm tone ----
 
     private static MediaPlayer sNativeTone;

@@ -7,6 +7,7 @@ export interface NativeBridge {
   clearOfflineCache?(): void;
   setAlarmRinging?(ringing: boolean, label: string): void;
   setKeepScreenOn?(keepOn: boolean): void;
+  previewSound?(): void;
 }
 
 /** The bridge, or `null` in a browser. */

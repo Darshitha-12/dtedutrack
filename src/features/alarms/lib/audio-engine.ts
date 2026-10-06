@@ -52,8 +52,31 @@ class AudioEngineClass {
     this.startLoop(name as AlarmSoundName);
   }
 
+  /**
+ * Plays a short sample of a sound, then stops on its own.
+ *
+ * <p>Used by the sound picker so picking a sound is heard immediately rather than only at the next
+ * alarm. Built-in sounds stop early — they loop forever otherwise — while a custom file is left to
+ * run a little longer, since it is the thing a user is trying to identify by ear.
+ */
+  preview(name: AlarmSound, ms = 2500): void {
+    const customId = customSoundId(name);
+    this.play(name);
+    if (this.previewTimer !== null) clearTimeout(this.previewTimer);
+    this.previewTimer = setTimeout(() => {
+      this.previewTimer = null;
+      this.stop();
+    }, customId ? Math.max(ms, 6000) : ms);
+  }
+
+  private previewTimer: ReturnType<typeof setTimeout> | null = null;
+
   stop(): void {
     this.token += 1;
+    if (this.previewTimer !== null) {
+      clearTimeout(this.previewTimer);
+      this.previewTimer = null;
+    }
     if (this.loopTimer !== null) {
       clearTimeout(this.loopTimer);
       this.loopTimer = null;
