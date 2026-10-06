@@ -13,6 +13,9 @@ import android.os.Handler;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
+import android.media.MediaPlayer;
+import android.media.RingtoneManager;
+import android.net.Uri;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
@@ -242,12 +245,93 @@ public class MediaPlaybackService extends Service {
         // AudioTrack was already active, and the alarm played nothing. Grabbing focus here — before
         // asking the page to make any noise — is what makes it audible.
         requestAudioFocusForAlarm(ctx);
+        // Start the native tone as well. This is the only thing guaranteed to be audible when the
+        // app has been closed: the WebView renderer is gone in that state, so the web layer's
+        // AudioEngine cannot make a sound at all. The page still takes over with the user's custom
+        // sound when it is alive, and the native tone is what covers the case where it is not.
+        startNativeAlarmTone(ctx);
         ensureRunning(ctx);
         postAlarmNotification(ctx);
         // The web layer owns the sound (custom MP3s live in its IndexedDB) and the ring UI, so ask
         // it to start. This is the path an OS-fired alarm takes, where no timer in the page ever
         // got the chance to run.
         MainActivity.dispatchMediaCommand("ringAlarm");
+    }
+
+    // ---- native alarm tone ----
+
+    private static MediaPlayer sNativeTone;
+    private static boolean sNativeToneFailed;
+
+    /**
+     * Plays a built-in alarm tone with {@link MediaPlayer}, looping until the alarm is dismissed.
+     *
+     * <p>This is deliberately independent of the WebView. Measured on a Galaxy A01 Core: with the
+     * app closed, the notification posted and audio focus was granted, but nothing was audible
+     * because the renderer that runs {@code AudioContext} no longer exists. A ringtone here is the
+     * only sound the OS can make on the app's behalf.
+     */
+    private static void startNativeAlarmTone(Context ctx) {
+        if (sNativeTone != null) return;
+        if (sNativeToneFailed) return;
+
+        try {
+            Uri alarm = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+            if (alarm == null) alarm = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+            if (alarm == null) {
+                sNativeToneFailed = true;
+                return;
+            }
+
+            MediaPlayer mp = new MediaPlayer();
+            mp.setDataSource(ctx.getApplicationContext(), alarm);
+            mp.setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build());
+            mp.setLooping(true);
+            mp.setOnErrorListener((p, what, extra) -> {
+                // Keep looping by hand; setLooping does not survive a decode hiccup on some builds.
+                try {
+                    if (what == MediaPlayer.MEDIA_ERROR_UNKNOWN && extra == MediaPlayer.MEDIA_ERROR_UNKNOWN) {
+                        p.seekTo(0);
+                        p.start();
+                        return true;
+                    }
+                } catch (Throwable ignored) {
+                }
+                return false;
+            });
+            mp.setOnCompletionListener(p -> {
+                try {
+                    p.seekTo(0);
+                    p.start();
+                } catch (Throwable ignored) {
+                }
+            });
+            mp.prepare();
+            mp.start();
+            sNativeTone = mp;
+            Log.i(TAG, "native alarm tone started");
+        } catch (Throwable t) {
+            sNativeToneFailed = true;
+            Log.w(TAG, "native alarm tone unavailable: " + t.getMessage());
+        }
+    }
+
+    private static void stopNativeAlarmTone() {
+        MediaPlayer mp = sNativeTone;
+        sNativeTone = null;
+        if (mp == null) return;
+        try {
+            if (mp.isPlaying()) mp.stop();
+        } catch (Throwable ignored) {
+        }
+        try {
+            mp.release();
+        } catch (Throwable ignored) {
+        }
+        Log.i(TAG, "native alarm tone stopped");
     }
 
     private static AudioFocusRequest sFocusRequest;
@@ -295,6 +379,7 @@ public class MediaPlaybackService extends Service {
     /** Releases only the alarm hold — media playback, if active, keeps the service alive. */
     public static void stopAlarm(Context ctx) {
         alarmActive = false;
+        stopNativeAlarmTone();
         abandonAudioFocusForAlarm(ctx);
         cancelAlarmNotification(ctx);
         if (!mediaPlaying) {
@@ -433,12 +518,15 @@ public class MediaPlaybackService extends Service {
             mediaPlaying = false;
             alarmActive = false;
             playbackRequested = false;
+            stopNativeAlarmTone();
+            abandonAudioFocusForAlarm(this);
             cancelAlarmNotification(this);
             MainActivity.dispatchMediaCommand("stop");
         } else if (ACTION_DISMISS_ALARM.equals(action)) {
             // Dismiss from the notification: stop the ringing UI, drop the alarm hold and take the
             // lock-screen popup away. Media playback, if it is running, is left alone.
             alarmActive = false;
+            stopNativeAlarmTone();
             abandonAudioFocusForAlarm(this);
             cancelAlarmNotification(this);
             MainActivity.dispatchMediaCommand("dismissAlarm");
@@ -653,6 +741,12 @@ public class MediaPlaybackService extends Service {
     @Override
     public void onDestroy() {
         Log.i(TAG, "onDestroy playing=" + mediaPlaying + " pos=" + positionMs);
+        // The alarm hold keeps the service alive, so reaching here means the ringing is over by
+        // some other route (process teardown, a stop action). Never leave a tone playing with no
+        // service behind it.
+        if (!mediaPlaying) {
+            stopNativeAlarmTone();
+        }
         foreground = false;
         MAIN.removeCallbacks(KEEPALIVE_TASK);
         MAIN.removeCallbacks(RELEASE_TASK);
