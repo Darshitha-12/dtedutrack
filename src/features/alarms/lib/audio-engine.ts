@@ -5,6 +5,8 @@ export type AlarmSoundName = "chime" | "digital" | "bio";
 /** A built-in tone, or `custom:<soundId>` pointing at the user's own audio file. */
 export type AlarmSound = AlarmSoundName | `custom:${string}`;
 
+const DECODE_TIMEOUT_MS = 2500;
+
 class AudioEngineClass {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
@@ -150,36 +152,35 @@ class AudioEngineClass {
     const token = ++this.token;
     this.ensure();
 
+    // A decoded buffer gives gapless looping, but it is not dependable here: on this WebView
+    // `decodeAudioData` on a ~4 MB file neither resolves nor rejects, so awaiting it left the
+    // alarm waiting forever and silent. A plain <audio> element loads and plays the same files
+    // straight away, so it goes first and decoding is only ever a bonus.
+    const played = await this.startCustomViaMediaElement(id);
+    if (token !== this.token) return;
+    if (played) {
+      this.onSoundStarted?.();
+      return;
+    }
+
     let buffer = this.bufferCache.get(id);
     if (!buffer) {
-      // Decode straight from the stored bytes. An object URL was used here before, and it was
-      // revoked as soon as decoding finished — but the same URL is cached and shared with
-      // <audio> elements, so the second playback onwards was handed dead bytes and went silent.
       let bytes: ArrayBuffer | null = null;
       try {
         bytes = await getCustomSoundBytes(id);
       } catch {
         bytes = null;
       }
-      if (!bytes) {
-        // The sound is gone from storage — it can happen if a save was lost. Ring the default
-        // tone instead of leaving the alarm silent.
+      // The sound is gone from storage, or nothing on this device can play it. Ring the default
+      // tone rather than leaving the alarm silent.
+      if (!bytes || token !== this.token) {
         if (token === this.token) this.startLoop("chime");
         return;
       }
-      if (token !== this.token) return;
-
-      try {
-        buffer = await this.ctx!.decodeAudioData(bytes);
-        this.bufferCache.set(id, buffer);
-      } catch {
-        // A codec WebView cannot decode, or the file is gone. Fall back to a media element so the
-        // alarm is still audible while the app is in the foreground, and to a built-in tone if even
-        // that cannot play.
-        if (token !== this.token) return;
-        const played = await this.startCustomViaMediaElement(id);
-        if (!played && token === this.token) this.startLoop("chime");
-        return;
+      const decoded = await this.decodeWithTimeout(bytes, DECODE_TIMEOUT_MS);
+      if (decoded) {
+        buffer = decoded;
+        this.bufferCache.set(id, decoded);
       }
     }
     if (!buffer || token !== this.token || !this.ctx || !this.masterGain) return;
@@ -201,6 +202,32 @@ class AudioEngineClass {
     source.start();
     this.bufferSource = source;
     this.onSoundStarted?.();
+  }
+
+  /**
+ * Decodes with a deadline.
+ *
+ * <p>`decodeAudioData` is not guaranteed to settle: on the device this was built for, a ~4 MB file
+ * produced a promise that neither resolved nor rejected, which left the alarm waiting on it
+ * forever. A timeout keeps playback moving instead.
+ */
+  private async decodeWithTimeout(bytes: ArrayBuffer, ms: number): Promise<AudioBuffer | null> {
+    if (!this.ctx) return null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), ms);
+    });
+    try {
+      const ctx = this.ctx;
+      return await Promise.race([
+        ctx.decodeAudioData(bytes).catch(() => null),
+        timeout,
+      ]);
+    } catch {
+      return null;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   /** Foreground-only fallback for files the Web Audio decoder rejects. Returns whether it started. */

@@ -71,6 +71,35 @@ function notifyChanged(): void {
   window.dispatchEvent(new CustomEvent(SOUNDS_CHANGED_EVENT));
 }
 
+/**
+ * Identifies an audio file from its magic bytes.
+ *
+ * <p>Returns an empty string for anything unrecognised, including raw DASH/MP4 segments: those look
+ * like audio files and load in some players, but they cannot be decoded as one, so it is better to
+ * store them honestly than to mislabel them.
+ */
+function sniffAudioMime(bytes: ArrayBuffer): string {
+  if (bytes.byteLength < 4) return "";
+  const head = new Uint8Array(bytes, 0, Math.min(16, bytes.byteLength));
+  const ascii = (start: number, len: number) =>
+    String.fromCharCode(...head.slice(start, start + len));
+
+  if (ascii(0, 3) === "ID3") return "audio/mpeg";
+  // MPEG audio frame sync: 11 set bits.
+  if (head[0] === 0xff && (head[1] & 0xe0) === 0xe0) return "audio/mpeg";
+  if (ascii(0, 4) === "OggS") return "audio/ogg";
+  if (ascii(0, 4) === "fLaC") return "audio/flac";
+  if (ascii(0, 4) === "RIFF" && ascii(8, 4) === "WAVE") return "audio/wav";
+  if (ascii(4, 4) === "ftyp") {
+    const brand = ascii(8, 4);
+    // `dash` marks a fragmented DASH segment, not a playable audio file.
+    if (brand === "dash") return "";
+    return "audio/mp4";
+  }
+  if (ascii(4, 4) === "moov" || ascii(4, 4) === "mdat") return "audio/mp4";
+  return "";
+}
+
 /* ------------------------------------------------------------------ *
  * Database plumbing
  * ------------------------------------------------------------------ */
@@ -240,24 +269,24 @@ export async function addCustomSound(file: File): Promise<CustomSoundMeta> {
 
   const id = generateId();
 
-  // Android WebView frequently hands over a picked file with an empty `type`, even though the bytes
-  // are a perfectly good MP3. That empty type is the reason a stored sound silently refuses to
-  // play later: an object URL built from it reaches the audio element untyped and the WebView
-  // rejects it. Re-wrapping the bytes with the MIME type we already resolved makes the stored
-  // blob self-describing regardless of what the file picker reported.
-  let blob: Blob = file;
-  if (!file.type) {
-    try {
-      blob = new Blob([await file.arrayBuffer()], { type: "audio/mpeg" });
-    } catch {
-      blob = file;
-    }
+  // Work out the real type from the bytes rather than believing the picker. Android WebView hands
+  // over plenty of files with an empty type, and forcing `audio/mpeg` onto whatever arrived
+  // mislabelled things badly: a `ftypdash` container is not an MP3, and calling it one left the
+  // sound unplayable. Guessing wrong is worse than admitting nothing is known.
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await file.arrayBuffer();
+  } catch {
+    bytes = new ArrayBuffer(0);
   }
+  const sniffed = sniffAudioMime(bytes);
+  const type = sniffed || (file.type.startsWith("audio/") ? file.type : "");
+  let blob: Blob = type ? new Blob([bytes], { type }) : new Blob([bytes]);
 
   const record: SoundRecord = {
     id,
     name: (file.name || "Custom sound").slice(0, 80),
-    mime: blob.type || "audio/mpeg",
+    mime: type || "application/octet-stream",
     size: blob.size,
     duration: null,
     createdAt: Date.now(),
