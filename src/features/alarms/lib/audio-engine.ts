@@ -142,8 +142,18 @@ class AudioEngineClass {
       this.mediaEl = null;
     }
     if (this.mediaUrl) {
-      URL.revokeObjectURL(this.mediaUrl);
+      const url = this.mediaUrl;
       this.mediaUrl = null;
+      // Defer revocation slightly. Revoking immediately while the element is still
+      // attempting to load/play aborts the in-flight play() call (AbortError) and
+      // leaves the element in NETWORK_NO_SOURCE on some WebViews.
+      setTimeout(() => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          /* ignore */
+        }
+      }, 500);
     }
   }
 
@@ -261,8 +271,17 @@ class AudioEngineClass {
     }
     if (!url) return false;
     this.mediaEl = el;
-    if (this.mediaUrl && this.mediaUrl !== url) URL.revokeObjectURL(this.mediaUrl);
-    this.mediaUrl = url;
+    if (this.mediaUrl && this.mediaUrl !== url) {
+      const old = this.mediaUrl;
+      this.mediaUrl = url;
+      setTimeout(() => {
+        try {
+          URL.revokeObjectURL(old);
+        } catch {}
+      }, 500);
+    } else {
+      this.mediaUrl = url;
+    }
     el.onended = () => {
       // Some WebViews drop `loop` on blob sources; re-arm defensively.
       if (el && el.paused === false) {
