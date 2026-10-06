@@ -47,6 +47,14 @@ public final class OfflineCache {
             "/api/", "/login", "/register", "/forgot-password",
     };
 
+    /**
+     * Server-rendered pages contain an absolute reference to the chunk they were built against, so
+     * a page served from the cache has to be paired with those exact assets. The web layer collects
+     * them off the live document and sends them along, so they are written to a single lookup
+     * table keyed by "shell:<path>" rather than being scattered across cache entries.
+     */
+    private static final String ASSET_DIR = "offline-assets";
+
     private OfflineCache() {
     }
 
@@ -96,7 +104,20 @@ public final class OfflineCache {
         return new File(dir(ctx), key(url) + ".meta");
     }
 
-    private static boolean cacheable(String url) {
+    /**
+ * The URL a cache lookup should try first.
+ *
+ * <p>Next.js decorates client-side navigations with a {@code ?_rsc=} cache-buster, so the same
+ * page is requested under a different URL than it was saved under. Dropping the query string makes
+ * the two match again, while the path (which is what actually identifies the page) is preserved.
+ */
+public static String lookupUrl(String url) {
+    if (url == null) return null;
+    int q = url.indexOf('?');
+    return q < 0 ? url : url.substring(0, q);
+}
+
+private static boolean cacheable(String url) {
         for (String p : NEVER_CACHE_PREFIXES) {
             if (url.contains(p)) return false;
         }

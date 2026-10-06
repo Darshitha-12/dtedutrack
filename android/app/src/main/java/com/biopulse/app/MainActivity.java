@@ -446,13 +446,34 @@ public class MainActivity extends BridgeActivity {
                     return null;
                 }
 
-                OfflineCache.Entry entry = OfflineCache.read(activity, url);
-                if (entry == null) {
-                    Log.i("BioPulseCache", "offline and nothing saved for " + url);
+                // Never serve a saved HTML page for an API call or an XHR. Doing so hands the caller a document
+                // where it asked for JSON, which is worse than letting it fail so the app can show
+                // its own offline handling.
+                if (!request.isForMainFrame()) {
                     return null;
                 }
 
-                Log.i("BioPulseCache", "offline: serving saved " + url);
+                // Only the top-level navigation needs handling. The pages the WebView loads for
+                // rendering are always main-frame document requests, and by returning null for
+                // everything else the online path stays completely untouched.
+                OfflineCache.Entry entry = OfflineCache.read(activity, OfflineCache.lookupUrl(url));
+
+                if (entry == null) {
+                    // The WebView asks for the origin root on (re)start, but "/dashboard" and
+                    // friends are what actually get saved. Falling back to a saved page keeps the
+                    // app usable offline instead of the browser's own error page.
+                    entry = OfflineCache.read(activity, appOrigin + "/dashboard");
+                }
+                if (entry == null) {
+                    entry = OfflineCache.read(activity, appOrigin + "/");
+                }
+
+                if (entry == null) {
+                    Log.i("BioPulseCache", "offline: no saved page for " + url);
+                    return null;
+                }
+
+                Log.i("BioPulseCache", "offline: serving saved page for " + url);
                 WebResourceResponse res = new WebResourceResponse(
                         entry.mime, "utf-8", new java.io.ByteArrayInputStream(entry.body));
                 Map<String, String> headers = new HashMap<>();
