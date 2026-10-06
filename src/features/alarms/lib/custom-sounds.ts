@@ -221,17 +221,32 @@ export async function addCustomSound(file: File): Promise<CustomSoundMeta> {
   }
 
   const id = generateId();
+
+  // Android WebView frequently hands over a picked file with an empty `type`, even though the bytes
+  // are a perfectly good MP3. That empty type is the reason a stored sound silently refuses to
+  // play later: an object URL built from it reaches the audio element untyped and the WebView
+  // rejects it. Re-wrapping the bytes with the MIME type we already resolved makes the stored
+  // blob self-describing regardless of what the file picker reported.
+  let blob: Blob = file;
+  if (!file.type) {
+    try {
+      blob = new Blob([await file.arrayBuffer()], { type: "audio/mpeg" });
+    } catch {
+      blob = file;
+    }
+  }
+
   const record: SoundRecord = {
     id,
     name: (file.name || "Custom sound").slice(0, 80),
-    mime: file.type || "audio/mpeg",
-    size: file.size,
+    mime: blob.type || "audio/mpeg",
+    size: blob.size,
     duration: null,
     createdAt: Date.now(),
-    blob: file,
+    blob,
   };
 
-  const probeUrl = URL.createObjectURL(file);
+  const probeUrl = URL.createObjectURL(blob);
   record.duration = await readDuration(probeUrl);
   URL.revokeObjectURL(probeUrl);
 

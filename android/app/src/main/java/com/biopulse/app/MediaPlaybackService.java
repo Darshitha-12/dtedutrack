@@ -10,6 +10,9 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.Handler;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
+import android.media.AudioManager;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
@@ -234,6 +237,11 @@ public class MediaPlaybackService extends Service {
     public static void startAlarm(Context ctx, String label) {
         currentTitle = "Alarm - " + (label == null || label.trim().isEmpty() ? "Alert" : label.trim());
         alarmActive = true;
+        // Web Audio creates its audio track, but on this WebView the track comes up muted unless
+        // the app holds audio focus: `dumpsys audio` showed an empty focus stack while an
+        // AudioTrack was already active, and the alarm played nothing. Grabbing focus here — before
+        // asking the page to make any noise — is what makes it audible.
+        requestAudioFocusForAlarm(ctx);
         ensureRunning(ctx);
         postAlarmNotification(ctx);
         // The web layer owns the sound (custom MP3s live in its IndexedDB) and the ring UI, so ask
@@ -242,9 +250,52 @@ public class MediaPlaybackService extends Service {
         MainActivity.dispatchMediaCommand("ringAlarm");
     }
 
+    private static AudioFocusRequest sFocusRequest;
+
+    private static void requestAudioFocusForAlarm(Context ctx) {
+        AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) return;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (sFocusRequest == null) {
+                    sFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                            .setAudioAttributes(new AudioAttributes.Builder()
+                                    .setUsage(AudioAttributes.USAGE_ALARM)
+                                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                    .build())
+                            .setOnAudioFocusChangeListener(focusChange -> {
+                                if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
+                                    cancelAlarmNotification(ctx);
+                                }
+                            })
+                            .build();
+                }
+                am.requestAudioFocus(sFocusRequest);
+            } else {
+                am.requestAudioFocus(null, AudioManager.STREAM_ALARM, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "audio focus request failed", t);
+        }
+    }
+
+    private static void abandonAudioFocusForAlarm(Context ctx) {
+        AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) return;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (sFocusRequest != null) am.abandonAudioFocusRequest(sFocusRequest);
+            } else {
+                am.abandonAudioFocus(null);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
     /** Releases only the alarm hold — media playback, if active, keeps the service alive. */
     public static void stopAlarm(Context ctx) {
         alarmActive = false;
+        abandonAudioFocusForAlarm(ctx);
         cancelAlarmNotification(ctx);
         if (!mediaPlaying) {
             scheduleRelease(ctx);
@@ -388,6 +439,7 @@ public class MediaPlaybackService extends Service {
             // Dismiss from the notification: stop the ringing UI, drop the alarm hold and take the
             // lock-screen popup away. Media playback, if it is running, is left alone.
             alarmActive = false;
+            abandonAudioFocusForAlarm(this);
             cancelAlarmNotification(this);
             MainActivity.dispatchMediaCommand("dismissAlarm");
             if (mediaPlaying) {
