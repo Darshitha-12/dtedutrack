@@ -122,16 +122,22 @@ class AudioEngineClass {
       this.bufferUrl = null;
     }
 
+    // Tear the element down before releasing its URL. Revoking first left the element holding a
+    // dead source, so the next attempt saw `networkState === NETWORK_NO_SOURCE` and refused to
+    // load; and revoking while a `play()` was still starting aborted that play outright.
     if (this.mediaEl) {
       const el = this.mediaEl;
       try {
         el.onended = null;
         el.pause();
-        el.currentTime = 0;
+      } catch {
+        /* element already torn down */
+      }
+      try {
         el.removeAttribute("src");
         el.load();
       } catch {
-        /* element already torn down */
+        /* nothing to clear */
       }
       this.mediaEl = null;
     }
@@ -232,18 +238,17 @@ class AudioEngineClass {
 
   /** Foreground-only fallback for files the Web Audio decoder rejects. Returns whether it started. */
   private async startCustomViaMediaElement(id: string): Promise<boolean> {
-    // Reuse a live element so rapid snooze/dismiss cycles do not leak nodes.
-    let el = this.mediaEl;
-    if (!el) {
-      try {
-        el = new Audio();
-      } catch {
-        return false;
-      }
-      el.preload = "auto";
-      el.loop = true;
-      this.mediaEl = el;
+    // A fresh element every time. Reusing one left it holding the previous, already-revoked URL,
+    // and a WebView that will not load a second source into the same element reported
+    // `NETWORK_NO_SOURCE` and played nothing at all.
+    let el: HTMLAudioElement;
+    try {
+      el = new Audio();
+    } catch {
+      return false;
     }
+    el.preload = "auto";
+    el.loop = true;
     // Build a URL the engine owns outright. Revoking the shared cached URL here raced the
     // element's own load and left it pointing at nothing, which is why this fallback was always
     // silent too.
@@ -255,6 +260,7 @@ class AudioEngineClass {
       url = null;
     }
     if (!url) return false;
+    this.mediaEl = el;
     if (this.mediaUrl && this.mediaUrl !== url) URL.revokeObjectURL(this.mediaUrl);
     this.mediaUrl = url;
     el.onended = () => {
