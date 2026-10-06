@@ -265,14 +265,22 @@ class AudioEngineClass {
     };
     el.src = url;
     el.currentTime = 0;
-    try {
-      await el.play();
-      this.onSoundStarted?.();
-      return true;
-    } catch {
-      // Autoplay blocked before the first user gesture — the next test starts it.
-      return false;
+    // `play()` rejects with AbortError when anything pauses the element while it is still starting
+    // up, which happens easily when a playback request is issued twice in quick succession. One
+    // retry separates the two without leaving the alarm silent.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await el.play();
+        return true;
+      } catch (e) {
+        const name = e instanceof Error ? e.name : "";
+        if (name !== "AbortError" || attempt === 1) return false;
+        await new Promise((r) => setTimeout(r, 120));
+        if (el.paused) continue;
+        return true;
+      }
     }
+    return false;
   }
 
   cue(name: string): void {

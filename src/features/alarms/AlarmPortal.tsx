@@ -115,8 +115,15 @@ export function AlarmPortal() {
         return delta <= 0 && delta > -120_000;
       });
       if (due) {
+        const key = getDedupKey(due, new Date(now));
+        const already = firedRef.current[key] ?? 0;
+        // The native side can raise this event more than once for a single alarm (the service is
+        // started from several places). Re-triggering restarts playback from the top each time and,
+        // for a custom file, each restart cancels the media element's pending play — which left the
+        // alarm silent. Ring it once.
+        if (now - already < 90_000) return;
         const dedup = { ...firedRef.current };
-        dedup[getDedupKey(due, new Date(now))] = now;
+        dedup[key] = now;
         firedRef.current = dedup;
         writeFired(dedup);
         triggerAlarm(due);
