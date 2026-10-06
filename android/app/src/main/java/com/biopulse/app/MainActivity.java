@@ -15,8 +15,13 @@ import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.webkit.WebViewClient;
+
+import androidx.activity.OnBackPressedCallback;
 import android.widget.FrameLayout;
 
 import com.getcapacitor.Bridge;
@@ -24,6 +29,8 @@ import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebChromeClient;
 
 import java.lang.ref.WeakReference;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Hosts the Capacitor bridge and adds:
@@ -65,6 +72,23 @@ public class MainActivity extends BridgeActivity {
 
         if (current.get() == null) current = new WeakReference<>(this);
 
+        // Back gestures do not reach onBackPressed() any more, so the dispatcher callback is what
+        // actually runs on Android 13+ and on the predictive-back gesture.
+        try {
+            getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+                @Override
+                public void handleOnBackPressed() {
+                    if (fullscreenView != null) {
+                        exitFullscreen(true);
+                        return;
+                    }
+                    // Nothing of ours is open, so let the app close as it normally would.
+                    finish();
+                }
+            });
+        } catch (Throwable ignored) {
+        }
+
         WebView webView = getBridge().getWebView();
         WebSettings settings = webView.getSettings();
         settings.setMediaPlaybackRequiresUserGesture(false);
@@ -81,13 +105,24 @@ public class MainActivity extends BridgeActivity {
         // Android freezes/throttles the WebView's renderer process once the app is no longer
         // visible, which kills the YouTube iframe's audio track the moment the user leaves the
         // app. Marking the renderer important keeps it scheduled so background playback survives.
-        try {
-            webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
-        } catch (Throwable ignored) {
+        // API 26+ only — on older releases the method does not exist.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
+            } catch (Throwable ignored) {
+            }
         }
 
         webView.addJavascriptInterface(new JsBridge(), "BioPulseBridge");
         webView.setWebChromeClient(new FullscreenChromeClient(getBridge()));
+        webView.setWebViewClient(new OfflineFallbackClient(this, webView));
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
+            } catch (Throwable ignored) {
+            }
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             try {
@@ -307,6 +342,128 @@ public class MainActivity extends BridgeActivity {
         public void ringAlarmNow(final String label) {
             runOnUiThread(() -> MediaPlaybackService.startAlarm(MainActivity.this, label));
         }
+
+        /**
+         * Saves the given URLs to native storage so the app still opens without a network. Runs on
+         * a background thread and reports back through {@code window.__bp_offline_saved} so the
+         * Settings card can show progress instead of pretending to work.
+         *
+         * @param jsonArray a JSON array of absolute URLs.
+         */
+        @JavascriptInterface
+        public void saveForOffline(final String jsonArray) {
+            final String[] urls;
+            try {
+                org.json.JSONArray arr = new org.json.JSONArray(jsonArray);
+                urls = new String[arr.length()];
+                for (int i = 0; i < arr.length(); i++) urls[i] = arr.getString(i);
+            } catch (Throwable t) {
+                Log.w("BioPulseCache", "bad save request: " + t.getMessage());
+                return;
+            }
+
+            new Thread(() -> {
+                int saved = 0;
+                long bytes = 0;
+                for (String url : urls) {
+                    bytes += OfflineCache.save(MainActivity.this, url);
+                    if (bytes > 0) saved++;
+                    notifyOfflineSaved(saved, urls.length, bytes);
+                }
+                notifyOfflineSaved(saved, urls.length, bytes);
+                Log.i("BioPulseCache", "save finished: " + saved + "/" + urls.length + " (" + bytes + " bytes)");
+            }, "offline-save").start();
+        }
+
+        /** {@code {"count":n,"bytes":n}} for the settings card. */
+        @JavascriptInterface
+        public String offlineCacheStats() {
+            return OfflineCache.stats(MainActivity.this);
+        }
+
+        /** Removes every saved page, e.g. after signing out. */
+        @JavascriptInterface
+        public void clearOfflineCache() {
+            new Thread(() -> OfflineCache.clear(MainActivity.this), "offline-clear").start();
+        }
+
+        private void notifyOfflineSaved(int saved, int total, long bytes) {
+            final String json = "{\"saved\":" + saved + ",\"total\":" + total
+                    + ",\"bytes\":" + bytes + "}";
+            runOnUiThread(() -> {
+                try {
+                    WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+                    if (webView == null) return;
+                    webView.evaluateJavascript(
+                            "window.dispatchEvent(new CustomEvent('biopulse:offline-saved',{detail:"
+                                    + json + "}));", null);
+                } catch (Throwable ignored) {
+                }
+            });
+        }
+    }
+
+    /**
+     * Serves saved pages when the device is offline, and stays completely out of the way when it is
+     * not.
+     *
+     * <p>While online this returns {@code null} for every request, which is the WebView's default
+     * behaviour, so the normal load path is untouched. Returning {@code null} rather than
+     * performing the request here is deliberate: doing the fetch natively would mean re-sending
+     * cookies and headers by hand and would add a layer that can break the app for no benefit
+     * while there is still a network to use.
+     */
+    private static final class OfflineFallbackClient extends WebViewClient {
+
+        private final MainActivity activity;
+        private final WebView webView;
+        private final String appOrigin;
+
+        OfflineFallbackClient(MainActivity activity, WebView webView) {
+            this.activity = activity;
+            this.webView = webView;
+            this.appOrigin = capacitorServerUrl(webView);
+        }
+
+        private static String capacitorServerUrl(WebView webView) {
+            try {
+                java.util.regex.Matcher m =
+                        java.util.regex.Pattern.compile("^https?://[^/]+").matcher(webView.getUrl());
+                if (m.find()) return m.group(0);
+            } catch (Throwable ignored) {
+            }
+            return "";
+        }
+
+        @Override
+        public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+            try {
+                if (OfflineCache.isOnline(activity)) return null;
+
+                String url = request.getUrl() != null ? request.getUrl().toString() : null;
+                if (url == null || appOrigin.isEmpty() || !url.startsWith(appOrigin)) return null;
+                if (request.getMethod() != null && !"GET".equalsIgnoreCase(request.getMethod())) {
+                    return null;
+                }
+
+                OfflineCache.Entry entry = OfflineCache.read(activity, url);
+                if (entry == null) {
+                    Log.i("BioPulseCache", "offline and nothing saved for " + url);
+                    return null;
+                }
+
+                Log.i("BioPulseCache", "offline: serving saved " + url);
+                WebResourceResponse res = new WebResourceResponse(
+                        entry.mime, "utf-8", new java.io.ByteArrayInputStream(entry.body));
+                Map<String, String> headers = new HashMap<>();
+                headers.put("Cache-Control", "no-store");
+                res.setResponseHeaders(headers);
+                return res;
+            } catch (Throwable t) {
+                Log.w("BioPulseCache", "intercept failed: " + t.getMessage());
+                return null;
+            }
+        }
     }
 
     /** Extends the Capacitor client so camera/mic permissions and dialogs keep working. */
@@ -402,12 +559,4 @@ public class MainActivity extends BridgeActivity {
         setRequestedOrientation(preFullscreenOrientation);
     }
 
-    @Override
-    public void onBackPressed() {
-        if (fullscreenView != null) {
-            exitFullscreen(true);
-            return;
-        }
-        super.onBackPressed();
     }
-}

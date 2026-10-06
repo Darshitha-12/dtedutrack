@@ -1,3 +1,20 @@
+/** The Java bridge MainActivity injects. Only these methods exist on it. */
+export interface NativeBridge {
+  scheduleAlarm?(epochMillis: number, label: string): void;
+  ringAlarmNow?(label: string): void;
+  saveForOffline?(jsonArray: string): void;
+  offlineCacheStats?(): string;
+  clearOfflineCache?(): void;
+  setAlarmRinging?(ringing: boolean, label: string): void;
+  setKeepScreenOn?(keepOn: boolean): void;
+}
+
+/** The bridge, or `null` in a browser. */
+export function nativeBridge(): NativeBridge | null {
+  if (typeof window === "undefined") return null;
+  return ((window as unknown as { BioPulseBridge?: NativeBridge }).BioPulseBridge) ?? null;
+}
+
 /**
  * Detects the Capacitor native shell (the Android APK).
  *
@@ -8,8 +25,9 @@
  * on a Galaxy A01 Core (Android 10, WebView 156): unregistering the worker made the very same
  * request load instantly.
  *
- * So the APK must run *without* a service worker. Offline for the installed app has to be solved by
- * bundling pages into the APK instead, which is not possible while the site is server-rendered.
+ * So the APK must run *without* a service worker. Offline for the installed app is handled natively
+ * instead: `OfflineCache` saves pages to device storage while online and serves them back through
+ * `shouldInterceptRequest` when there is no network.
  */
 export function isNativeApp(): boolean {
   if (typeof window === "undefined") return false;

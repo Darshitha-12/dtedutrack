@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { OFFLINE_ROUTES } from "@/lib/offline-routes";
+import { nativeBridge } from "@/lib/native-shell";
 import {
   Palette,
   Globe,
@@ -53,6 +54,36 @@ interface SettingsData {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
+/**
+ * The exact stylesheets and scripts this build loaded.
+ *
+ * A saved HTML page is useless without them — it would come back unstyled and inert — and the
+ * asset filenames are content-hashed, so the ones currently in the document are the ones every
+ * cached page needs. Reading them off the live document means this keeps up with the build
+ * automatically and there is no manifest to keep in sync by hand.
+ */
+function collectLoadedAssets(): string[] {
+  if (typeof document === "undefined") return [];
+  const urls = new Set<string>();
+  const add = (raw: string | null) => {
+    if (!raw) return;
+    if (!raw.startsWith("/_next/")) return;
+    urls.add(raw);
+  };
+  document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]').forEach((el) =>
+    add(el.getAttribute("href")),
+  );
+  document.querySelectorAll<HTMLScriptElement>("script[src]").forEach((el) =>
+    add(el.getAttribute("src")),
+  );
+  document
+    .querySelectorAll<HTMLLinkElement>('link[rel="preload"][as="style"], link[rel="preload"][as="script"]')
+    .forEach((el) => add(el.getAttribute("href")));
+  // The offline page itself, so an uncached route still has something to show.
+  add("/offline.html");
+  return [...urls];
+}
+
 export default function SettingsPage() {
   const { showToast } = useToast();
   const [settings, setSettings] = useState<SettingsData>({
@@ -87,6 +118,17 @@ export default function SettingsPage() {
   // and downloadable on demand instead of a silent mechanism that mysteriously fails.
   useEffect(() => {
     const count = async () => {
+      const native = nativeBridge();
+      if (native?.offlineCacheStats) {
+        try {
+          const stats = JSON.parse(native.offlineCacheStats()) as { count: number };
+          setOfflineCount(stats.count);
+          return;
+        } catch {
+          setOfflineCount(null);
+          return;
+        }
+      }
       if (!("caches" in window)) {
         setOfflineCount(null);
         return;
@@ -107,7 +149,38 @@ export default function SettingsPage() {
     void count();
   }, []);
 
+  // Inside the Android app the native cache reports progress through this event.
+  useEffect(() => {
+    const onSaved = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { saved: number; total: number };
+      if (detail?.total && detail.saved >= detail.total) {
+        setWarming(false);
+        setOfflineCount(detail.saved);
+        showToast(`Saved ${detail.saved} files for offline use.`, "success");
+      }
+    };
+    window.addEventListener("biopulse:offline-saved", onSaved);
+    return () => window.removeEventListener("biopulse:offline-saved", onSaved);
+  }, [showToast]);
+
   const saveForOffline = async () => {
+    const native = nativeBridge();
+    if (native?.saveForOffline) {
+      setWarming(true);
+      // The page's own assets have to travel with it, otherwise the saved HTML arrives unstyled.
+      const assets = collectLoadedAssets();
+      const urls = [...OFFLINE_ROUTES, ...assets].map((u) =>
+        u.startsWith("http") ? u : window.location.origin + u,
+      );
+      try {
+        native.saveForOffline(JSON.stringify(urls));
+      } catch {
+        setWarming(false);
+        showToast("Could not save pages. Check your connection and try again.", "error");
+      }
+      return;
+    }
+
     if (!("serviceWorker" in navigator)) {
       showToast("This browser cannot save pages for offline use.", "error");
       return;
@@ -127,12 +200,11 @@ export default function SettingsPage() {
         navigator.serviceWorker.addEventListener("message", onDone);
         worker.postMessage({
           type: "WARM_CACHE",
-          urls: OFFLINE_ROUTES,
+          urls: [...OFFLINE_ROUTES, ...collectLoadedAssets()],
         });
         // Never leave the button spinning forever if the worker cannot answer.
         window.setTimeout(resolve, 20000);
       });
-      setOfflineCount((prev) => (prev == null ? prev : prev));
       showToast("Saved your pages for offline use.", "success");
       const keys = await caches.keys();
       let pages = 0;
