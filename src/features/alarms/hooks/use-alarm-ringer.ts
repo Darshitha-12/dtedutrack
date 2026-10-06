@@ -136,17 +136,23 @@ export function useAlarmRinger() {
     return () => window.removeEventListener("biopulse:alarm-dismiss", onDismiss);
   }, [dismiss]);
 
+  // Teardown belongs to unmount only. Depending on the callbacks here meant the cleanup also ran
+  // whenever one of them changed identity, which called `AudioEngine.stop()` in the middle of a
+  // starting alarm — cancelling the media element's pending play and leaving the alarm silent.
+  const teardownRef = useRef<() => void>(() => {});
+  teardownRef.current = () => {
+    AudioEngine.stop();
+    stopVibration();
+    releaseWakeLock();
+    holdBackgroundPlayback(false);
+    if (snoozeTimerRef.current !== null) {
+      clearTimeout(snoozeTimerRef.current);
+    }
+  };
+
   useEffect(() => {
-    return () => {
-      AudioEngine.stop();
-      stopVibration();
-      releaseWakeLock();
-      holdBackgroundPlayback(false);
-      if (snoozeTimerRef.current !== null) {
-        clearTimeout(snoozeTimerRef.current);
-      }
-    };
-  }, [stopVibration, releaseWakeLock]);
+    return () => teardownRef.current();
+  }, []);
 
   return {
     currentAlarm,
