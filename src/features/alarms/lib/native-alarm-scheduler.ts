@@ -10,7 +10,7 @@
 import { nextOccurrenceFor, type Alarm } from "./scheduler";
 
 interface NativeScheduleBridge {
-  scheduleAlarm(epochMillis: number, label: string): void;
+  scheduleAlarm(epochMillis: number, label: string, soundId?: string): void;
 }
 
 function nativeBridge(): NativeScheduleBridge | null {
@@ -34,7 +34,7 @@ export function publishNextAlarm(alarms: Alarm[]): void {
   const bridge = nativeBridge();
   if (!bridge) return;
 
-  let soonest: { at: number; label: string } | null = null;
+  let soonest: { at: number; label: string; soundId?: string } | null = null;
 
   for (const alarm of alarms) {
     if (!alarm.enabled) continue;
@@ -44,7 +44,7 @@ export function publishNextAlarm(alarms: Alarm[]): void {
     // Leave a little room so a due-now alarm is not handed to the OS as a time in the past.
     if (at <= Date.now() + 1_000) continue;
     if (!soonest || at < soonest.at) {
-      soonest = { at, label: labelFor(alarm) };
+      soonest = { at, label: labelFor(alarm), soundId: (alarm as any).sound || (alarm as any).soundId };
     }
   }
 

@@ -1,6 +1,6 @@
 /** The Java bridge MainActivity injects. Only these methods exist on it. */
 export interface NativeBridge {
-  scheduleAlarm?(epochMillis: number, label: string): void;
+  scheduleAlarm?(epochMillis: number, label: string, soundId?: string): void;
   ringAlarmNow?(label: string): void;
   saveForOffline?(jsonArray: string): void;
   offlineCacheStats?(): string;
@@ -50,3 +50,8 @@ export function isNativeApp(): boolean {
   }
   return Boolean(w.CapacitorBridge);
 }
+
+
+export interface NativeBridgeExtended extends NativeBridge { saveCustomSound?(id: string, base64: string, mime: string): boolean; hasCustomSound?(id: string): boolean; }
+export function nativeBridgeExt(): NativeBridgeExtended | null { const b=nativeBridge() as unknown as NativeBridgeExtended | null; return b; }
+

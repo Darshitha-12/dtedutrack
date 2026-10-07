@@ -601,4 +601,37 @@ public class MainActivity extends BridgeActivity {
         setRequestedOrientation(preFullscreenOrientation);
     }
 
+        @JavascriptInterface
+        public boolean saveCustomSound(String id, String base64, String mime) {
+            try {
+                java.io.File dir = new java.io.File(getFilesDir(), "custom_sounds");
+                if (!dir.exists()) dir.mkdirs();
+                java.io.File out = new java.io.File(dir, id + ".mp3");
+                byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.NO_WRAP);
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(out);
+                fos.write(bytes);
+                fos.flush();
+                fos.close();
+                android.content.SharedPreferences p = getSharedPreferences("biopulse_sounds", MODE_PRIVATE);
+                p.edit().putString("custom_path_" + id, out.getAbsolutePath()).apply();
+                p.edit().putString("custom_mime_" + id, mime == null ? "audio/mpeg" : mime).apply();
+                return true;
+            } catch (Throwable e) {
+                Log.e("BioPulseMedia", "saveCustomSound failed", e);
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public boolean hasCustomSound(String id) {
+            try {
+                android.content.SharedPreferences p = getSharedPreferences("biopulse_sounds", MODE_PRIVATE);
+                String path = p.getString("custom_path_" + id, null);
+                if (path == null) return false;
+                java.io.File f = new java.io.File(path);
+                return f.exists() && f.length() > 0;
+            } catch (Throwable t) {
+                return false;
+            }
+        }
     }

@@ -1,4 +1,7 @@
 "use client";
+import { nativeBridge, nativeBridgeExt } from '@/lib/native-shell';
+
+
 
 /**
  * Custom alarm/reminder sound library.
@@ -259,6 +262,8 @@ export class SoundTooLargeError extends Error {}
  * intentionally no count limit, only a per-file size guard so a single huge file
  * cannot wedge storage.
  */
+
+async function saveToNative(id: string, bytes: ArrayBuffer, mime: string): Promise<void> { try { const b = nativeBridgeExt(); if (b?.saveCustomSound) { const chunk = new Uint8Array(bytes); let binary = ''; const len = chunk.length; for (let i=0;i<len;i++) binary += String.fromCharCode(chunk[i]); const base64 = btoa(binary); b.saveCustomSound(id, base64, mime || 'audio/mpeg'); } } catch (e) { console.warn('native save failed', e); } }
 export async function addCustomSound(file: File): Promise<CustomSoundMeta> {
   const MAX_BYTES = 25 * 1024 * 1024;
   if (file.size > MAX_BYTES) {

@@ -237,7 +237,7 @@ public class MediaPlaybackService extends Service {
     }
 
     /** Holds the service (and wakelock) open while an alarm/reminder is ringing. */
-    public static void startAlarm(Context ctx, String label) {
+    public static void startAlarm(Context ctx, String label) {\n        startAlarm(ctx, label, null);\n    }\n\n    public static void startAlarm(Context ctx, String label, String soundId) {
         currentTitle = "Alarm - " + (label == null || label.trim().isEmpty() ? "Alert" : label.trim());
         alarmActive = true;
         // Web Audio creates its audio track, but on this WebView the track comes up muted unless

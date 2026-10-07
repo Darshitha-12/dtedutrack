@@ -25,7 +25,7 @@ public final class AlarmScheduler {
     private static final String TAG = "BioPulseAlarm";
     private static final String PREFS = "biopulse_alarm";
     private static final String KEY_TRIGGER_AT = "trigger_at";
-    private static final String KEY_LABEL = "label";
+    private static final String KEY_LABEL = "label";\n    private static final String KEY_SOUND = "sound";
 
     /** Fixed so re-scheduling replaces the previous alarm instead of stacking a second one. */
     private static final int REQUEST_CODE = 7101;
@@ -147,7 +147,7 @@ public final class AlarmScheduler {
             Log.i(TAG, "alarm due: " + label);
             // Runs the foreground service, posts the full-screen alarm notification and asks the
             // web layer to start the sound and the ring UI.
-            MediaPlaybackService.startAlarm(app, label);
+            MediaPlaybackService.startAlarm(app, label, soundId);
         }
     }
 }
