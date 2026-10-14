@@ -27,11 +27,13 @@ import {
   Globe,
   Award,
   StickyNote,
-  MessagesSquare,
   MessageCircle,
+  Send,
   Wallet,
   Youtube,
   Timer,
+  CalendarDays,
+  Workflow,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useT, useLanguage } from "@/lib/language-context"
@@ -54,7 +56,7 @@ interface NavSection {
   title?: string
 }
 
-const NAV_SECTIONS: NavSection[] = [
+const RAW_NAV_SECTIONS: NavSection[] = [
   {
     title: "Study",
     items: [
@@ -69,8 +71,10 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Note Pad", labelKey: "sidebar.notePad", href: "/note-pad", icon: StickyNote, tab: "Note Pad" },
       { label: "Exam Marks", labelKey: "sidebar.examMarks", href: "/exam-marks", icon: Award, tab: "Marks" },
       { label: "Class Fees", labelKey: "sidebar.classFees", href: "/fees", icon: Wallet, tab: "Fees" },
+      { label: "My Classes", labelKey: "sidebar.classes", href: "/classes", icon: CalendarDays, tab: "Classes" },
+      { label: "Study Flow", labelKey: "sidebar.studyFlow", href: "/study-flow", icon: Workflow, tab: "Flow" },
       { label: "Diagram Lab", labelKey: "sidebar.diagramLab", href: "/diagrams", icon: Microscope, tab: "Diagrams" },
-      { label: "Telegram", labelKey: "sidebar.telegram", href: "/telegram", icon: MessagesSquare, tab: "Telegram" },
+      { label: "Telegram", labelKey: "sidebar.telegram", href: "/telegram", icon: Send, tab: "Telegram" },
       { label: "Messages", labelKey: "sidebar.messages", href: "/chat", icon: MessageCircle, tab: "Chat" },
       { label: "YT", labelKey: "sidebar.yt", href: "/yt", icon: Youtube, tab: "YT" },
       { label: "Download Manager", labelKey: "sidebar.download", href: "/downloads", icon: Download, tab: "Downloads" },
@@ -99,6 +103,19 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
 ]
+
+// The offline APK ships without AI generation: these routes are not exported and the
+// shim answers their APIs with 503, so the entries are dropped entirely (NEXT_PUBLIC_*
+// is inlined, so this folds away in the online build).
+const OFFLINE_HIDDEN = new Set(["/ai-tutor", "/diagrams", "/ai-timetable"])
+const OFFLINE_BUILD = process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1"
+
+const NAV_SECTIONS: NavSection[] = OFFLINE_BUILD
+  ? RAW_NAV_SECTIONS.map((section) => ({
+      ...section,
+      items: section.items.filter((item) => !OFFLINE_HIDDEN.has(item.href)),
+    }))
+  : RAW_NAV_SECTIONS
 
 interface SidebarProps {
   open: boolean
