@@ -79,6 +79,14 @@ let state: SyncState = {
 };
 
 let inFlight = false;
+let lastSyncAt = 0;
+
+/**
+ * Minimum spacing between the "opportunistic" syncs (tab became visible, network
+ * came back). Without this, flicking between apps produced one full account
+ * pull each time — and each pull re-reads every collection the account owns.
+ */
+const OPPORTUNISTIC_SYNC_MIN_MS = 60_000;
 let started = false;
 
 function url(path: string): string {
@@ -463,12 +471,14 @@ export async function runSync(): Promise<{ appliedKeys: string[] }> {
     }
 
     const identity = readIdentity();
+    const finishedAt = Date.now();
+    lastSyncAt = finishedAt;
     setState({
       status: "ok",
       error: "",
       connected: true,
       email: identity.email || state.email,
-      lastSyncedAt: Date.now(),
+      lastSyncedAt: finishedAt,
     });
     return { appliedKeys };
   } catch (error) {
@@ -497,9 +507,14 @@ export function startAccountSync(): () => void {
   void runSync();
 
   const onVisible = () => {
-    if (document.visibilityState === "visible") void runSync();
+    if (document.visibilityState !== "visible") return;
+    if (Date.now() - lastSyncAt < OPPORTUNISTIC_SYNC_MIN_MS) return;
+    void runSync();
   };
-  const onOnline = () => void runSync();
+  const onOnline = () => {
+    if (Date.now() - lastSyncAt < OPPORTUNISTIC_SYNC_MIN_MS) return;
+    void runSync();
+  };
   const onStorage = (e: StorageEvent) => {
     if (e.key && isTracked(e.key)) {
       void runSync();
@@ -510,15 +525,22 @@ export function startAccountSync(): () => void {
     }
   };
 
+  // A full account pull reads every collection the account owns (notes, decks,
+  // marks, planner, chat history) and the blob push rewrites those rows, so the
+  // background interval has to stay slow: at 60s the two of them together were
+  // what exhausted the database plan's monthly transfer allowance.
   const interval = window.setInterval(() => {
     if (document.visibilityState === "visible") void runSync();
-  }, 60_000);
+  }, 300_000);
 
   window.addEventListener("focus", onOnline);
   window.addEventListener("online", onOnline);
   window.addEventListener("storage", onStorage);
   document.addEventListener("visibilitychange", onVisible);
-  window.addEventListener("biopulse:sync-now", onOnline);
+  // An explicit "sync now" (dispatched by the native shell) always goes through:
+  // it is a deliberate user action, not an opportunistic wake-up.
+  const onSyncNow = () => void runSync();
+  window.addEventListener("biopulse:sync-now", onSyncNow);
 
   return () => {
     started = false;
@@ -527,6 +549,6 @@ export function startAccountSync(): () => void {
     window.removeEventListener("online", onOnline);
     window.removeEventListener("storage", onStorage);
     document.removeEventListener("visibilitychange", onVisible);
-    window.removeEventListener("biopulse:sync-now", onOnline);
+    window.removeEventListener("biopulse:sync-now", onSyncNow);
   };
 }

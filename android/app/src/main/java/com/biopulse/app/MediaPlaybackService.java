@@ -1979,8 +1979,14 @@ public class MediaPlaybackService extends Service {
     // per partner (ChatReplyReceiver.PREFS), so a message is announced exactly once no matter
     // which side spots it first.
 
-    /** Gap between background polls. Slow enough to spare the battery, quick enough to be useful. */
-    private static final long DM_POLL_MS = 30_000L;
+    /**
+     * Gap between background polls. This one request rebuilds the whole conversation list
+     * (including unread counts) from Postgres, so it is the single most expensive thing the
+     * app does while closed. 30s kept the database permanently awake and, together with the
+     * account-sync loop, exhausted the plan's monthly transfer allowance — 2 minutes still
+     * delivers a DM notification promptly at a quarter of the requests.
+     */
+    private static final long DM_POLL_MS = 120_000L;
     private static final int DM_HTTP_TIMEOUT_MS = 15_000;
 
     private static volatile boolean dmWatchActive = false;

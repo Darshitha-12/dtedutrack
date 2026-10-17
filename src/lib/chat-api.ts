@@ -28,6 +28,17 @@ export function chatPreflight(): NextResponse {
 }
 
 /**
+ * Whether a resolved user id still exists, cached per process.
+ *
+ * `resolveChatUser` used to run `user.findUnique` on every single poll, on top
+ * of the token lookup. The row rarely changes, so memoise it — the chat pages
+ * poll far more often than users are deleted.
+ */
+const USER_CACHE_TTL_MS = 5 * 60_000;
+const USER_CACHE_MAX = 500;
+const userCache = new Map<string, { exists: boolean; at: number }>();
+
+/**
  * Resolves the acting chat user from either the NextAuth cookie (web) or the
  * long-lived device token (Android APK). Returns null when neither identifies a
  * user that still exists.
@@ -35,6 +46,18 @@ export function chatPreflight(): NextResponse {
 export async function resolveChatUser(req: Request): Promise<{ id: string } | null> {
   const userId = await resolveSyncUserId(req);
   if (!userId) return null;
+
+  const now = Date.now();
+  const cached = userCache.get(userId);
+  if (cached && now - cached.at < USER_CACHE_TTL_MS) {
+    return cached.exists ? { id: userId } : null;
+  }
+
   const user = await db.user.findUnique({ where: { id: userId }, select: { id: true } });
+  if (userCache.size >= USER_CACHE_MAX && !userCache.has(userId)) {
+    const oldest = userCache.keys().next();
+    if (!oldest.done) userCache.delete(oldest.value);
+  }
+  userCache.set(userId, { exists: !!user, at: now });
   return user ? { id: user.id } : null;
 }

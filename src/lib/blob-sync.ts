@@ -290,27 +290,64 @@ export function mergeServerBlob(s: OfflineState, remoteRaw: unknown): void {
 }
 
 /**
+ * Fingerprint of the local blob.
+ *
+ * The phone is the only writer of most of this data, so an upload whose payload
+ * is byte-identical to the previous one is pure waste — the server's
+ * `applyBlob()` deletes and re-inserts every collection it is handed. Remembering
+ * the last uploaded fingerprint lets those no-op uploads be skipped entirely,
+ * which is where most of the account-sync traffic (and the resulting database
+ * writes) used to go.
+ */
+let lastPushedSig = "";
+
+function signatureOf(value: unknown): string {
+  let text: string;
+  try {
+    text = JSON.stringify(value) ?? "";
+  } catch {
+    return "";
+  }
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `${hash.toString(16)}:${text.length}`;
+}
+
+/**
  * One blob sync pass for the offline build: detect local deletions, pull the
  * server blob, merge it in, save, then push the merged blob back.
+ *
+ * `pull` / `push` can be disabled per call. Interval syncs pull and push; a
+ * sync triggered by a local edit only needs to push.
  */
-export async function syncBlob(): Promise<{ ok: boolean; merged: boolean }> {
+export async function syncBlob(
+  opts: { pull?: boolean; push?: boolean } = {},
+): Promise<{ ok: boolean; merged: boolean; pushed: boolean }> {
+  const pull = opts.pull !== false;
+  const push = opts.push !== false;
+
   const s = getState();
   detectLocalDeletions(s);
 
-  let res: Response;
-  try {
-    res = await fetch(`${BASE}/api/account/blob`, {
-      headers: authHeaders(),
-      credentials: "same-origin",
-      cache: "no-store",
-    });
-  } catch {
-    saveState();
-    return { ok: false, merged: false };
+  let res: Response | null = null;
+  if (pull) {
+    try {
+      res = await fetch(`${BASE}/api/account/blob`, {
+        headers: authHeaders(),
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+    } catch {
+      saveState();
+      return { ok: false, merged: false, pushed: false };
+    }
   }
 
   const before = JSON.stringify(s);
-  if (res.ok) {
+  if (res && res.ok) {
     try {
       const remote = await res.json();
       mergeServerBlob(s, remote?.blob ?? remote);
@@ -323,16 +360,25 @@ export async function syncBlob(): Promise<{ ok: boolean; merged: boolean }> {
   saveState();
   if (merged) resetCache();
 
-  if (!res.ok) return { ok: false, merged };
+  if (res && !res.ok) return { ok: false, merged, pushed: false };
 
-  const push = await fetch(`${BASE}/api/account/blob`, {
+  const state = getState();
+  const sig = signatureOf(state);
+  if (!push || sig === lastPushedSig) {
+    return { ok: true, merged, pushed: false };
+  }
+
+  const pushed = await fetch(`${BASE}/api/account/blob`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     credentials: "same-origin",
-    body: JSON.stringify({ blob: getState() }),
+    body: JSON.stringify({ blob: state }),
   });
 
-  if (push.ok) writeSeen(getState());
+  if (pushed.ok) {
+    lastPushedSig = sig;
+    writeSeen(getState());
+  }
 
   if (merged) {
     try {
@@ -343,5 +389,5 @@ export async function syncBlob(): Promise<{ ok: boolean; merged: boolean }> {
       /* no-op */
     }
   }
-  return { ok: push.ok, merged };
+  return { ok: pushed.ok, merged, pushed: pushed.ok };
 }

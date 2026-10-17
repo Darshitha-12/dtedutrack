@@ -23,9 +23,25 @@ interface PartnerState {
 let totalUnread = 0;
 let baselineSet = false;
 let pollerActive = false;
-let timer: ReturnType<typeof setInterval> | null = null;
+let timer: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<UnreadListener>();
 const prevPartners = new Map<string, PartnerState>();
+
+/**
+ * Unread badge poll.
+ *
+ * This is the app's only *global* poller — it runs on every page — so its cadence
+ * is the single biggest lever on how often an idle UI touches the database. The
+ * endpoint it reads, `/api/chat/conversations`, is also the most expensive read in
+ * the app because it rebuilds every conversation together with its unread count.
+ * So: 30s is plenty for a badge, a hidden page skips the fetch entirely (the
+ * native foreground service owns background delivery), and a failing fetch backs
+ * off instead of retrying at full rate.
+ */
+const UNREAD_POLL_MS = 30_000;
+const UNREAD_POLL_MAX_MS = 120_000;
+let failStreak = 0;
+let lastFetchOk = true;
 
 function emit(): void {
   listeners.forEach((l) => l(totalUnread));
@@ -147,8 +163,12 @@ interface ConversationItem {
 export async function refreshChatUnread(): Promise<number> {
   try {
     const res = await fetch("/api/chat/conversations", { credentials: "same-origin" });
-    if (!res.ok) return totalUnread;
+    if (!res.ok) {
+      lastFetchOk = false;
+      return totalUnread;
+    }
     const data = await res.json();
+    lastFetchOk = true;
     const list = (Array.isArray(data) ? data : data?.conversations ?? []) as ConversationItem[];
 
     let n = 0;
@@ -208,22 +228,42 @@ export async function refreshChatUnread(): Promise<number> {
     }
     return n;
   } catch {
+    lastFetchOk = false;
     return totalUnread;
   }
+}
+
+function scheduleNextPoll(delay: number): void {
+  if (!pollerActive) return;
+  timer = setTimeout(() => void pollUnread(), delay);
+}
+
+async function pollUnread(): Promise<void> {
+  if (!pollerActive) return;
+  if (typeof document === "undefined" || !document.hidden) {
+    await refreshChatUnread();
+    failStreak = lastFetchOk ? 0 : Math.min(failStreak + 1, 4);
+  }
+  const delay = lastFetchOk
+    ? UNREAD_POLL_MS
+    : Math.min(UNREAD_POLL_MAX_MS, UNREAD_POLL_MS * 2 ** failStreak);
+  scheduleNextPoll(delay);
 }
 
 function startPoller(): void {
   if (pollerActive) return;
   pollerActive = true;
-  void refreshChatUnread();
-  timer = setInterval(() => void refreshChatUnread(), 8000);
+  failStreak = 0;
+  if (typeof document === "undefined" || !document.hidden) void refreshChatUnread();
+  scheduleNextPoll(UNREAD_POLL_MS);
 }
 
 function stopPoller(): void {
   if (!pollerActive) return;
   pollerActive = false;
+  failStreak = 0;
   if (timer) {
-    clearInterval(timer);
+    clearTimeout(timer);
     timer = null;
   }
 }
@@ -234,6 +274,11 @@ export function useChatUnread(): { totalUnread: number } {
   useEffect(() => {
     listeners.add(setN);
     startPoller();
+    // Catch up the moment the page comes back — the poller stands down while hidden.
+    const onVisible = () => {
+      if (!document.hidden) void refreshChatUnread();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     // One-time user-gesture unlock for the Web Audio context so the
     // notification cue can actually play after the first tap.
     const unlock = () => {
@@ -250,6 +295,7 @@ export function useChatUnread(): { totalUnread: number } {
     return () => {
       listeners.delete(setN);
       if (listeners.size === 0) stopPoller();
+      document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("pointerdown", unlock);
       window.removeEventListener("click", unlock);
     };

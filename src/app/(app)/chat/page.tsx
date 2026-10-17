@@ -257,7 +257,15 @@ interface StatusItem {
   viewers?: { userId: string; name: string; image: string | null; viewedAt: string }[];
 }
 
-const POLL_MS = 3000;
+// Poll cadence. Chat delivery here is poll-based (the Supabase realtime channel
+// is gone), so these are a trade between how quickly a new message appears and
+// how many requests each open device sends. They are only used while the page is
+// actually visible — a background WebView is frozen and the native DM watcher
+// takes over.
+const POLL_MS = 6000;
+const RING_POLL_MS = 6000;
+/** Ceiling for the failure backoff: keeps a broken backend from being hammered. */
+const POLL_MAX_MS = 60_000;
 
 /** Quick reactions offered when a message is tapped. */
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
@@ -512,6 +520,12 @@ export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Dm[]>([]);
+  // Latest messages, readable from callbacks that must not be re-created on each
+  // message (markRead runs on every poll tick and is a dependency-stable ref).
+  const messagesRef = useRef<Dm[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
   const [text, setText] = useState("");
   const [replyDraft, setReplyDraft] = useState("");
   const [search, setSearch] = useState("");
@@ -608,25 +622,29 @@ export default function ChatPage() {
     setCallPeer(null);
   }, []);
 
-  const loadConversations = useCallback(async () => {
+  const loadConversations = useCallback(async (): Promise<boolean> => {
     try {
       const res = await fetch("/api/chat/conversations");
       if (res.ok) {
         const data = await res.json();
         setConversations(data.conversations || []);
         if (typeof data.me === "string" && data.me) setChatMeId(data.me);
-      } else if (res.status === 500) {
+        return true;
+      }
+      if (res.status === 500) {
         // Serverless DB may be resuming from idle — retry once.
         const retry = await fetch("/api/chat/conversations");
         if (retry.ok) {
           const data = await retry.json();
           setConversations(data.conversations || []);
           if (typeof data.me === "string" && data.me) setChatMeId(data.me);
+          return true;
         }
       }
     } catch {
       /* ignore */
     }
+    return false;
   }, []);
 
   const loadUsers = useCallback(async () => {
@@ -641,7 +659,7 @@ export default function ChatPage() {
     }
   }, []);
 
-  const loadMessages = useCallback(async (partnerId: string) => {
+  const loadMessages = useCallback(async (partnerId: string): Promise<boolean> => {
     try {
       setLoadingMsgs(true);
       let data: { messages?: Dm[] } | null = null;
@@ -656,24 +674,37 @@ export default function ChatPage() {
         // Merge rather than replace so an in-flight optimistic bubble is not wiped out
         // by a poll that raced the POST.
         setMessages((prev) => mergeMessages(next, prev));
+        return true;
       }
     } catch {
       /* ignore */
     } finally {
       setLoadingMsgs(false);
     }
+    return false;
   }, []);
 
   const markRead = useCallback(
-    async (partnerId: string) => {
-      try {
-        await fetch("/api/chat/read", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ partnerId }),
-        });
-      } catch {
-        /* ignore */
+    async (partnerId: string, opts: { force?: boolean } = {}) => {
+      // This runs on every poll tick. Asking the server to mark a thread read
+      // when nothing in it is unread is a database *write* every few seconds for
+      // as long as the thread stays open, so only send it when there is really
+      // something to clear — or when the caller just opened the thread and wants
+      // the badge gone immediately.
+      const hasUnread =
+        opts.force === true ||
+        messagesRef.current.some((m) => m.senderId === partnerId && !m.readAt);
+
+      if (hasUnread) {
+        try {
+          await fetch("/api/chat/read", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ partnerId }),
+          });
+        } catch {
+          /* ignore */
+        }
       }
       // The thread is on screen now, so take away any system notification for it (the Android
       // shell keeps one per partner until it is tapped or the conversation is read here).
@@ -691,7 +722,7 @@ export default function ChatPage() {
           m.senderId === partnerId && !m.readAt ? { ...m, readAt: new Date().toISOString() } : m,
         ),
       );
-      loadConversations();
+      if (hasUnread) loadConversations();
     },
     [loadConversations],
   );
@@ -714,10 +745,13 @@ export default function ChatPage() {
     loadUsers();
     updatePresence("online");
     // Heartbeat only while the tab is visible so a hidden/backgrounded tab
-    // doesn't flip the user back to "online" after we've gone offline.
+    // doesn't flip the user back to "online" after we've gone offline. Each beat
+    // is a database *write*, so it is deliberately slow: presence being a minute
+    // stale is invisible next to paying for a write every 15s on every open
+    // device. Going offline is immediate via the visibility/unload handlers.
     const hb = setInterval(() => {
       if (!document.hidden) updatePresence("online");
-    }, 15000);
+    }, 60000);
     const handleVisibility = () => updatePresence(document.hidden ? "offline" : "online");
     document.addEventListener("visibilitychange", handleVisibility);
     const beforeUnload = () => {
@@ -747,7 +781,9 @@ export default function ChatPage() {
       setMessages([]);
       loadUsers();
       loadMessages(id);
-      markRead(id);
+      // Opening a thread always clears its unread badge, even though the local
+      // message list is still empty at this instant.
+      markRead(id, { force: true });
     },
     [loadUsers, loadMessages, markRead],
   );
@@ -808,9 +844,22 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (tab !== "status") return;
-    loadStatuses();
-    const id = setInterval(loadStatuses, 30000);
-    return () => clearInterval(id);
+    const tick = () => {
+      if (document.hidden) return;
+      void loadStatuses();
+    };
+    tick();
+    // Statuses are ambient, and each poll re-reads the whole feed for every
+    // viewer, so refresh slowly and only while the tab is on screen.
+    const id = setInterval(tick, 60000);
+    const onVisible = () => {
+      if (!document.hidden) void loadStatuses();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [tab, loadStatuses]);
 
   const postStatus = async () => {
@@ -1012,24 +1061,48 @@ export default function ChatPage() {
   }, [viewerProgress, viewerItems]);
 
   useEffect(() => {
-    const tick = () => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let failStreak = 0;
+
+    function schedule(ms: number) {
+      if (stopped) return;
+      timer = setTimeout(() => void tick(), ms);
+    }
+
+    async function tick() {
       // While the app is in the background the native DM watcher (MediaPlaybackService)
       // owns delivery, so the page poller stands down and protects the battery.
-      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      loadConversations();
-      if (activeRoomRef.current) {
-        loadMessages(activeRoomRef.current);
-        markRead(activeRoomRef.current);
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        schedule(POLL_MS);
+        return;
       }
-    };
-    const poll = setInterval(tick, POLL_MS);
+      let ok = await loadConversations();
+      const room = activeRoomRef.current;
+      if (room) {
+        const messagesOk = await loadMessages(room);
+        markRead(room);
+        ok = ok && messagesOk;
+      }
+      // Back off while the backend is unhealthy (database suspended, no network).
+      // Polling at full rate through an outage only multiplies the load that made
+      // it unhealthy in the first place.
+      failStreak = ok ? 0 : Math.min(failStreak + 1, 5);
+      schedule(ok ? POLL_MS : Math.min(POLL_MAX_MS, POLL_MS * 2 ** failStreak));
+    }
+
+    schedule(POLL_MS);
     // Catch up immediately after returning to the app (the interval may have been frozen).
     const onVisible = () => {
-      if (document.visibilityState === "visible") tick();
+      if (document.visibilityState !== "visible") return;
+      if (timer) clearTimeout(timer);
+      failStreak = 0;
+      void tick();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
-      clearInterval(poll);
+      stopped = true;
+      if (timer) clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [loadConversations, loadMessages, markRead]);
@@ -1070,30 +1143,53 @@ export default function ChatPage() {
   useEffect(() => {
     if (!me) return;
     let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let failStreak = 0;
 
-    const check = async () => {
+    function schedule(ms: number) {
+      if (stopped) return;
+      timer = setTimeout(() => void check(), ms);
+    }
+
+    async function check() {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        schedule(RING_POLL_MS);
+        return;
+      }
+      let ok = false;
       try {
         const res = await fetch("/api/chat/call-signal/incoming", { cache: "no-store" });
-        if (!res.ok || stopped) return;
-        const data = (await res.json()) as {
-          caller?: CallPeer & { callId: string; kind?: CallKind };
-        };
-        const caller = data.caller;
-        if (!caller?.id || caller.id === me) return;
-        if (callPeerRef.current) return; // already in a call
-        setCallKind(caller.kind === "voice" ? "voice" : "video");
-        setCallRole("callee");
-        setCallPeer({ id: caller.id, name: caller.name, avatar: caller.avatar });
+        ok = res.ok;
+        if (ok && !stopped) {
+          const data = (await res.json()) as {
+            caller?: CallPeer & { callId: string; kind?: CallKind };
+          };
+          const caller = data.caller;
+          if (caller?.id && caller.id !== me && !callPeerRef.current) {
+            setCallKind(caller.kind === "voice" ? "voice" : "video");
+            setCallRole("callee");
+            setCallPeer({ id: caller.id, name: caller.name, avatar: caller.avatar });
+          }
+        }
       } catch {
-        /* ignore */
+        ok = false;
       }
-    };
+      failStreak = ok ? 0 : Math.min(failStreak + 1, 5);
+      schedule(ok ? RING_POLL_MS : Math.min(POLL_MAX_MS, RING_POLL_MS * 2 ** failStreak));
+    }
 
     void check();
-    const iv = window.setInterval(check, 3000);
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (timer) clearTimeout(timer);
+      failStreak = 0;
+      void check();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       stopped = true;
-      clearInterval(iv);
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [me]);
 
