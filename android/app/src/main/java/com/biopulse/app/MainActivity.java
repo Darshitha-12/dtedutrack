@@ -812,7 +812,13 @@ public class MainActivity extends BridgeActivity {
             if (s.startsWith("/")) return null;
             if (s.contains("..") || s.contains("\u0000") || s.contains(":")) return null;
             if (s.length() == 0 || s.length() > 512) return null;
-            if (!s.matches("[A-Za-z0-9._/-]+")) return null;
+            // Next.js emits route-group folders such as `_next/static/chunks/app/(app)/chat/…`,
+            // so "(" and ")" (and "[" / "]") have to be writable. Rejecting them made every
+            // chunk under a route group fail, which aborted the whole OTA install — the app
+            // silently stayed on the bundle it shipped with. Path traversal is still blocked by
+            // the "..", leading-slash, ":" and NUL checks above plus the canonical-path check in
+            // writeWebFile.
+            if (!s.matches("[A-Za-z0-9._/()\\[\\]-]+")) return null;
             return s;
         }
 
