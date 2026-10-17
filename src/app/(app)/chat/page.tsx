@@ -741,6 +741,10 @@ export default function ChatPage() {
       activeRoomRef.current = id;
       setMobilePane("chat");
       setNewChatOpen(false);
+      // Drop the previous thread first: its bubbles would otherwise keep rendering under the
+      // new partner until the fetch lands, and since ownership is derived from the partner they
+      // would all paint as ours — the very "both sides on one side" glitch.
+      setMessages([]);
       loadUsers();
       loadMessages(id);
       markRead(id);
@@ -1460,6 +1464,20 @@ export default function ChatPage() {
   const activeConv = conversations.find((c) => c.id === activeId) || null;
   const activeOnline = activeConv?.status === "online";
 
+  /**
+   * Whose bubble is this?
+   *
+   * Never trust only `me` here. On the Android build the offline session carries a
+   * synthetic id ("offline-user") that can never equal a real sender id, so comparing
+   * against `me` alone painted *every* bubble as received (both sides on one side) and
+   * hid the seen ticks. Inside a thread we always know the partner, so anything that did
+   * not come from the partner is ours — correct even while `me` is still resolving.
+   */
+  const isMine = useCallback(
+    (m: Dm) => (activeId ? m.senderId !== activeId : m.senderId === me),
+    [activeId, me],
+  );
+
   const filteredConversations = conversations.filter(
     (c) => c.name.toLowerCase().includes(search.toLowerCase()),
   );
@@ -1887,7 +1905,7 @@ export default function ChatPage() {
                 </div>
               ) : (
                 messages.map((m, i) => {
-                  const mine = m.senderId === me;
+                  const mine = isMine(m);
                   const prev = messages[i - 1];
                   const showDay = !prev || formatDay(prev.createdAt) !== formatDay(m.createdAt);
                   return (
@@ -2508,7 +2526,7 @@ export default function ChatPage() {
                 <Trash2 className="h-4 w-4 text-muted-foreground" />
                 Delete for me
               </button>
-              {actionMsg.senderId === me && !actionMsg.pending && (
+              {isMine(actionMsg) && !actionMsg.pending && (
                 <button
                   type="button"
                   onClick={() => deleteMessage(actionMsg.id, "everyone")}

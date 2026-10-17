@@ -10,6 +10,7 @@ import { topicPerformances, weakTopicRows, wrongQuestionIds } from "./quiz";
 import {
   getState,
   mutate,
+  meId,
   ME,
   type OfflineState,
   type NotepadEntry,
@@ -33,7 +34,7 @@ export function fakeSession(): Record<string, unknown> {
   const p = getState().profile;
   return {
     user: {
-      id: ME,
+      id: meId(),
       name: p.name,
       email: p.email,
       image: p.image,

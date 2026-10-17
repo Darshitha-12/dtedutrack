@@ -1,12 +1,25 @@
 // Chat endpoints. Offline there are no other users, so lists stay empty and
 // presence/status round-trips simply succeed against local state.
 
-import { getState, mutate, ME, type StoredChatMessage, type StoredStatus } from "./store";
+import { getState, mutate, meId, ME, type StoredChatMessage, type StoredStatus } from "./store";
 import { nowIso, uid } from "./runtime";
 
 type Result = { status: number; body: Record<string, unknown> };
 
 const SESSION_EXPIRED = "Session expired. Please sign in again.";
+
+/**
+ * Stored messages can carry either the real account id (synced from the server) or the
+ * synthetic offline id (created on the device before it was linked), so treat both as "me".
+ */
+function isMe(id: string): boolean {
+  return id === ME || id === meId();
+}
+
+/** The other side of a stored message. */
+function partnerOf(m: StoredChatMessage): string {
+  return isMe(m.senderId) ? m.receiverId : m.senderId;
+}
 
 function otherUsers(): { id: string; name: string; fullName: string; email: string; image: string | null; about: string; status: string; lastSeen: string | null }[] {
   // No other accounts exist offline.
@@ -17,7 +30,7 @@ export function chatConversations(): Result {
   const state = getState();
   const byPartner = new Map<string, StoredChatMessage[]>();
   for (const m of state.chatMessages) {
-    const partner = m.senderId === ME ? m.receiverId : m.senderId;
+    const partner = partnerOf(m);
     const list = byPartner.get(partner) ?? [];
     list.push(m);
     byPartner.set(partner, list);
@@ -36,7 +49,7 @@ export function chatConversations(): Result {
             : last.mediaType === "audio"
               ? "🎤 Voice note"
               : `📎 ${last.mediaName || "File"}`);
-      const mine = last.senderId === ME;
+      const mine = isMe(last.senderId);
       const user = users.find((u) => u.id === partner);
       return {
         id: partner,
@@ -47,11 +60,11 @@ export function chatConversations(): Result {
         lastMessage: (mine ? "You: " : "") + preview,
         lastMessageIsMine: mine,
         lastMessageAt: last.createdAt,
-        unread: sorted.filter((m) => m.senderId !== ME && !m.readAt).length,
+        unread: sorted.filter((m) => !isMe(m.senderId) && !m.readAt).length,
       };
     })
     .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
-  return { status: 200, body: { conversations, me: ME } };
+  return { status: 200, body: { conversations, me: meId() } };
 }
 
 export function chatUsers(): Result {
@@ -66,8 +79,8 @@ export function chatMessages(query: URLSearchParams): Result {
   const messages = state.chatMessages
     .filter(
       (m) =>
-        (m.senderId === ME && m.receiverId === partnerId) ||
-        (m.senderId === partnerId && m.receiverId === ME),
+        (isMe(m.senderId) && m.receiverId === partnerId) ||
+        (m.senderId === partnerId && isMe(m.receiverId)),
     )
     .filter((m) => !hidden.has(m.id))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
@@ -90,7 +103,9 @@ export function chatMessages(query: URLSearchParams): Result {
 export function sendChatMessage(body: Record<string, unknown>): Result {
   const partnerId = String(body.partnerId ?? "");
   if (!partnerId) return { status: 400, body: { error: "partnerId required" } };
-  if (partnerId === ME) return { status: 400, body: { error: "Cannot message yourself" } };
+  if (isMe(partnerId)) return { status: 400, body: { error: "Cannot message yourself" } };
+  // Offline there are no other accounts, and the blob sync does not write messages back to
+  // the server — so a locally-stored send would look sent yet never reach anyone. Refuse it.
   if (!otherUsers().some((u) => u.id === partnerId)) {
     return { status: 404, body: { error: "User not found" } };
   }
@@ -99,7 +114,7 @@ export function sendChatMessage(body: Record<string, unknown>): Result {
   if (!text && !mediaUrl) return { status: 400, body: { error: "Message is empty" } };
   const msg: StoredChatMessage = {
     id: uid(),
-    senderId: ME,
+    senderId: meId(),
     receiverId: partnerId,
     text,
     mediaUrl,
@@ -129,10 +144,10 @@ export function sendChatMessage(body: Record<string, unknown>): Result {
 export function clearChatMessages(body: Record<string, unknown>): Result {
   const partnerId = String(body.partnerId ?? "");
   if (!partnerId) return { status: 400, body: { error: "partnerId required" } };
-  if (partnerId === ME) return { status: 400, body: { error: "Cannot clear your own thread" } };
+  if (isMe(partnerId)) return { status: 400, body: { error: "Cannot clear your own thread" } };
   mutate((s) => {
     s.chatMessages = s.chatMessages.filter(
-      (m) => !((m.senderId === ME && m.receiverId === partnerId) || (m.senderId === partnerId && m.receiverId === ME)),
+      (m) => !((isMe(m.senderId) && m.receiverId === partnerId) || (m.senderId === partnerId && isMe(m.receiverId))),
     );
   });
   return { status: 200, body: { ok: true } };
@@ -173,7 +188,7 @@ export function chatRead(body: Record<string, unknown>): Result {
   let marked = 0;
   mutate((s) => {
     for (const m of s.chatMessages) {
-      if (m.senderId === partnerId && m.receiverId === ME && !m.readAt) {
+      if (m.senderId === partnerId && isMe(m.receiverId) && !m.readAt) {
         m.readAt = nowIso();
         marked += 1;
       }
@@ -185,10 +200,10 @@ export function chatRead(body: Record<string, unknown>): Result {
 export function deleteConversation(body: Record<string, unknown>): Result {
   const partnerId = String(body.partnerId ?? "");
   if (!partnerId) return { status: 400, body: { error: "partnerId required" } };
-  if (partnerId === ME) return { status: 400, body: { error: "Cannot delete your own thread" } };
+  if (isMe(partnerId)) return { status: 400, body: { error: "Cannot delete your own thread" } };
   mutate((s) => {
     s.chatMessages = s.chatMessages.filter(
-      (m) => !((m.senderId === ME && m.receiverId === partnerId) || (m.senderId === partnerId && m.receiverId === ME)),
+      (m) => !((isMe(m.senderId) && m.receiverId === partnerId) || (m.senderId === partnerId && isMe(m.receiverId))),
     );
   });
   return { status: 200, body: { ok: true } };

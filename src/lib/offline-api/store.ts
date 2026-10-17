@@ -7,6 +7,29 @@ import { nowIso, uid } from "./runtime";
 
 export const ME = "offline-user";
 const LS_KEY = "biopulse-offline-v1";
+const SYNC_IDENTITY_KEY = "biopulse.sync.identity";
+
+/**
+ * The real account id once this device is linked to an account (account-sync saves it as
+ * `biopulse.sync.identity = { id, email, name }`), falling back to the synthetic offline id.
+ *
+ * The chat shim needs this: `chatConversations()` reports `me`, and the chat page trusts it.
+ * If it always said "offline-user" while the synced messages carried real sender ids, every
+ * bubble was painted as received (both sides on one side) and the seen ticks vanished.
+ */
+export function meId(): string {
+  try {
+    const raw = typeof window !== "undefined" ? window.localStorage.getItem(SYNC_IDENTITY_KEY) : null;
+    if (raw) {
+      const id = (JSON.parse(raw) as { id?: string }).id;
+      if (typeof id === "string" && id) return id;
+    }
+  } catch {
+    /* corrupted identity — fall back below */
+  }
+  return ME;
+}
+
 
 export interface StoredProfile {
   name: string;
