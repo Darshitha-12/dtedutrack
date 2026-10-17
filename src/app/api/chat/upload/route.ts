@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { supabaseAdmin, isSupabaseConfigured } from "@/lib/supabase-admin";
+import { chatPreflight, resolveChatUser } from "@/lib/chat-api";
 
 const BUCKET = "chat-media";
 const MAX_BYTES = 15 * 1024 * 1024; // 15MB
 const MAX_INLINE_BYTES = 10 * 1024 * 1024; // base64 data-URL fallback cap (10MB raw)
 
+export async function OPTIONS() {
+  return chatPreflight();
+}
+
 export async function POST(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const me = await resolveChatUser(req);
+    if (!me) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -52,7 +56,7 @@ export async function POST(req: Request) {
     }
 
     const safeName = (file.name || "file").replace(/[^a-zA-Z0-9._-]/g, "_");
-    const path = `${session.user.id}/${Date.now()}-${safeName}`;
+    const path = `${me.id}/${Date.now()}-${safeName}`;
 
     const { error } = await supabaseAdmin.storage
       .from(BUCKET)

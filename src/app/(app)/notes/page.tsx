@@ -8,7 +8,10 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Loader2, Sparkles, Trash2, Eye, Plus, FileText } from "lucide-react";
+import { Loader2, Sparkles, Trash2, Eye, Plus, FileText, PenLine } from "lucide-react";
+
+// Offline APK: no AI generation — the AI form is replaced by a manual composer.
+const OFFLINE_BUILD = process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1";
 
 interface Note {
   id: string;
@@ -105,6 +108,34 @@ export default function NotesPage() {
     }
   };
 
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!topic.trim()) {
+      setError("Please enter a title.");
+      return;
+    }
+    setError("");
+    setLoading(true);
+    setSelected(null);
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic, content: prompt }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to save note");
+      setSelected(data);
+      setTopic("");
+      setPrompt("");
+      await loadNotes();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     try {
       const res = await fetch(`/api/notes?id=${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -120,7 +151,11 @@ export default function NotesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Study Notes"
-        description="Generate structured A/L study notes with AI and manage your saved notes."
+        description={
+          OFFLINE_BUILD
+            ? "Write structured A/L study notes and manage your saved notes."
+            : "Generate structured A/L study notes with AI and manage your saved notes."
+        }
       />
 
       <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
@@ -129,36 +164,50 @@ export default function NotesPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
-                <Sparkles className="h-4 w-4 text-primary" />
-                Generate with AI
+                {OFFLINE_BUILD ? (
+                  <>
+                    <PenLine className="h-4 w-4 text-primary" />
+                    New Note
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    Generate with AI
+                  </>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleGenerate} className="space-y-3">
+              <form onSubmit={OFFLINE_BUILD ? handleCreate : handleGenerate} className="space-y-3">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    Topic
+                    {OFFLINE_BUILD ? "Title" : "Topic"}
                   </label>
                   <Input
                     value={topic}
                     onChange={(e) => setTopic(e.target.value)}
-                    placeholder="e.g. Photosynthesis"
+                    placeholder={OFFLINE_BUILD ? "e.g. Photosynthesis summary" : "e.g. Photosynthesis"}
                     disabled={loading}
                   />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    Extra instructions (optional)
+                    {OFFLINE_BUILD ? "Content" : "Extra instructions (optional)"}
                   </label>
                   <textarea
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="e.g. Focus on light reactions with bullet points"
+                    placeholder={
+                      OFFLINE_BUILD
+                        ? "Write your note here. Use # headings, - lists, plain paragraphs..."
+                        : "e.g. Focus on light reactions with bullet points"
+                    }
                     disabled={loading}
-                    rows={3}
+                    rows={OFFLINE_BUILD ? 8 : 3}
                     className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                   />
                 </div>
+                {!OFFLINE_BUILD && (
                 <div>
                   <label className="mb-1 block text-xs font-medium text-muted-foreground">
                     Language
@@ -172,6 +221,7 @@ export default function NotesPage() {
                     <option value="Sinhala">සිංහල</option>
                   </Select>
                 </div>
+                )}
                 {error && (
                   <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
                     {error}
@@ -181,7 +231,12 @@ export default function NotesPage() {
                   {loading ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Generating...
+                      {OFFLINE_BUILD ? "Saving..." : "Generating..."}
+                    </>
+                  ) : OFFLINE_BUILD ? (
+                    <>
+                      <PenLine className="h-4 w-4" />
+                      Save Note
                     </>
                   ) : (
                     <>
@@ -205,7 +260,7 @@ export default function NotesPage() {
             <CardContent>
               {notes.length === 0 ? (
                 <p className="py-4 text-center text-sm text-muted-foreground">
-                  No notes yet. Generate your first one!
+                  No notes yet. {OFFLINE_BUILD ? "Create your first one!" : "Generate your first one!"}
                 </p>
               ) : (
                 <ul className="space-y-2">
@@ -261,7 +316,11 @@ export default function NotesPage() {
             <EmptyState
               icon="📝"
               title="Select a note"
-              description="Generate a note with AI or pick one from your saved list to view it here."
+              description={
+                OFFLINE_BUILD
+                  ? "Create a note or pick one from your saved list to view it here."
+                  : "Generate a note with AI or pick one from your saved list to view it here."
+              }
             />
           )}
         </Card>

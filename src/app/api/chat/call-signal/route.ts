@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireDbUser } from "@/lib/require-db-user";
 import { db } from "@/lib/db";
 import {
   CALL_SIGNAL_MEDIA_TYPE,
   CALL_SIGNAL_TTL_MS,
   CALL_SIGNAL_MAX_BYTES,
 } from "@/lib/call-signal";
+import { chatPreflight, resolveChatUser } from "@/lib/chat-api";
 
 // ============================================================
 // WebRTC signaling relay over the existing `direct_messages` table.
@@ -21,10 +21,16 @@ import {
 
 export const dynamic = "force-dynamic";
 
+export async function OPTIONS() {
+  return chatPreflight();
+}
+
 const postSchema = z.object({
   callId: z.string().min(1).max(120),
   toId: z.string().min(1).max(64),
   kind: z.enum(["hello", "offer", "answer", "ice", "accept", "decline", "bye"]),
+  /** Voice or video. Carried so the callee can ring/render the right UI. */
+  callKind: z.enum(["voice", "video"]).optional(),
   sdp: z.unknown().optional(),
   ice: z.unknown().optional(),
   caller: z
@@ -38,8 +44,7 @@ const postSchema = z.object({
 
 export async function POST(req: Request) {
   try {
-    const session = await requireDbUser();
-    const me = session?.user?.id;
+    const me = (await resolveChatUser(req))?.id;
     if (!me) {
       return NextResponse.json(
         { error: "Session expired. Please sign in again." },
@@ -52,7 +57,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid signal." }, { status: 400 });
     }
 
-    const { callId, toId, kind, sdp, ice, caller } = parsed.data;
+    const { callId, toId, kind, callKind, sdp, ice, caller } = parsed.data;
     if (toId === me) {
       return NextResponse.json({ error: "Cannot signal yourself." }, { status: 400 });
     }
@@ -66,7 +71,7 @@ export async function POST(req: Request) {
       data: {
         senderId: me,
         receiverId: toId,
-        text: JSON.stringify({ kind, sdp: sdp ?? null, ice: ice ?? null }),
+        text: JSON.stringify({ kind, sdp: sdp ?? null, ice: ice ?? null, callKind: callKind ?? null }),
         mediaType: CALL_SIGNAL_MEDIA_TYPE,
         mediaName: `${callId}|${kind}`,
       },
@@ -80,8 +85,7 @@ export async function POST(req: Request) {
 
 export async function GET(req: Request) {
   try {
-    const session = await requireDbUser();
-    const me = session?.user?.id;
+    const me = (await resolveChatUser(req))?.id;
     if (!me) {
       return NextResponse.json(
         { error: "Session expired. Please sign in again." },
@@ -134,6 +138,7 @@ export async function GET(req: Request) {
         from: r.senderId,
         callId: rowCallId,
         kind,
+        callKind: (body.callKind as string | null) ?? null,
         sdp: body.sdp ?? null,
         ice: body.ice ?? null,
         at: r.createdAt.toISOString(),
@@ -148,8 +153,7 @@ export async function GET(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const session = await requireDbUser();
-    const me = session?.user?.id;
+    const me = (await resolveChatUser(req))?.id;
     if (!me) {
       return NextResponse.json(
         { error: "Session expired. Please sign in again." },

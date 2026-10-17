@@ -12,21 +12,32 @@ class BrowserNotificationProvider implements NotificationProvider {
 
     try {
       if ("serviceWorker" in navigator) {
-        const reg = await navigator.serviceWorker.ready;
-        await reg.showNotification(title, {
-          body,
-          icon: "/icon-192.png",
-          badge: "/icon-192.png",
-          tag: `bp-${Date.now()}`,
-          renotify: true,
-          vibrate: [200, 100, 200, 100, 500],
-          ...({
-            urgency: "high",
-            priority: 2,
-          } as Record<string, unknown>),
-          ...options,
-        } as NotificationOptions);
-        return true;
+        // `.ready` never settles once the service worker has been unregistered (the native app
+        // removes it), so awaiting it outright left this promise pending forever and the
+        // notification simply never appeared. Race it against a short timeout and fall through
+        // to the plain constructor when no registration materialises.
+        const reg = await Promise.race([
+          navigator.serviceWorker.ready,
+          new Promise<ServiceWorkerRegistration | null>((resolve) =>
+            setTimeout(() => resolve(null), 800),
+          ),
+        ]);
+        if (reg) {
+          await reg.showNotification(title, {
+            body,
+            icon: "/icon-192.png",
+            badge: "/icon-192.png",
+            tag: `bp-${Date.now()}`,
+            renotify: true,
+            vibrate: [200, 100, 200, 100, 500],
+            ...({
+              urgency: "high",
+              priority: 2,
+            } as Record<string, unknown>),
+            ...options,
+          } as NotificationOptions);
+          return true;
+        }
       }
 
       new Notification(title, { body, ...options } as NotificationOptions);

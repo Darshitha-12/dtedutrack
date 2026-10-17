@@ -1,0 +1,11 @@
+node_modules/
+.next/
+.next-offline/
+out/
+.offline-stash/
+android/
+vercel_deploy.log
+build_out.log
+*.apk
+*.tsbuildinfo
+__tests__/

@@ -7,7 +7,7 @@
  */
 
 interface RingBridge {
-  setAlarmRinging?: (ringing: boolean, label: string) => void;
+  setAlarmRinging?: (ringing: boolean, label: string, soundId?: string | null) => void;
 }
 
 function getBridge(): RingBridge | null {
@@ -16,9 +16,18 @@ function getBridge(): RingBridge | null {
   return w.BioPulseBridge ?? null;
 }
 
-export function holdBackgroundPlayback(ringing: boolean, label = "Alarm"): void {
+/**
+ * `soundId` must reach the native side with every "start ringing" call: it is how the native
+ * fallback tone knows which sound the user picked (a custom file from its native cache, or a
+ * built-in tone), instead of ringing a generic system sound.
+ */
+export function holdBackgroundPlayback(
+  ringing: boolean,
+  label = "Alarm",
+  soundId?: string | null,
+): void {
   try {
-    getBridge()?.setAlarmRinging?.(ringing, label);
+    getBridge()?.setAlarmRinging?.(ringing, label, soundId ?? null);
   } catch {
     /* bridge unavailable (web build, or native side rejected the call) */
   }

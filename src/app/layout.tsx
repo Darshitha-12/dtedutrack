@@ -3,6 +3,7 @@ import { Inter } from "next/font/google"
 import { AuthProvider } from "@/components/auth-provider"
 import { PwaRegister } from "@/components/pwa-register"
 import { BUILD_STAMP } from "@/lib/build-stamp"
+import { OfflineApiBootstrap } from "@/lib/offline-api/bootstrap"
 import "./globals.css"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -76,6 +77,7 @@ export default function RootLayout({
         />
       </head>
       <body className={inter.className}>
+        {process.env.OFFLINE_BUILD === "1" && <OfflineApiBootstrap />}
         <PwaRegister />
         <AuthProvider>{children}</AuthProvider>
       </body>

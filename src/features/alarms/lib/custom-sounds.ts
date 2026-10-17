@@ -263,7 +263,60 @@ export class SoundTooLargeError extends Error {}
  * cannot wedge storage.
  */
 
-async function saveToNative(id: string, bytes: ArrayBuffer, mime: string): Promise<void> { try { const b = nativeBridgeExt(); if (b?.saveCustomSound) { const chunk = new Uint8Array(bytes); let binary = ''; const len = chunk.length; for (let i=0;i<len;i++) binary += String.fromCharCode(chunk[i]); const base64 = btoa(binary); b.saveCustomSound(id, base64, mime || 'audio/mpeg'); } } catch (e) { console.warn('native save failed', e); } }
+/**
+ * Writes the sound into the app's private storage so the native alarm player can ring from it.
+ *
+ * <p>Returns whether the bytes actually landed. The old version swallowed every failure and the
+ * caller marked the id as "checked" regardless, so one failed write (bridge hiccup, missing blob)
+ * left the sound permanently uncopied until an app restart — with the alarm then falling back to
+ * the system ringtone every time. Callers now retry on false.
+ */
+async function saveToNative(id: string, bytes: ArrayBuffer, mime: string): Promise<boolean> {
+  try {
+    const b = nativeBridgeExt();
+    if (!b) return false;
+    const u8 = new Uint8Array(bytes);
+    // Preferred path: transfer in 256KB chunks. One giant base64 string through the Java bridge
+    // is where this used to die silently on low-memory devices — the argument conversion holds
+    // the whole thing in memory several times over. Chunks stay small, each one is acknowledged,
+    // and the native side only registers the file after verifying the total length.
+    if (b.beginCustomSound && b.appendCustomSound && b.endCustomSound) {
+      if (!b.beginCustomSound(id, mime || "audio/mpeg")) {
+        console.warn("[native-sound] beginCustomSound failed for", id);
+        return false;
+      }
+      const CHUNK = 256 * 1024;
+      for (let off = 0; off < u8.length; off += CHUNK) {
+        const slice = u8.subarray(off, Math.min(off + CHUNK, u8.length));
+        let binary = "";
+        for (let i = 0; i < slice.length; i++) binary += String.fromCharCode(slice[i]);
+        if (!b.appendCustomSound(btoa(binary))) {
+          console.warn("[native-sound] appendCustomSound failed at byte", off, "of", u8.length);
+          return false;
+        }
+      }
+      if (!b.endCustomSound(id, u8.length)) {
+        console.warn("[native-sound] endCustomSound rejected for", id);
+        return false;
+      }
+      console.info("[native-sound] chunked copy complete for", id, u8.length, "bytes");
+      return true;
+    }
+    // Fallback for older bridges: single-shot write.
+    if (!b.saveCustomSound) return false;
+    let binary = "";
+    for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8[i]);
+    const saved = b.saveCustomSound(id, btoa(binary), mime || "audio/mpeg");
+    if (saved !== true) {
+      console.warn("[native-sound] saveCustomSound reported failure for", id);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn("[native-sound] native save failed for", id, e);
+    return false;
+  }
+}
 export async function addCustomSound(file: File): Promise<CustomSoundMeta> {
   const MAX_BYTES = 25 * 1024 * 1024;
   if (file.size > MAX_BYTES) {
@@ -318,6 +371,17 @@ export async function addCustomSound(file: File): Promise<CustomSoundMeta> {
     record.size = stored.size;
   }
 
+  // Push a native copy straight away instead of waiting for the next scheduler publish: with the
+  // app closed, the native player can only ring from its own copy of the file. Best effort — the
+  // scheduler re-pushes (and retries) on every publish until native confirms the file exists.
+  if (bytes.byteLength > 0) {
+    nativeCopyAttemptedAt.set(id, Date.now());
+    nativeCopySaving.add(id);
+    void saveToNative(id, bytes, record.mime).then((ok) => {
+      if (ok) nativeCopyChecked.add(id);
+    }).finally(() => nativeCopySaving.delete(id));
+  }
+
   notifyChanged();
   return toMeta(record);
 }
@@ -344,6 +408,55 @@ export async function getCustomSoundBytes(id: string): Promise<ArrayBuffer | nul
     return await blob.arrayBuffer();
   } catch {
     return null;
+  }
+}
+
+const nativeCopyChecked = new Set<string>();
+/** Last transfer attempt per id — retries run at most every 10s, not on every scheduler tick. */
+const nativeCopyAttemptedAt = new Map<string, number>();
+/** Ids mid-transfer, so the add-time push and the scheduler retry can never interleave writes. */
+const nativeCopySaving = new Set<string>();
+
+/**
+ * Makes sure the sound also exists in the app's native storage.
+ *
+ * <p>With the app closed the WebView is gone, so the native side rings the alarm instead — but it
+ * can only play a custom file it has a copy of. Sounds saved before the native cache existed (or
+ * while it failed) would otherwise fall back to a generic tone, so the copy is (re)pushed here the
+ * first time a sound is handed to the OS scheduler. Idempotent and best-effort.
+ */
+export async function ensureNativeSoundCopy(id: string): Promise<void> {
+  if (!id || nativeCopyChecked.has(id)) return;
+  if (nativeCopySaving.has(id)) return;
+  const last = nativeCopyAttemptedAt.get(id) ?? 0;
+  if (Date.now() - last < 10_000) return;
+  nativeCopyAttemptedAt.set(id, Date.now());
+  nativeCopySaving.add(id);
+  try {
+    const b = nativeBridgeExt();
+    // Not present: leave the id unmarked so the next scheduler publish tries again.
+    if (!b?.saveCustomSound || !b?.hasCustomSound) return;
+    if (b.hasCustomSound(id)) {
+      nativeCopyChecked.add(id);
+      return;
+    }
+    const blob = await getCustomSoundBlob(id);
+    if (!blob) return;
+    const bytes = await blob.arrayBuffer();
+    const saved = await saveToNative(id, bytes, blob.type || "");
+    // Mark as done only once the file is verifiably on disk; anything else stays retryable,
+    // because with the app closed a missing copy is exactly what turns the selected sound into
+    // the generic system ringtone.
+    if (saved && b.hasCustomSound(id)) {
+      nativeCopyChecked.add(id);
+      console.info("[native-sound] native copy ready for", id, bytes.byteLength, "bytes");
+    } else {
+      console.warn("[native-sound] native copy NOT ready for", id, "- will retry on next publish");
+    }
+  } catch (e) {
+    console.warn("[native-sound] ensure failed for", id, e);
+  } finally {
+    nativeCopySaving.delete(id);
   }
 }
 

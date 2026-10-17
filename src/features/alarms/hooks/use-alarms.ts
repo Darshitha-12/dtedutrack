@@ -71,6 +71,13 @@ export function useAlarms() {
     loadAlarms();
   }, [loadAlarms]);
 
+  // Re-read when account sync writes a newer list from another device.
+  useEffect(() => {
+    const onRemote = () => loadAlarms();
+    window.addEventListener("biopulse:alarms-changed", onRemote);
+    return () => window.removeEventListener("biopulse:alarms-changed", onRemote);
+  }, [loadAlarms]);
+
   useEffect(() => {
     if (alarms.length > 0 || Object.keys(fired).length > 0) {
       saveAlarms();

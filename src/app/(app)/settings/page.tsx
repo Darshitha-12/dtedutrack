@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,15 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { OFFLINE_ROUTES } from "@/lib/offline-routes";
 import { nativeBridge } from "@/lib/native-shell";
+import { AccountSyncCard } from "@/components/account-sync-card";
+import { SyncDiagnostics } from "@/components/sync-diagnostics";
+import {
+  applyBackup,
+  backupNow,
+  backupTimestamp,
+  hasLocalData,
+  restoreFromDevice,
+} from "@/lib/offline-api/backup";
 import {
   Palette,
   Globe,
@@ -26,10 +35,13 @@ import {
   Key,
   Mail,
   Smartphone,
-  MessageSquare,
   Hash,
   Clock,
   Download,
+  HardDrive,
+  RotateCcw,
+  Upload,
+  Database,
 } from "lucide-react";
 
 interface SettingsData {
@@ -84,6 +96,19 @@ function collectLoadedAssets(): string[] {
   return [...urls];
 }
 
+/** Human-readable byte size for the storage card. */
+function formatBytes(n: number): string {
+  if (!n || n <= 0) return "0 MB";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}
+
 export default function SettingsPage() {
   const { showToast } = useToast();
   const [settings, setSettings] = useState<SettingsData>({
@@ -113,6 +138,18 @@ export default function SettingsPage() {
   const [userEmail, setUserEmail] = useState("");
   const [offlineCount, setOfflineCount] = useState<number | null>(null);
   const [warming, setWarming] = useState(false);
+  const [backupAt, setBackupAt] = useState<number>(0);
+  const [backingUp, setBackingUp] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [backupSupported, setBackupSupported] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [tgStorage, setTgStorage] = useState<{ free: number; total: number; cache: number } | null>(
+    null,
+  );
+  const [tgStorageSupported, setTgStorageSupported] = useState(false);
+  const [tgStorageBusy, setTgStorageBusy] = useState(false);
+  const prevTgCacheRef = useRef(0);
+  const clearingTgRef = useRef(false);
 
   // Offline support depends entirely on what has been cached while online, so make it visible
   // and downloadable on demand instead of a silent mechanism that mysteriously fails.
@@ -149,6 +186,63 @@ export default function SettingsPage() {
     void count();
   }, []);
 
+  // Device backup (Android app only): report the last snapshot so the user can see their data is
+  // protected without having to open a file manager.
+  useEffect(() => {
+    const native = nativeBridge();
+    if (native?.readBackup) {
+      setBackupSupported(true);
+      setBackupAt(backupTimestamp());
+    }
+  }, []);
+
+  const handleBackupNow = () => {
+    setBackingUp(true);
+    const ok = backupNow();
+    setBackupAt(backupTimestamp());
+    setBackingUp(false);
+    showToast(
+      ok ? "Backup saved to your Downloads folder." : "Could not save a backup on this device.",
+      ok ? "success" : "error",
+    );
+  };
+
+  const handleRestore = () => {
+    if (
+      hasLocalData() &&
+      !window.confirm("This replaces the data on this device with the latest backup. Continue?")
+    ) {
+      return;
+    }
+    setRestoring(true);
+    const restored = restoreFromDevice();
+    if (restored > 0) {
+      showToast(`Restored ${restored} items. Reloading…`, "success");
+      window.setTimeout(() => window.location.reload(), 800);
+    } else {
+      setRestoring(false);
+      showToast("No device backup was found.", "error");
+    }
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const restored = applyBackup(text);
+      if (restored > 0) {
+        showToast(`Imported ${restored} items. Reloading…`, "success");
+        window.setTimeout(() => window.location.reload(), 800);
+      } else {
+        showToast("That file is not a valid BioPulse backup.", "error");
+      }
+    } catch {
+      showToast("Could not read that file.", "error");
+    }
+  };
+
   // Inside the Android app the native cache reports progress through this event.
   useEffect(() => {
     const onSaved = (e: Event) => {
@@ -162,6 +256,43 @@ export default function SettingsPage() {
     window.addEventListener("biopulse:offline-saved", onSaved);
     return () => window.removeEventListener("biopulse:offline-saved", onSaved);
   }, [showToast]);
+
+  // Telegram (TDLib) downloads media into a cache on this device. When the disk fills up those
+  // downloads can't complete, which shows up as videos stalling. Expose the free space and let
+  // the user reclaim it in one tap — without touching the message history.
+  useEffect(() => {
+    const native = nativeBridge();
+    if (!native?.telegramStorage) return;
+    setTgStorageSupported(true);
+    const w = window as unknown as {
+      __bp_storage?: (s: { free: number; total: number; cache: number }) => void;
+    };
+    w.__bp_storage = (s) => {
+      setTgStorage(s);
+      if (clearingTgRef.current) {
+        clearingTgRef.current = false;
+        setTgStorageBusy(false);
+        const freed = Math.max(0, prevTgCacheRef.current - s.cache);
+        showToast(
+          freed > 0 ? `Cleared ${formatBytes(freed)} of Telegram cache.` : "Telegram cache cleared.",
+          "success",
+        );
+      }
+    };
+    native.telegramStorage();
+    return () => {
+      if (w.__bp_storage) delete w.__bp_storage;
+    };
+  }, [showToast]);
+
+  const clearTgCache = () => {
+    const native = nativeBridge();
+    if (!native?.clearTelegramCache) return;
+    prevTgCacheRef.current = tgStorage?.cache ?? 0;
+    clearingTgRef.current = true;
+    setTgStorageBusy(true);
+    native.clearTelegramCache();
+  };
 
   const saveForOffline = async () => {
     const native = nativeBridge();
@@ -390,6 +521,105 @@ export default function SettingsPage() {
           </Button>
         </Card>
 
+        {/* Telegram storage Card */}
+        {tgStorageSupported && (
+          <Card className="p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <Database className="h-5 w-5 text-primary" />
+              <h2 className="text-lg font-semibold">Telegram storage</h2>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              Telegram downloads videos and music into a cache on this device so they play
+              smoothly. If the disk fills up those downloads can&apos;t finish and videos start to
+              stall. Clearing the cache frees space without touching your messages.
+            </p>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <div className="text-xs text-muted-foreground">Free space</div>
+                <div className="text-lg font-semibold">
+                  {tgStorage ? formatBytes(tgStorage.free) : "…"}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Telegram cache</div>
+                <div className="text-lg font-semibold">
+                  {tgStorage ? formatBytes(tgStorage.cache) : "…"}
+                </div>
+              </div>
+            </div>
+            {tgStorage && tgStorage.free < 500 * 1024 * 1024 && (
+              <p className="mb-3 text-xs font-medium text-amber-600 dark:text-amber-400">
+                Storage is running low — clearing the cache will help videos play smoothly.
+              </p>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={clearTgCache}
+              disabled={tgStorageBusy}
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              {tgStorageBusy ? "Clearing…" : "Clear Telegram cache"}
+            </Button>
+          </Card>
+        )}
+
+        {/* Backup & Restore Card */}
+        <Card className="p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <HardDrive className="h-5 w-5 text-primary" />
+            <h2 className="text-lg font-semibold">Backup &amp; restore</h2>
+          </div>
+          <p className="text-sm text-muted-foreground mb-4">
+            {backupSupported
+              ? "BioPulse keeps a copy of your notes, marks, planner and chats in your Downloads folder. That copy survives clearing app data, and is restored automatically if the app starts empty."
+              : "In the Android app, BioPulse keeps a copy of your data in your Downloads folder so it survives clearing app data. You can also export a copy here."}
+          </p>
+
+          {backupSupported && (
+            <p className="text-xs text-muted-foreground mb-4">
+              {backupAt > 0
+                ? `Last backup: ${new Date(backupAt).toLocaleString()}`
+                : "No backup saved yet."}
+            </p>
+          )}
+
+          <div className="flex flex-wrap gap-3">
+            {backupSupported && (
+              <Button type="button" onClick={handleBackupNow} disabled={backingUp}>
+                <Save className="h-4 w-4 mr-2" />
+                {backingUp ? "Saving…" : "Back up now"}
+              </Button>
+            )}
+            {backupSupported && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleRestore}
+                disabled={restoring}
+              >
+                <RotateCcw className="h-4 w-4 mr-2" />
+                {restoring ? "Restoring…" : "Restore from backup"}
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => importInputRef.current?.click()}
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              Import from file
+            </Button>
+          </div>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+        </Card>
+
         {/* Appearance Card */}
         <Card className="p-6">
           <div className="flex items-center gap-3 mb-6">
@@ -510,53 +740,6 @@ export default function SettingsPage() {
               </button>
             </div>
 
-            {/* Telegram */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                  <div>
-                    <p className="text-sm font-medium">Telegram</p>
-                    <p className="text-xs text-muted-foreground">Receive alerts via Telegram</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => updateNotification("telegram", !settings.notifications.telegram)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    settings.notifications.telegram ? "bg-primary" : "bg-muted"
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      settings.notifications.telegram ? "translate-x-6" : "translate-x-1"
-                    }`}
-                  />
-                </button>
-              </div>
-              {settings.notifications.telegram && (
-                <div className="ml-7 grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium">Bot Token</label>
-                    <Input
-                      type="password"
-                      value={settings.notifications.telegramToken}
-                      onChange={(e) => updateNotification("telegramToken", e.target.value)}
-                      placeholder="Enter bot token"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium">Chat ID</label>
-                    <Input
-                      value={settings.notifications.telegramChatId}
-                      onChange={(e) => updateNotification("telegramChatId", e.target.value)}
-                      placeholder="Enter chat ID"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
             {/* Ntfy */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -669,6 +852,12 @@ export default function SettingsPage() {
             </div>
           </div>
         </Card>
+
+        {/* Account Sync Card */}
+        <AccountSyncCard />
+
+        {/* Sync diagnostics */}
+        <SyncDiagnostics />
 
         {/* Account Card */}
         <Card className="p-6">

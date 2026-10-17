@@ -5,16 +5,20 @@
  * yesterday's code after a deploy. The cache is now only an offline fallback. In the background
  * the fresh copy is stored so a later offline visit still works.
  */
-const CACHE_NAME = "biopulse-v11";
+const CACHE_NAME = "biopulse-v12";
 const OFFLINE_FALLBACK = "/offline.html";
 
-/** How long a navigation waits on the network before the cached page is used instead. */
-const NETWORK_TIMEOUT_MS = 6000;
+/** How long a navigation waits on the network before the cached page is used instead.
+ *  A cold serverless start on a phone can exceed the old 6s, which showed the offline
+ *  screen on a perfectly good connection. Keep this generous. */
+const NETWORK_TIMEOUT_MS = 15000;
 
 // Core static assets to precache on install.
 const PRECACHE = [
   "/",
   "/dashboard",
+  "/classes",
+  "/study-flow",
   "/alarms",
   "/reminders",
   "/focus",

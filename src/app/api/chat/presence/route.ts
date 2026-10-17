@@ -1,18 +1,22 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireDbUser } from "@/lib/require-db-user";
 import { db } from "@/lib/db";
 import { supabaseAdmin, isSupabaseConfigured } from "@/lib/supabase-admin";
 import { channelRoomFor } from "@/lib/supabase";
+import { chatPreflight, resolveChatUser } from "@/lib/chat-api";
 
 const presenceSchema = z.object({
   status: z.enum(["online", "offline"]).default("online"),
 });
 
+export async function OPTIONS() {
+  return chatPreflight();
+}
+
 export async function POST(req: Request) {
   try {
-    const session = await requireDbUser();
-    if (!session?.user?.id) {
+    const meUser = await resolveChatUser(req);
+    if (!meUser) {
       return NextResponse.json(
         { error: "Session expired. Please sign in again." },
         { status: 401 },
@@ -22,7 +26,7 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const parsed = presenceSchema.safeParse(body);
     const status = parsed.success ? parsed.data.status : "online";
-    const me = session.user.id;
+    const me = meUser.id;
 
     const now = new Date();
     await db.presence.upsert({

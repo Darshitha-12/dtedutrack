@@ -2,4 +2,6 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <external-path name="my_images" path="." />
     <cache-path name="my_cache_images" path="." />
+    <files-path name="tdlib" path="tdlib/" />
+    <external-files-path name="bp_downloads" path="downloads/" />
 </paths>

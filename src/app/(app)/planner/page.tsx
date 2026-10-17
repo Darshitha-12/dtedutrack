@@ -140,6 +140,9 @@ const DEFAULT_PREFS: Prefs = {
   weakTopics: [],
 };
 
+// Offline APK: no AI generation, so the AI Study Plan card is hidden entirely.
+const OFFLINE_BUILD = process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1";
+
 export default function PlannerPage() {
   const { showToast } = useToast();
   const [tab, setTab] = useState<Tab>("overview");
@@ -1244,6 +1247,7 @@ export default function PlannerPage() {
           </Card>
 
           {/* AI Study Plan */}
+          {!OFFLINE_BUILD && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -1268,6 +1272,7 @@ export default function PlannerPage() {
               {aiError && <p className="mt-2 text-sm text-destructive">{aiError}</p>}
             </CardContent>
           </Card>
+          )}
 
           {aiPlan && (
             <Card>

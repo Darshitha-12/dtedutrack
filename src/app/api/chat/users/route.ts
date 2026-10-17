@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { resolvePresence } from "@/lib/presence";
+import { chatPreflight, resolveChatUser } from "@/lib/chat-api";
 
-export async function GET() {
+export async function OPTIONS() {
+  return chatPreflight();
+}
+
+export async function GET(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const me = await resolveChatUser(req);
+    if (!me) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const users = await db.user.findMany({
-      where: { id: { not: session.user.id } },
+      where: { id: { not: me.id } },
       select: {
         id: true,
         name: true,

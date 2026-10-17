@@ -127,9 +127,26 @@ export function PwaRegister() {
       /* ignore */
     }
 
+    // A stuck worker must be able to replace itself. `updateViaCache: "none"` plus an
+    // immediate `update()` means a freshly deployed worker takes over on the next load
+    // instead of lingering, which is what left phones on the offline screen after a deploy.
+    let stopWorkerChecks = () => {};
     navigator.serviceWorker
-      .register("/sw.js")
+      .register("/sw.js", { updateViaCache: "none" })
       .then((reg) => {
+        const checkForUpdate = () => {
+          reg.update().catch(() => {});
+        };
+        const onVisible = () => {
+          if (document.visibilityState === "visible") checkForUpdate();
+        };
+        checkForUpdate();
+        document.addEventListener("visibilitychange", onVisible);
+        window.addEventListener("focus", checkForUpdate);
+        stopWorkerChecks = () => {
+          document.removeEventListener("visibilitychange", onVisible);
+          window.removeEventListener("focus", checkForUpdate);
+        };
         reg.addEventListener("updatefound", () => {
           const worker = reg.installing;
           if (!worker) return;
@@ -144,6 +161,7 @@ export function PwaRegister() {
 
     return () => {
       active = false;
+      stopWorkerChecks();
       navigator.serviceWorker.removeEventListener("message", onMessage);
     };
   }, []);

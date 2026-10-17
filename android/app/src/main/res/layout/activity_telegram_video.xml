@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FF000000">
+
+    <androidx.media3.ui.PlayerView
+        android:id="@+id/tgVideoView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center"
+        app:show_buffering="when_playing"
+        app:use_controller="true" />
+
+    <ProgressBar
+        android:id="@+id/tgVideoProgress"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center" />
+
+    <TextView
+        android:id="@+id/tgVideoClose"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="16dp"
+        android:background="#66000000"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="8dp"
+        android:text="✕"
+        android:textColor="#FFFFFFFF"
+        android:textSize="18sp" />
+
+    <TextView
+        android:id="@+id/tgVideoSave"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="16dp"
+        android:background="#66000000"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="8dp"
+        android:text="⬇ Save"
+        android:textColor="#FFFFFFFF"
+        android:textSize="14sp" />
+</FrameLayout>

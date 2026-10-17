@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireDbUser } from "@/lib/require-db-user";
 import { db } from "@/lib/db";
+import { chatPreflight, resolveChatUser } from "@/lib/chat-api";
 
 async function ensureSchema() {
   try {
@@ -22,10 +22,14 @@ const viewSchema = z.object({
   statusId: z.string().min(1).max(200),
 });
 
+export async function OPTIONS() {
+  return chatPreflight();
+}
+
 export async function POST(req: Request) {
   try {
-    const session = await requireDbUser();
-    if (!session?.user?.id) {
+    const me = await resolveChatUser(req);
+    if (!me) {
       return NextResponse.json(
         { error: "Session expired. Please sign in again." },
         { status: 401 },
@@ -46,10 +50,10 @@ export async function POST(req: Request) {
     }
 
     // Don't count the author's own view.
-    if (status.userId !== session.user.id) {
+    if (status.userId !== me.id) {
       await db.statusView.upsert({
-        where: { statusId_viewerId: { statusId, viewerId: session.user.id } },
-        create: { statusId, viewerId: session.user.id },
+        where: { statusId_viewerId: { statusId, viewerId: me.id } },
+        create: { statusId, viewerId: me.id },
         update: {},
       });
     }

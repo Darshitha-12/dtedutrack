@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireDbUser } from "@/lib/require-db-user";
+import { chatPreflight, resolveChatUser } from "@/lib/chat-api";
 
 const EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -60,10 +60,14 @@ const statusSchema = z.object({
   duration: z.number().max(60_000).optional(),
 });
 
+export async function OPTIONS() {
+  return chatPreflight();
+}
+
 export async function GET(req: Request) {
   try {
-    const session = await requireDbUser();
-    if (!session?.user?.id) {
+    const me = await resolveChatUser(req);
+    if (!me) {
       return NextResponse.json(
         { error: "Session expired. Please sign in again." },
         { status: 401 },
@@ -94,7 +98,7 @@ export async function GET(req: Request) {
     }
 
     const statusIds = rows.map((s) => s.id);
-    const ownIds = rows.filter((s) => s.userId === session.user!.id).map((s) => s.id);
+    const ownIds = rows.filter((s) => s.userId === me.id).map((s) => s.id);
     const [views, reactions, myViews] = await Promise.all([
       db.statusView.findMany({ where: { statusId: { in: statusIds } } }),
       db.statusReaction.findMany({ where: { statusId: { in: statusIds } } }),
@@ -124,7 +128,7 @@ export async function GET(req: Request) {
     const statuses = rows.map((s) => {
       const sViews = views.filter((v) => v.statusId === s.id);
       const sReactions = reactions.filter((r) => r.statusId === s.id);
-      const mine = s.userId === session.user!.id;
+      const mine = s.userId === me.id;
       const reactionMap: Record<string, number> = {};
       for (const r of sReactions) reactionMap[r.emoji] = (reactionMap[r.emoji] || 0) + 1;
       return {
@@ -137,12 +141,12 @@ export async function GET(req: Request) {
         imageType: s.imageType,
         createdAt: s.createdAt.toISOString(),
         viewCount: sViews.length,
-        myReaction: sReactions.find((r) => r.userId === session.user!.id)?.emoji || null,
+        myReaction: sReactions.find((r) => r.userId === me.id)?.emoji || null,
         reactions: Object.entries(reactionMap)
           .map(([emoji, count]) => ({ emoji, count }))
           .sort((a, b) => b.count - a.count),
         seenByFew: sViews.length > 0 && sViews.length < 5,
-        viewedByMe: mine || sViews.some((v) => v.viewerId === session.user!.id),
+        viewedByMe: mine || sViews.some((v) => v.viewerId === me.id),
         viewers: mine ? (myViewersByStatus[s.id as keyof typeof myViewersByStatus] || []) : undefined,
       };
     });
@@ -156,8 +160,8 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const session = await requireDbUser();
-    if (!session?.user?.id) {
+    const me = await resolveChatUser(req);
+    if (!me) {
       return NextResponse.json(
         { error: "Session expired. Please sign in again." },
         { status: 401 },
@@ -177,7 +181,7 @@ export async function POST(req: Request) {
 
     const status = await db.userStatus.create({
       data: {
-        userId: session.user.id,
+        userId: me.id,
         text: text.trim() || null,
         imageUrl: imageUrl || null,
         imageType: imageUrl ? imageType || (duration ? "video" : "image") : null,
@@ -196,15 +200,15 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const session = await requireDbUser();
-    if (!session?.user?.id) {
+    const me = await resolveChatUser(req);
+    if (!me) {
       return NextResponse.json(
         { error: "Session expired. Please sign in again." },
         { status: 401 },
       );
     }
     await ensureSchema();
-    await db.userStatus.deleteMany({ where: { userId: session.user.id } });
+    await db.userStatus.deleteMany({ where: { userId: me.id } });
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("Chat status DELETE error:", error);

@@ -1,0 +1,54 @@
+{
+  "generatedAt": "2026-10-17T16:39:08.287Z",
+  "subjectParams": [
+    {
+      "subjectSlug": "biology"
+    }
+  ],
+  "unitParams": [
+    {
+      "subjectSlug": "biology",
+      "unitSlug": "cell-biology"
+    },
+    {
+      "subjectSlug": "biology",
+      "unitSlug": "molecular-biology"
+    },
+    {
+      "subjectSlug": "biology",
+      "unitSlug": "ecology"
+    }
+  ],
+  "topicParams": [
+    {
+      "subjectSlug": "biology",
+      "unitSlug": "cell-biology",
+      "topicSlug": "cell-structure"
+    },
+    {
+      "subjectSlug": "biology",
+      "unitSlug": "cell-biology",
+      "topicSlug": "cell-division"
+    },
+    {
+      "subjectSlug": "biology",
+      "unitSlug": "molecular-biology",
+      "topicSlug": "dna-structure"
+    },
+    {
+      "subjectSlug": "biology",
+      "unitSlug": "molecular-biology",
+      "topicSlug": "protein-synthesis"
+    },
+    {
+      "subjectSlug": "biology",
+      "unitSlug": "ecology",
+      "topicSlug": "ecosystems"
+    },
+    {
+      "subjectSlug": "biology",
+      "unitSlug": "ecology",
+      "topicSlug": "biodiversity"
+    }
+  ]
+}

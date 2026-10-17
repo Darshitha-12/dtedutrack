@@ -21,6 +21,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
+import { parseYtSearchResults } from "@/lib/yt-search"
 
 interface SavedVideo {
   id: string
@@ -112,6 +113,49 @@ function nativeKeepScreenOn(on: boolean) {
   }
 }
 
+/**
+ * Searches YouTube through the Android bridge: the offline build strips the search API route and
+ * a plain fetch to youtube.com from the page would be blocked by CORS, so the WebView fetches and
+ * extracts the results natively.
+ *
+ * Resolves with the raw `ytInitialData` JSON ("" = no network / fetch failed), or `null` when
+ * there is no bridge (browser, online build) — the caller then falls back to /api/yt-search.
+ */
+function nativeYtSearch(query: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined") {
+      resolve(null)
+      return
+    }
+    const b = (window as any).BioPulseBridge
+    if (!b || typeof b.ytSearch !== "function") {
+      resolve(null)
+      return
+    }
+    const w = window as any
+    const id = Math.random().toString(36).slice(2) + Date.now().toString(36)
+    const prev = w.__bp_yt_search
+    let done = false
+    let timer = 0
+    const finish = (value: string | null) => {
+      if (done) return
+      done = true
+      w.__bp_yt_search = prev
+      window.clearTimeout(timer)
+      resolve(value)
+    }
+    w.__bp_yt_search = (rid: string, json: string) => {
+      if (rid === id) finish(json || "")
+    }
+    timer = window.setTimeout(() => finish(""), 15000)
+    try {
+      b.ytSearch(id, query)
+    } catch {
+      finish(null)
+    }
+  })
+}
+
 /** Feeds the notification progress bar (and, via native, the background keepalive clock). */
 function nativeProgress(positionSeconds: number, durationSeconds: number) {
   try {
@@ -189,6 +233,9 @@ function YtInner() {
   const shouldPlayRef = React.useRef(false)
   const userPausedRef = React.useRef(false)
   const seekingRef = React.useRef(false)
+  // Last player state the embed reported (1 playing, 2 paused, 0 ended, …). Used so the
+  // keepalive only nudges playback when it actually stalled instead of every second.
+  const playerStateRef = React.useRef<number>(-1)
   const lastResumeKickRef = React.useRef(0)
   const postCmdRef =
     React.useRef<(cmd: string, args?: unknown[]) => void>(() => {})
@@ -262,6 +309,20 @@ function YtInner() {
     playbackIntent(true)
   }
 
+  const [online, setOnline] = React.useState(true)
+
+  React.useEffect(() => {
+    setOnline(navigator.onLine)
+    const on = () => setOnline(true)
+    const off = () => setOnline(false)
+    window.addEventListener("online", on)
+    window.addEventListener("offline", off)
+    return () => {
+      window.removeEventListener("online", on)
+      window.removeEventListener("offline", off)
+    }
+  }, [])
+
   const doSearch = async (q = query) => {
     const qq = q.trim()
     if (!qq || searching) return
@@ -270,6 +331,21 @@ function YtInner() {
     setResults([])
     setSearched(qq)
     try {
+      const native = await nativeYtSearch(qq)
+      if (native !== null) {
+        // Android shell: the API routes are stripped from the offline build, so the bridge
+        // fetches the results page and we parse the same ytInitialData JSON here.
+        const list: SearchVideo[] = native ? parseYtSearchResults(native, 18) : []
+        setResults(list)
+        if (list.length === 0) {
+          setSearchErr(
+            native
+              ? "No results. Try different words."
+              : "Search needs an internet connection. You are likely offline."
+          )
+        }
+        return
+      }
       const res = await fetch(`/api/yt-search?q=${encodeURIComponent(qq)}&max=18`)
       const data = await res.json()
       if (!res.ok) throw new Error("bad")
@@ -288,13 +364,16 @@ function YtInner() {
     if (stateRef.current === st) return
     stateRef.current = st
     if (st === "playing") {
+      playerStateRef.current = 1
       setPlaying(true)
       shouldPlayRef.current = !userPausedRef.current && shouldPlayRef.current
       bridge("playing", titleRef.current)
     } else if (st === "paused") {
+      playerStateRef.current = 2
       setPlaying(false)
       if (!shouldPlayRef.current) bridge("paused", titleRef.current)
     } else if (st === "ended") {
+      playerStateRef.current = 0
       setPlaying(false)
       userPausedRef.current = false
       shouldPlayRef.current = false
@@ -352,6 +431,7 @@ function YtInner() {
         let st: number | undefined
         if (d.event === "infoDelivery" && d.info && typeof d.info.playerState === "number") {
           st = d.info.playerState
+          if (typeof st === "number") playerStateRef.current = st
           // infoDelivery also carries the playhead — use it for the notification progress bar.
           const pos = Number(d.info.currentTime)
           const dur = Number(d.info.duration)
@@ -363,8 +443,11 @@ function YtInner() {
           // flowing. Recover right here instead of waiting for the (heavily throttled) keepalive
           // timer — background timers can be a minute apart, which is long enough for YouTube to
           // drop the audio track entirely.
+          // Never recover from the "ended" state (0): issuing playVideo there would restart the
+          // finished video, which is exactly the unwanted auto-repeat.
           if (
             st !== 1 &&
+            st !== 0 &&
             shouldPlayRef.current &&
             !userPausedRef.current &&
             !seekingRef.current
@@ -380,6 +463,7 @@ function YtInner() {
           }
         } else if (d.event === "onStateChange") {
           st = typeof d.data === "number" ? d.data : d.state
+          if (typeof st === "number") playerStateRef.current = st
         }
         // 1 playing, 2 paused, 0 ended; ignore -1/3/5 (unstarted/buffering/cued)
         if (st === 1) onState("playing")
@@ -424,10 +508,15 @@ function YtInner() {
       try {
         const f = iframeRef.current
         if (!f) return
-        f.contentWindow?.postMessage(
-          JSON.stringify({ event: "command", func: "playVideo", args: [] }),
-          "*",
-        )
+        // Only nudge playback when the embed reports it is NOT already playing. Firing
+        // playVideo every second fights the player chrome and, right at the end of a clip,
+        // can restart it — so we recover only from a genuine stall.
+        if (playerStateRef.current !== 1) {
+          f.contentWindow?.postMessage(
+            JSON.stringify({ event: "command", func: "playVideo", args: [] }),
+            "*",
+          )
+        }
         if (tick % 5 === 0) {
           f.contentWindow?.postMessage(
             JSON.stringify({ event: "listening", id: (Math.random() * 1e6) | 0 }),
@@ -523,11 +612,25 @@ function YtInner() {
       window.setTimeout(kick, 700)
     }
 
+    // Leaving the app (Home / app switch) must not pause anything: the native mediaPlayback
+    // foreground service and its MediaSession keep the pipeline alive. Re-assert play the instant
+    // we go hidden so the embed's own visibility handler (which YouTube wires to pause) does not
+    // win the race and drop the audio track before the service can nudge it back.
+    const onHidden = () => {
+      if (document.visibilityState !== "hidden") return
+      if (!shouldPlayRef.current || userPausedRef.current) return
+      send("unMute")
+      send("setVolume", [100])
+      send("playVideo")
+    }
+
     document.addEventListener("visibilitychange", onVisible)
+    document.addEventListener("visibilitychange", onHidden)
     window.addEventListener("pageshow", onVisible)
     window.addEventListener("focus", onVisible)
     return () => {
       document.removeEventListener("visibilitychange", onVisible)
+      document.removeEventListener("visibilitychange", onHidden)
       window.removeEventListener("pageshow", onVisible)
       window.removeEventListener("focus", onVisible)
     }
@@ -613,7 +716,14 @@ function YtInner() {
       playsinline: "1",
       autoplay: "1",
       enablejsapi: "1",
+      controls: "1",
+      fs: "1",
     })
+    // The IFrame API needs the embedding origin, otherwise the player can load without its
+    // full controls and silently ignore postMessage commands.
+    if (typeof window !== "undefined" && window.location?.origin) {
+      q.set("origin", window.location.origin)
+    }
     if (video.list)
       return `https://www.youtube-nocookie.com/embed/videoseries?list=${video.list}&${q.toString()}`
     return `https://www.youtube-nocookie.com/embed/${video.id}?${q.toString()}`
@@ -733,6 +843,11 @@ function YtInner() {
                   {fs ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
                 </button>
               </div>
+              {video && !online && (
+                <div className="absolute inset-x-0 bottom-0 z-10 bg-black/85 px-3 py-2 text-center text-xs text-white/90">
+                  No internet — the video can&apos;t load right now.
+                </div>
+              )}
             </>
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">

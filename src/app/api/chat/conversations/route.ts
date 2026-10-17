@@ -1,22 +1,30 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { resolvePresence } from "@/lib/presence";
 import { CALL_SIGNAL_MEDIA_TYPE } from "@/lib/call-signal";
+import { chatPreflight, resolveChatUser } from "@/lib/chat-api";
+import { loadHiddenMessageIds } from "@/lib/dm-extras";
 
-export async function GET() {
+export async function OPTIONS() {
+  return chatPreflight();
+}
+
+export async function GET(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const me0 = await resolveChatUser(req);
+    if (!me0) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const me = session.user.id;
+    const me = me0.id;
 
     const messages = await db.directMessage.findMany({
       where: {
-        OR: [{ senderId: me }, { receiverId: me }],
-        // WebRTC signaling rides on this table; never treat it as chat activity.
-        mediaType: { not: CALL_SIGNAL_MEDIA_TYPE },
+        AND: [
+          { OR: [{ senderId: me }, { receiverId: me }] },
+          // WebRTC signaling rides on this table; never treat it as chat activity. A bare
+          // `not` also hides every normal message (mediaType NULL), so match NULL explicitly.
+          { OR: [{ mediaType: null }, { mediaType: { not: CALL_SIGNAL_MEDIA_TYPE } }] },
+        ],
       },
       orderBy: { createdAt: "desc" },
       select: {
@@ -32,23 +40,25 @@ export async function GET() {
       },
     });
 
+    // Messages this user removed with "delete for me" must not count as unread or preview.
+    const hidden = await loadHiddenMessageIds(me);
+
     const byPartner = new Map<
       string,
-      { last: (typeof messages)[number]; unread: number; lastIsMine: boolean }
+      { last: (typeof messages)[number] | null; newest: (typeof messages)[number]; unread: number }
     >();
 
     for (const m of messages) {
       const partnerId = m.senderId === me ? m.receiverId : m.senderId;
-      const entry = byPartner.get(partnerId);
+      let entry = byPartner.get(partnerId);
       if (!entry) {
-        byPartner.set(partnerId, {
-          last: m,
-          unread: m.senderId !== me && !m.readAt ? 1 : 0,
-          lastIsMine: m.senderId === me,
-        });
-      } else {
-        if (m.senderId !== me && !m.readAt) entry.unread += 1;
+        entry = { last: null, newest: m, unread: 0 };
+        byPartner.set(partnerId, entry);
       }
+      if (hidden.has(m.id)) continue;
+      // Newest-first order, so the first visible message wins as the preview.
+      if (!entry.last) entry.last = m;
+      if (m.senderId !== me && !m.readAt) entry.unread += 1;
     }
 
     const partnerIds = [...byPartner.keys()];
@@ -71,17 +81,20 @@ export async function GET() {
     const list = [...byPartner.entries()]
       .map(([id, entry]) => {
         const p = partnerMap.get(id);
-        const last = entry.last;
+        const last = entry.last ?? entry.newest;
+        const lastIsMine = last.senderId === me;
         const { status, lastSeen } = resolvePresence(p?.presence || null);
-        const preview = last.mediaUrl
-          ? last.mediaType === "image"
+        const preview = !entry.last
+          ? "Message deleted"
+          : entry.last.mediaUrl
+          ? entry.last.mediaType === "image"
             ? "📷 Photo"
-            : last.mediaType === "video"
+            : entry.last.mediaType === "video"
             ? "🎬 Video"
-            : last.mediaType === "audio"
+            : entry.last.mediaType === "audio"
             ? "🎤 Voice note"
-            : "📎 " + (last.mediaName || "File")
-          : last.text || "";
+            : "📎 " + (entry.last.mediaName || "File")
+          : entry.last.text || "";
         return {
           id,
           name: p?.displayName || p?.name || "User",
@@ -90,15 +103,17 @@ export async function GET() {
           // Fall back to the partner's latest message when they've never
           // opened the chat (no presence row yet).
           lastSeen: lastSeen || (last.senderId !== me ? last.createdAt.toISOString() : null),
-          lastMessage: entry.lastIsMine ? `You: ${preview}` : preview,
-          lastMessageIsMine: entry.lastIsMine,
-          lastMessageAt: last.createdAt.toISOString(),
+          lastMessage: lastIsMine ? `You: ${preview}` : preview,
+          lastMessageIsMine: lastIsMine,
+          lastMessageAt: entry.newest.createdAt.toISOString(),
           unread: entry.unread,
         };
       })
       .sort((a, b) => (a.lastMessageAt < b.lastMessageAt ? 1 : -1));
 
-    return NextResponse.json({ conversations: list });
+    // `me` lets the Android client (which has no NextAuth session) learn its real user id so it
+    // can tell its own messages apart from the other side's.
+    return NextResponse.json({ conversations: list, me });
   } catch (error) {
     console.error("Chat conversations GET error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

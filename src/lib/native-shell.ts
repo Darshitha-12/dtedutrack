@@ -1,7 +1,12 @@
 /** The Java bridge MainActivity injects. Only these methods exist on it. */
 export interface NativeBridge {
   scheduleAlarm?(epochMillis: number, label: string, soundId?: string): void;
+  scheduleAlarms?(eventsJson: string): void;
   ringAlarmNow?(label: string): void;
+  testExamReminder?(target: string | null, examLabel: string | null): void;
+  notificationsEnabled?(): boolean;
+  openNotificationSettings?(): void;
+  ytSearch?(requestId: string, query: string): void;
   saveForOffline?(jsonArray: string): void;
   offlineCacheStats?(): string;
   clearOfflineCache?(): void;
@@ -9,6 +14,25 @@ export interface NativeBridge {
   setKeepScreenOn?(keepOn: boolean): void;
   previewSound?(): void;
   stopNativeTone?(): void;
+  notifyChat?(id: number, title: string, text: string): void;
+  showChatNotification?(name: string, text: string, partnerId: string): void;
+  setChatAuth?(token: string, base: string): void;
+  setChatWatch?(active: boolean): void;
+  getChatUnreadSeen?(partnerId: string): number;
+  setChatUnreadSeen?(partnerId: string, unread: number): void;
+  dismissChatNotification?(partnerId: string): void;
+  setKeepAlive?(active: boolean): void;
+  telegramNativeAvailable?(): boolean;
+  openTelegram?(): void;
+  openTelegramWeb?(): void;
+  enableTelegramNotifications?(): void;
+  telegramStatus?(): string;
+  telegramLogout?(): void;
+  telegramStorage?(): void;
+  clearTelegramCache?(): void;
+  readBackup?(): string;
+  writeBackup?(json: string): boolean;
+  backupTimestamp?(): number;
 }
 
 /** The bridge, or `null` in a browser. */
@@ -52,6 +76,6 @@ export function isNativeApp(): boolean {
 }
 
 
-export interface NativeBridgeExtended extends NativeBridge { saveCustomSound?(id: string, base64: string, mime: string): boolean; hasCustomSound?(id: string): boolean; }
+export interface NativeBridgeExtended extends NativeBridge { saveCustomSound?(id: string, base64: string, mime: string): boolean; hasCustomSound?(id: string): boolean; beginCustomSound?(id: string, mime: string): boolean; appendCustomSound?(base64Chunk: string): boolean; endCustomSound?(id: string, expectedBytes: number): boolean; }
 export function nativeBridgeExt(): NativeBridgeExtended | null { const b=nativeBridge() as unknown as NativeBridgeExtended | null; return b; }
 

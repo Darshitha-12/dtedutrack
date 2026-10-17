@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireDbUser } from "@/lib/require-db-user";
 import { db } from "@/lib/db";
+import { chatPreflight, resolveChatUser } from "@/lib/chat-api";
 
 async function ensureSchema() {
   try {
@@ -24,10 +24,14 @@ const reactionSchema = z.object({
   emoji: z.string().min(1).max(16),
 });
 
+export async function OPTIONS() {
+  return chatPreflight();
+}
+
 export async function POST(req: Request) {
   try {
-    const session = await requireDbUser();
-    if (!session?.user?.id) {
+    const me = await resolveChatUser(req);
+    if (!me) {
       return NextResponse.json(
         { error: "Session expired. Please sign in again." },
         { status: 401 },
@@ -49,16 +53,16 @@ export async function POST(req: Request) {
 
     // Toggle: same emoji removes the reaction.
     const existing = await db.statusReaction.findUnique({
-      where: { statusId_userId: { statusId, userId: session.user.id } },
+      where: { statusId_userId: { statusId, userId: me.id } },
     });
     if (existing?.emoji === emoji) {
       await db.statusReaction.delete({
-        where: { statusId_userId: { statusId, userId: session.user.id } },
+        where: { statusId_userId: { statusId, userId: me.id } },
       });
     } else {
       await db.statusReaction.upsert({
-        where: { statusId_userId: { statusId, userId: session.user.id } },
-        create: { statusId, userId: session.user.id, emoji },
+        where: { statusId_userId: { statusId, userId: me.id } },
+        create: { statusId, userId: me.id, emoji },
         update: { emoji },
       });
     }
@@ -66,7 +70,7 @@ export async function POST(req: Request) {
     const reactions = await db.statusReaction.findMany({ where: { statusId } });
     const reactionMap: Record<string, number> = {};
     for (const r of reactions) reactionMap[r.emoji] = (reactionMap[r.emoji] || 0) + 1;
-    const myReaction = reactions.find((r) => r.userId === session.user!.id)?.emoji || null;
+    const myReaction = reactions.find((r) => r.userId === me.id)?.emoji || null;
 
     return NextResponse.json({
       myReaction,

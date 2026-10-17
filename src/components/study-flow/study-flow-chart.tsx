@@ -24,23 +24,32 @@ import {
 import "@xyflow/react/dist/style.css";
 import "./study-flow.css";
 import { cn } from "@/lib/utils";
+import { getSyncState, subscribeSync, runSync, isOfflineBuild, type SyncState } from "@/lib/account-sync";
 
 type StudyData = { label: string };
 type StudyNode = Node<StudyData, "study">;
-
 type FlowData = { nodes: StudyNode[]; edges: Edge[]; viewport: Viewport };
+type DayEntry = FlowData & { updatedAt: number };
 
-const STORAGE_KEY = "biopulse.studyflow.v1";
+const DAY_PREFIX = "biopulse.studyflow.d."; // per-day offline cache (mirrored to the account)
+const SEEN_KEY = "biopulse.studyflow.seen";
 
-const ARROW = { type: MarkerType.ArrowClosed, width: 18, height: 18, color: "#8b5cf6" } as const;
+const ARROW = { type: MarkerType.ArrowClosed, width: 18, height: 18, color: "#c4b5fd" } as const;
 
 function normalizeEdges(edges: Edge[]): Edge[] {
   return (edges ?? []).map((e) => ({
     ...e,
     type: "smoothstep",
     markerEnd: e.markerEnd ?? ARROW,
-    style: { strokeWidth: 2, stroke: "#8b5cf6", ...(e.style ?? {}) },
+    style: { strokeWidth: 2, stroke: "#c4b5fd", ...(e.style ?? {}) },
   }));
+}
+
+// Deterministic vivid hue per node id so every box gets its own bright colour.
+function hueFromId(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
+  return h;
 }
 
 const SAMPLE: FlowData = {
@@ -54,9 +63,52 @@ const SAMPLE: FlowData = {
     { id: "e1", source: "subject", target: "t1" },
     { id: "e2", source: "subject", target: "t2" },
     { id: "e3", source: "subject", target: "t3" },
-  ].map((e) => ({ ...e, sourceHandle: undefined, targetHandle: undefined })),
+  ],
   viewport: { x: 0, y: 0, zoom: 1 },
 };
+
+// ---- local calendar-day helpers (the user's "today", not UTC) ----
+
+function localDateKey(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function addDays(key: string, delta: number): string {
+  const [y, m, d] = key.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + delta);
+  return localDateKey(dt);
+}
+
+function dayLabel(key: string): string {
+  const today = localDateKey();
+  if (key === today) return "Today";
+  if (key === addDays(today, -1)) return "Yesterday";
+  if (key === addDays(today, 1)) return "Tomorrow";
+  return key;
+}
+
+// ---- offline cache (per day) ----
+
+function readDay(date: string): DayEntry | null {
+  try {
+    const raw = localStorage.getItem(DAY_PREFIX + date);
+    return raw ? (JSON.parse(raw) as DayEntry) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDay(date: string, entry: DayEntry): void {
+  try {
+    localStorage.setItem(DAY_PREFIX + date, JSON.stringify(entry));
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 interface EditCtx {
   editingId: string | null;
@@ -70,6 +122,7 @@ function StudyNodeView({ id, data, selected }: NodeProps<StudyNode>) {
   const ctx = React.useContext(EditContext);
   const editing = ctx?.editingId === id;
   const [draft, setDraft] = React.useState(data.label);
+  const hue = React.useMemo(() => hueFromId(id), [id]);
   const lastTap = React.useRef(0);
   const downPt = React.useRef<{ x: number; y: number } | null>(null);
 
@@ -82,6 +135,7 @@ function StudyNodeView({ id, data, selected }: NodeProps<StudyNode>) {
   return (
     <div
       className={cn("study-node", selected && "selected", editing && "nodrag")}
+      style={{ "--study-h": hue } as React.CSSProperties}
       onPointerDown={(e) => {
         downPt.current = { x: e.clientX, y: e.clientY };
       }}
@@ -130,15 +184,6 @@ function StudyNodeView({ id, data, selected }: NodeProps<StudyNode>) {
 
 const nodeTypes = { study: StudyNodeView };
 
-function readSaved(): FlowData | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as FlowData) : null;
-  } catch {
-    return null;
-  }
-}
-
 function ToolbarButton({
   onClick,
   children,
@@ -164,17 +209,37 @@ function ToolbarButton({
   );
 }
 
+function accountLabel(s: SyncState): string {
+  if (s.status === "syncing") return "Syncing…";
+  if (s.status === "ok") {
+    return s.lastSyncedAt
+      ? `Synced ${new Date(s.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+      : "Synced";
+  }
+  if (s.status === "error") return "Offline · will sync when online";
+  if (s.status === "no-account") return isOfflineBuild() ? "Not linked · sign in to sync" : "";
+  return "";
+}
+
 function Flow() {
   const rf = useReactFlow();
-  const saved = React.useRef<FlowData | null>(readSaved()).current;
-
-  const [nodes, setNodes, onNodesChange] = useNodesState<StudyNode>(saved?.nodes ?? SAMPLE.nodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(
-    normalizeEdges(saved?.edges ?? SAMPLE.edges),
-  );
+  const [dateKey, setDateKey] = React.useState(() => localDateKey());
+  const [nodes, setNodes, onNodesChange] = useNodesState<StudyNode>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState("");
+  const [loading, setLoading] = React.useState(true);
+  const [sync, setSync] = React.useState<SyncState>(() => getSyncState());
+
+  const hydrated = React.useRef(false);
+  const dirty = React.useRef(false);
+  const saveTimer = React.useRef<number | null>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
+
+  const dateRef = React.useRef(dateKey);
+  dateRef.current = dateKey;
+
+  React.useEffect(() => subscribeSync(setSync), []);
 
   const flash = React.useCallback((msg: string) => {
     setStatus(msg);
@@ -199,15 +264,102 @@ function Flow() {
     [rf],
   );
 
+  const applyDay = React.useCallback(
+    (entry: DayEntry | null) => {
+      setNodes(entry?.nodes ?? []);
+      setEdges(normalizeEdges(entry?.edges ?? []));
+      if (entry?.viewport) {
+        window.setTimeout(() => rf.setViewport(entry.viewport, { duration: 0 }), 0);
+      }
+    },
+    [rf, setNodes, setEdges],
+  );
+
+  const saveLocal = React.useCallback(() => {
+    const entry: DayEntry = { ...getFlow(), updatedAt: Date.now() };
+    writeDay(dateRef.current, entry);
+    dirty.current = false;
+  }, [getFlow]);
+
+  const markDirty = React.useCallback(() => {
+    if (!hydrated.current) return;
+    dirty.current = true;
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null;
+      saveLocal();
+      void runSync();
+    }, 700);
+  }, [saveLocal]);
+
+  // Load the selected day from the offline cache; cloud sync runs in the background.
+  React.useEffect(() => {
+    hydrated.current = false;
+    setEditingId(null);
+    const local = readDay(dateKey);
+    if (local) {
+      applyDay(local);
+    } else {
+      setNodes([]);
+      setEdges([]);
+      if (dateKey === localDateKey()) {
+        let seen = false;
+        try {
+          seen = localStorage.getItem(SEEN_KEY) === "1";
+        } catch {
+          /* ignore */
+        }
+        if (!seen) {
+          setNodes(SAMPLE.nodes);
+          setEdges(normalizeEdges(SAMPLE.edges));
+        }
+      }
+    }
+    hydrated.current = true;
+    setLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateKey]);
+
+  // When the account sync writes a newer version of the visible day, refresh it.
+  React.useEffect(() => {
+    const onKvSynced = (e: Event) => {
+      const detail = (e as CustomEvent<{ keys?: string[] }>).detail;
+      if (!detail?.keys?.includes(DAY_PREFIX + dateRef.current)) return;
+      if (dirty.current) return;
+      const entry = readDay(dateRef.current);
+      if (entry) applyDay(entry);
+    };
+    window.addEventListener("biopulse:kvsynced", onKvSynced);
+    return () => window.removeEventListener("biopulse:kvsynced", onKvSynced);
+  }, [applyDay]);
+
+  const goToDay = React.useCallback(
+    (next: string) => {
+      if (next === dateKey) return;
+      if (saveTimer.current) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      if (dirty.current) {
+        saveLocal();
+        void runSync();
+      }
+      setDateKey(next);
+    },
+    [dateKey, saveLocal],
+  );
+
   const onConnect = React.useCallback(
-    (c: Connection) =>
+    (c: Connection) => {
       setEdges((eds) =>
         addEdge(
-          { ...c, type: "smoothstep", markerEnd: ARROW, style: { strokeWidth: 2, stroke: "#8b5cf6" } },
+          { ...c, type: "smoothstep", markerEnd: ARROW, style: { strokeWidth: 2, stroke: "#c4b5fd" } },
           eds,
         ),
-      ),
-    [setEdges],
+      );
+      markDirty();
+    },
+    [setEdges, markDirty],
   );
 
   const addNode = React.useCallback(() => {
@@ -215,37 +367,20 @@ function Flow() {
     const id = `n_${Date.now().toString(36)}`;
     setNodes((nds) => nds.concat({ id, type: "study", position: pos, data: { label: "New task" } }));
     setEditingId(id);
+    markDirty();
     flash("Node added");
-  }, [rf, setNodes, flash]);
-
-  const saveLocal = React.useCallback(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(getFlow()));
-      flash("Saved on this device");
-    } catch {
-      flash("Save failed");
-    }
-  }, [getFlow, flash]);
-
-  const loadLocal = React.useCallback(() => {
-    const data = readSaved();
-    if (!data) return flash("Nothing saved yet");
-    setNodes(data.nodes);
-    setEdges(normalizeEdges(data.edges));
-    window.setTimeout(() => rf.setViewport(data.viewport ?? { x: 0, y: 0, zoom: 1 }, { duration: 200 }), 0);
-    flash("Loaded");
-  }, [rf, setNodes, setEdges, flash]);
+  }, [rf, setNodes, markDirty, flash]);
 
   const exportFile = React.useCallback(() => {
     const blob = new Blob([JSON.stringify(getFlow(), null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "study-flow.json";
+    a.download = `study-flow-${dateKey}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    flash("Exported study-flow.json");
-  }, [getFlow, flash]);
+    flash("Exported");
+  }, [getFlow, flash, dateKey]);
 
   const importFile = React.useCallback(
     (file: File) => {
@@ -260,6 +395,7 @@ function Flow() {
             () => rf.setViewport(data.viewport ?? { x: 0, y: 0, zoom: 1 }, { duration: 200 }),
             0,
           );
+          markDirty();
           flash("Imported");
         } catch {
           flash("Invalid JSON file");
@@ -267,7 +403,7 @@ function Flow() {
       };
       reader.readAsText(file);
     },
-    [rf, setNodes, setEdges, flash],
+    [rf, setNodes, setEdges, markDirty, flash],
   );
 
   const copyJson = React.useCallback(async () => {
@@ -283,24 +419,89 @@ function Flow() {
     setNodes([]);
     setEdges([]);
     setEditingId(null);
+    markDirty();
     flash("Cleared");
-  }, [setNodes, setEdges, flash]);
+  }, [setNodes, setEdges, markDirty, flash]);
 
   const deleteSelected = React.useCallback(() => {
     const selN = rf.getNodes().filter((n) => n.selected).map((n) => ({ id: n.id }));
     const selE = rf.getEdges().filter((e) => e.selected).map((e) => ({ id: e.id }));
     if (!selN.length && !selE.length) return flash("Select a node/arrow first");
     rf.deleteElements({ nodes: selN, edges: selE });
-  }, [rf, flash]);
+    markDirty();
+  }, [rf, markDirty, flash]);
+
+  const manualSync = React.useCallback(() => {
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    saveLocal();
+    void runSync().then(() => flash("Saved"));
+  }, [saveLocal, flash]);
+
+  const today = localDateKey();
+  const tabs = [
+    { key: addDays(today, -1), label: "Yesterday" },
+    { key: today, label: "Today" },
+    { key: addDays(today, 1), label: "Tomorrow" },
+  ];
+  const syncText = accountLabel(sync);
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => goToDay(addDays(dateKey, -1))}
+          className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-sm font-semibold hover:bg-muted"
+          aria-label="Previous day"
+        >
+          ‹
+        </button>
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => goToDay(t.key)}
+            className={cn(
+              "rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors",
+              t.key === dateKey
+                ? "bg-gradient-to-r from-violet-600 to-sky-500 text-white shadow"
+                : "border border-border bg-card text-foreground hover:bg-muted",
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => goToDay(addDays(dateKey, 1))}
+          className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-sm font-semibold hover:bg-muted"
+          aria-label="Next day"
+        >
+          ›
+        </button>
+        <input
+          type="date"
+          value={dateKey}
+          onChange={(e) => e.target.value && goToDay(e.target.value)}
+          className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs text-foreground"
+        />
+        <span className="text-xs font-medium text-muted-foreground">{dayLabel(dateKey)}</span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground">Cloud sync:</span>
+        <ToolbarButton onClick={manualSync}>Sync now</ToolbarButton>
+        {syncText && <span className="text-xs font-medium text-muted-foreground">{syncText}</span>}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
         <ToolbarButton onClick={addNode} variant="primary">
           + Add Node
         </ToolbarButton>
-        <ToolbarButton onClick={saveLocal}>Save</ToolbarButton>
-        <ToolbarButton onClick={loadLocal}>Load</ToolbarButton>
+        <ToolbarButton onClick={manualSync}>Save</ToolbarButton>
         <ToolbarButton onClick={exportFile}>Export</ToolbarButton>
         <ToolbarButton onClick={() => fileRef.current?.click()}>Import</ToolbarButton>
         <ToolbarButton onClick={copyJson}>Copy JSON</ToolbarButton>
@@ -323,7 +524,8 @@ function Flow() {
 
       <p className="text-xs text-muted-foreground">
         Drag to move · drag a dot on a box edge onto another box to connect · double-tap a box to edit
-        (Enter = save, Esc = cancel) · pinch to zoom, drag the canvas to pan.
+        (Enter = save, Esc = cancel) · pinch to zoom, drag the canvas to pan. Each day is saved on this
+        device and synced to every device signed into your account.
       </p>
 
       <div className="study-flow-wrap">
@@ -333,13 +535,22 @@ function Flow() {
           <ReactFlow
             nodes={nodes}
             edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
+            onNodesChange={(changes) => {
+              onNodesChange(changes);
+              if (changes.some((c) => c.type === "position" || c.type === "remove" || c.type === "add")) {
+                markDirty();
+              }
+            }}
+            onEdgesChange={(changes) => {
+              onEdgesChange(changes);
+              if (changes.some((c) => c.type === "remove" || c.type === "add")) markDirty();
+            }}
             onConnect={onConnect}
+            onNodeDragStop={() => markDirty()}
+            onMoveEnd={() => markDirty()}
             nodeTypes={nodeTypes}
-            defaultEdgeOptions={{ type: "smoothstep", markerEnd: ARROW, style: { strokeWidth: 2, stroke: "#8b5cf6" } }}
-            defaultViewport={saved?.viewport ?? { x: 0, y: 0, zoom: 1 }}
-            fitView={!saved}
+            defaultEdgeOptions={{ type: "smoothstep", markerEnd: ARROW, style: { strokeWidth: 2, stroke: "#c4b5fd" } }}
+            fitView
             fitViewOptions={{ padding: 0.25 }}
             minZoom={0.2}
             maxZoom={2.5}
@@ -355,8 +566,8 @@ function Flow() {
             <MiniMap
               pannable
               zoomable
-              nodeColor={() => "rgb(139 92 246 / 0.6)"}
-              maskColor="rgb(0 0 0 / 0.55)"
+              nodeColor={(n) => `hsl(${hueFromId(n.id)} 90% 62%)`}
+              maskColor="rgb(20 12 45 / 0.45)"
             />
           </ReactFlow>
         </EditContext.Provider>

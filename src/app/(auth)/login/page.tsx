@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
 import { credentialsSignIn } from "@/lib/client-auth";
+import { connectAccount, hasToken } from "@/lib/account-sync";
+import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -13,6 +15,7 @@ import { Loader2, AlertCircle, Lock, Mail, ShieldCheck } from "lucide-react";
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { update: refreshSession } = useSession();
   const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -37,6 +40,18 @@ function LoginForm() {
       if (!r.ok) {
         setError(r.error || "Sign-in failed. Please try again.");
         return;
+      }
+      // In the offline APK there is no cookie session, so link this device to the
+      // account (mint a device token) to enable cloud sync across devices.
+      if (process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1" && !hasToken()) {
+        void connectAccount(email.trim(), password, "BioPulse device").catch(() => {});
+      }
+      // Refresh the cached session so the sidebar/topbar show the identity
+      // that was just signed in (the offline shim re-reads it from the store).
+      try {
+        await refreshSession();
+      } catch {
+        // Best-effort: never block navigation on a session refetch.
       }
       router.push(r.url || callbackUrl);
       router.refresh();

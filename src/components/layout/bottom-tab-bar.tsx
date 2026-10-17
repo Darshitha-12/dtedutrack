@@ -9,17 +9,29 @@ import {
   Timer,
   Settings,
   Search,
+  Target,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useChatUnread } from "@/features/chat/lib/unread-store"
 
-const BOTTOM_TABS = [
-  { href: "/dashboard", label: "Home", icon: LayoutDashboard },
-  { href: "/search", label: "Search", icon: Search },
-  { href: "/ai-tutor", label: "Tutor", icon: Brain },
-  { href: "/chat", label: "Chat", icon: MessageCircle },
-  { href: "/focus", label: "Focus", icon: Timer },
-]
+// The offline APK drops AI Tutor (route not exported) and puts Practice in its slot.
+const OFFLINE_BUILD = process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1"
+
+const BOTTOM_TABS = OFFLINE_BUILD
+  ? [
+      { href: "/dashboard", label: "Home", icon: LayoutDashboard },
+      { href: "/search", label: "Search", icon: Search },
+      { href: "/practice", label: "Practice", icon: Target },
+      { href: "/chat", label: "Chat", icon: MessageCircle },
+      { href: "/focus", label: "Focus", icon: Timer },
+    ]
+  : [
+      { href: "/dashboard", label: "Home", icon: LayoutDashboard },
+      { href: "/search", label: "Search", icon: Search },
+      { href: "/ai-tutor", label: "Tutor", icon: Brain },
+      { href: "/chat", label: "Chat", icon: MessageCircle },
+      { href: "/focus", label: "Focus", icon: Timer },
+    ]
 
 export function BottomTabBar() {
   const pathname = usePathname()

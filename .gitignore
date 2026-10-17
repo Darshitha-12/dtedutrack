@@ -1,5 +1,8 @@
 node_modules/
 .next/
+.next-offline/
+out/
+.offline-stash/
 .env
 .env.local
 *.tsbuildinfo
@@ -14,3 +17,11 @@ deploy_log*.txt
 verceldeploy*.txt
 webbuild*.txt
 webbuild_id.txt
+
+# local build/deploy scratch output
+/*.log
+/tc.txt
+/tc2.txt
+/vercel-logs.jsonl
+/vercel-logs.txt
+/*.apk

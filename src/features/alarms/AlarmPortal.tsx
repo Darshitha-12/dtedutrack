@@ -66,7 +66,9 @@ export function AlarmPortal() {
 
   const checkDue = useCallback(() => {
     const { alarms, fired } = readAlarms();
-    const pushJson = JSON.stringify({ alarms });
+    // Include `fired` so that the moment an alarm goes off the schedule is republished: the
+    // OS slot was just spent, and the following alarm/class has to be re-armed.
+    const pushJson = JSON.stringify({ alarms, fired });
     if (pushJson !== lastAlarmPush.current) {
       lastAlarmPush.current = pushJson;
       pushNativeAlarms(alarms);
@@ -129,6 +131,9 @@ export function AlarmPortal() {
         triggerAlarm(due);
       }
       // Whatever happened, hand the OS the following alarm so a long series keeps working.
+      // A class reminder is not in the alarms list, so nothing above changed `pushJson` for
+      // it — clear the dedup marker to force the re-publish after any native ring.
+      lastAlarmPush.current = "";
       checkDue();
     };
 

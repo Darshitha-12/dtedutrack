@@ -17,7 +17,7 @@ export default function StudyFlowPage() {
     <div className="space-y-4">
       <PageHeader
         title="Study Flow"
-        description="Plan your day as a flowchart — drag boxes, connect arrows and edit tasks. Saved on this device."
+        description="Plan each day as a flowchart — Yesterday, Today and Tomorrow. Drag boxes, connect arrows and edit tasks; your plan syncs across your devices."
       />
       <StudyFlowChart />
     </div>

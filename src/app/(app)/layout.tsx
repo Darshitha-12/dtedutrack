@@ -1,25 +1,20 @@
 import { redirect } from "next/navigation"
 import { auth } from "@/lib/auth"
-import { AppShell } from "@/components/layout/app-shell"
-import { ReminderPortal } from "@/features/reminders/ReminderPortal"
-import { AlarmPortal } from "@/features/alarms/AlarmPortal"
-import { ToastProvider } from "@/components/ui/toast"
-import { MediaCommandBridge } from "@/components/app/media-command-bridge"
+import { AppFrame } from "@/components/layout/app-frame"
+
+// The offline APK is a static export: there is no server, no session cookie and no
+// /login to redirect to. NEXT_PUBLIC_* is inlined at build time, so in the offline
+// build this condition folds to `false` and the auth() call below is never executed
+// (calling it would hit cookies() and fail `output: "export"` at build time).
+const OFFLINE = process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1"
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth()
-  if (!session?.user?.id) {
-    redirect("/login")
+  if (!OFFLINE) {
+    const session = await auth()
+    if (!session?.user?.id) {
+      redirect("/login")
+    }
   }
 
-  return (
-    <>
-      <ToastProvider>
-        <MediaCommandBridge />
-        <AppShell>{children}</AppShell>
-        <ReminderPortal />
-        <AlarmPortal />
-      </ToastProvider>
-    </>
-  )
+  return <AppFrame>{children}</AppFrame>
 }

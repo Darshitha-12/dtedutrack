@@ -1,19 +1,23 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { supabaseAdmin, isSupabaseConfigured } from "@/lib/supabase-admin";
 import { channelRoomFor } from "@/lib/supabase";
 import { CALL_SIGNAL_MEDIA_TYPE } from "@/lib/call-signal";
+import { chatPreflight, resolveChatUser } from "@/lib/chat-api";
 
 const readSchema = z.object({
   partnerId: z.string().min(1),
 });
 
+export async function OPTIONS() {
+  return chatPreflight();
+}
+
 export async function POST(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const meUser = await resolveChatUser(req);
+    if (!meUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -23,7 +27,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
     }
 
-    const me = session.user.id;
+    const me = meUser.id;
     const { partnerId } = parsed.data;
 
     const result = await db.directMessage.updateMany({
@@ -31,7 +35,9 @@ export async function POST(req: Request) {
         senderId: partnerId,
         receiverId: me,
         readAt: null,
-        mediaType: { not: CALL_SIGNAL_MEDIA_TYPE },
+        // A bare `not` compiles to `mediaType <> '…'` and would skip every normal message
+        // (mediaType NULL), so NULL is matched explicitly.
+        OR: [{ mediaType: null }, { mediaType: { not: CALL_SIGNAL_MEDIA_TYPE } }],
       },
       data: { readAt: new Date() },
     });

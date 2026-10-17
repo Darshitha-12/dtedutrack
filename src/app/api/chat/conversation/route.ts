@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { chatPreflight, resolveChatUser } from "@/lib/chat-api";
+
+export async function OPTIONS() {
+  return chatPreflight();
+}
 
 export async function DELETE(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const meUser = await resolveChatUser(req);
+    if (!meUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -14,7 +18,7 @@ export async function DELETE(req: Request) {
     if (!partnerId) {
       return NextResponse.json({ error: "partnerId required" }, { status: 400 });
     }
-    const me = session.user.id;
+    const me = meUser.id;
     if (partnerId === me) {
       return NextResponse.json({ error: "Cannot delete your own thread" }, { status: 400 });
     }

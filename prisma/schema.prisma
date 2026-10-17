@@ -55,6 +55,9 @@ model User {
   statusViews       StatusView[]
   statusReactions   StatusReaction[]
   classes           ClassSession[]
+  studyFlows        StudyFlow[]
+  accountSnapshot   AccountSnapshot?
+  deviceTokens      DeviceToken[]
 
   @@map("users")
 }
@@ -971,6 +974,67 @@ model ClassSession {
 
   @@index([userId, dayOfWeek])
   @@map("class_sessions")
+}
+
+// ============================================================
+// STUDY FLOW (per-day study-plan flowchart)
+// ============================================================
+
+model StudyFlow {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Local calendar day, YYYY-MM-DD (the user's "today", not UTC).
+  date      String
+  // { nodes: [...], edges: [...], viewport: { x, y, zoom } }
+  data      Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@map("study_flows")
+}
+
+// Cloud sync rooms for the offline-first Study Flow. A room is identified by a
+// user-chosen code (the shared secret between their devices), so the phone APK
+// (which has no account) can sync with the laptop web without authentication.
+model StudySync {
+  key       String   @id
+  // { dates: { "YYYY-MM-DD": { nodes, edges, viewport, updatedAt } } }
+  data      Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("study_sync")
+}
+
+// Per-account snapshot of the client-side data that has no dedicated server model
+// (reminders, alarms, per-day study flow) plus, later, mirrors of other collections.
+// Keyed by the user id so any device signed into the same email shares it.
+model AccountSnapshot {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // { updatedAt, kv: { "<localStorageKey>": { v: string | null, t: number } } }
+  data      Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("account_snapshots")
+}
+
+// Long-lived device tokens so the off-line Android app can authenticate its sync
+// calls cross-origin without a cookie session. Minted by /api/account/connect.
+model DeviceToken {
+  token     String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label     String   @default("")
+  createdAt DateTime @default(now())
+  lastSeen  DateTime @default(now())
+
+  @@index([userId])
+  @@map("device_tokens")
 }
 
 // ============================================================

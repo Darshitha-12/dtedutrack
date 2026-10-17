@@ -36,6 +36,7 @@ import {
   Tooltip,
 } from "recharts";
 import { SUBJECT_LIST } from "@/types/subject";
+import { testExamAlertNow } from "@/features/alarms/lib/native-alarm-scheduler";
 
 interface ProfileData {
   name: string;
@@ -613,6 +614,23 @@ export default function DashboardPage() {
             ))}
           </div>
         </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={() => {
+              if (!testExamAlertNow()) {
+                alert("මේ test එක app එකේ (installed) විතරයි වැඩ කරන්නේ.");
+              }
+            }}
+          >
+            <AlarmClock className="h-4 w-4" /> Test 12 AM alert
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Tonight&apos;s exam reminder, fired now
+          </span>
+        </div>
       </Card>
 
       {/* 3. YT Player Card */}
@@ -863,10 +881,10 @@ export default function DashboardPage() {
               Study Biology
             </Button>
           </Link>
-          <Link href="/ai-tutor">
+          <Link href={process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1" ? "/practice" : "/ai-tutor"}>
             <Button variant="outline" className="gap-2">
               <Play className="h-4 w-4" />
-              AI Tutor
+              {process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1" ? "Practice" : "AI Tutor"}
             </Button>
           </Link>
           <Link href="/focus">

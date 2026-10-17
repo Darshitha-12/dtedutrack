@@ -1,0 +1,22 @@
+module.exports = {
+  existsSync: () => false,
+  readFileSync: () => { throw new Error("fs disabled in browser build"); },
+  writeFileSync: () => {},
+  unlinkSync: () => {},
+  mkdirSync: () => {},
+  rmSync: () => {},
+  readdirSync: () => [],
+  createReadStream: () => { throw new Error("fs disabled in browser build"); },
+  createWriteStream: () => { throw new Error("fs disabled in browser build"); },
+  statSync: () => null,
+  promises: {
+    readFile: async () => { throw new Error("fs disabled in browser build"); },
+    writeFile: async () => {},
+    mkdir: async () => {},
+    rm: async () => {},
+    unlink: async () => {},
+    stat: async () => null,
+    access: async () => { throw new Error("fs disabled in browser build"); },
+    readdir: async () => [],
+  },
+};

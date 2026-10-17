@@ -12,6 +12,17 @@ import { holdBackgroundPlayback } from "@/features/alarms/lib/background-playbac
 export function MediaCommandBridge() {
   useEffect(() => {
     const handler = (command: string) => {
+      if (command === "speechStart") {
+        // The native side is about to announce over the tone: pull the music down so the voice
+        // is clearly ahead, then restore on speechEnd.
+        AudioEngine.setMusicLevel(0.14);
+        return;
+      }
+      if (command === "speechEnd") {
+        AudioEngine.setMusicLevel(0.5);
+        return;
+      }
+
       // Handled before the YouTube routing: while a video is open every command used to be sent
       // to the player, so a Dismiss button on the alarm notification would have been swallowed by
       // it and the alarm would keep ringing.

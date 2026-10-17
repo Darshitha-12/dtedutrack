@@ -36,11 +36,35 @@
     <div class="logo">🧬</div>
     <h1>BioPulse</h1>
     <p>You're offline right now. Pages you have already opened still work. Reconnect to load new ones.</p>
-    <button type="button" onclick="location.reload()">Try again</button>
+    <button type="button" onclick="recover()">Try again</button>
   </div>
   <script>
+    // Recover from a stale worker/cache that is pinning the tab to this screen: drop the
+    // service worker and every cache, then reload straight from the network. A plain
+    // location.reload() would just be answered by the same broken worker again.
+    var recovering = false;
+    function recover() {
+      if (recovering) return;
+      recovering = true;
+      var done = function () { location.reload(); };
+      try {
+        if (navigator.serviceWorker) {
+          navigator.serviceWorker.getRegistrations().then(function (regs) {
+            return Promise.all(regs.map(function (r) { return r.unregister(); }));
+          }).then(function () {
+            if (window.caches) {
+              return caches.keys().then(function (keys) {
+                return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+              });
+            }
+          }).then(done, done);
+          return;
+        }
+      } catch (e) { /* fall through to a plain reload */ }
+      done();
+    }
     // Coming back online should take the user straight to the app, not this screen.
-    window.addEventListener("online", function () { location.reload(); });
+    window.addEventListener("online", recover);
   </script>
 </body>
 </html>

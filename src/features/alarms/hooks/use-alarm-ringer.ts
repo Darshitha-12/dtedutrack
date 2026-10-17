@@ -89,7 +89,7 @@ export function useAlarmRinger() {
       };
       // Keeps the Android foreground media service (and wakelock) alive so a custom
       // MP3 keeps playing when the app is backgrounded or the screen is locked.
-      holdBackgroundPlayback(true, alarm.label);
+      holdBackgroundPlayback(true, alarm.label, alarm.sound);
       // The native full-screen skips launching when the web is the active
       // ringer, so the web is responsible for vibration in-app.
       startVibration();

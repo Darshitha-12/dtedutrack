@@ -3,8 +3,10 @@
 
     <application
         android:allowBackup="true"
+        android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:largeHeap="true"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
@@ -51,6 +53,11 @@
         </intent-filter>
     </receiver>
 
+    <!-- Inline "Reply" action on BioPulse direct-message notifications (chat quick reply). -->
+    <receiver
+        android:name=".ChatReplyReceiver"
+        android:exported="false" />
+
     <!-- Keeps WebView media (YouTube) playing in the background / with the screen locked,
          and shows lock-screen play-pause controls. -->
     <service
@@ -58,11 +65,76 @@
         android:exported="false"
         android:foregroundServiceType="mediaPlayback" />
 
+    <!-- Native Telegram client (TDLib) -->
+    <activity
+        android:name=".telegram.TelegramAuthActivity"
+        android:exported="false"
+        android:label="Telegram"
+        android:theme="@style/AppTheme.Tg" />
+
+    <activity
+        android:name=".telegram.TelegramChatsActivity"
+        android:exported="false"
+        android:label="Telegram"
+        android:theme="@style/AppTheme.Tg" />
+
+    <activity
+        android:name=".telegram.TelegramChatActivity"
+        android:exported="false"
+        android:label="Telegram"
+        android:theme="@style/AppTheme.Tg"
+        android:windowSoftInputMode="adjustResize" />
+
+    <activity
+        android:name=".telegram.TelegramPhotoActivity"
+        android:exported="false"
+        android:theme="@style/AppTheme.Tg.Immersive" />
+
+    <activity
+        android:name=".telegram.TelegramVideoActivity"
+        android:exported="false"
+        android:configChanges="orientation|screenSize|keyboardHidden"
+        android:theme="@style/AppTheme.Tg.Immersive" />
+
+    <activity
+        android:name=".telegram.TelegramWebActivity"
+        android:exported="false"
+        android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
+        android:hardwareAccelerated="true"
+        android:launchMode="singleTop"
+        android:theme="@style/AppTheme.Tg" />
+
+    <service
+        android:name=".telegram.TelegramService"
+        android:exported="false"
+        android:foregroundServiceType="dataSync" />
+
+    <receiver
+        android:name=".telegram.TelegramBootReceiver"
+        android:enabled="true"
+        android:exported="true">
+        <intent-filter>
+            <action android:name="android.intent.action.BOOT_COMPLETED" />
+            <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        </intent-filter>
+    </receiver>
+
+    <!-- Receives the inline reply text typed directly on a message notification. -->
+    <receiver
+        android:name=".telegram.TelegramReplyReceiver"
+        android:exported="false" />
+
     </application>
 
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Offline data safety net: the device backup is written to the public Downloads folder so
+         it survives an app-data wipe. Android 10+ writes it through MediaStore (no permission),
+         so this is only needed on older devices. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <!-- Video calling: camera capture + microphone capture -->
     <uses-permission android:name="android.permission.CAMERA" />
@@ -75,9 +147,17 @@
     <!-- Background media playback -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Without this every vibration request is silently ignored: the alarm notification's
+         pattern, the in-app ring vibration and the reminder pulses all go dead. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Lets the app ask to be exempt from battery optimisation so the Telegram notification
+         foreground service is not frozen/killed by the OEM power manager. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Lets the alarm be an exact OS alarm rather than an approximate one on Android 12+.
          Declared as not required because the scheduler falls back to an inexact alarm when the

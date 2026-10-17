@@ -1,6 +1,6 @@
 import { customSoundId, getCustomSoundBlob, getCustomSoundBytes } from "./custom-sounds";
 
-export type AlarmSoundName = "chime" | "digital" | "bio";
+export type AlarmSoundName = "chime" | "digital" | "bio" | "study" | "romantic";
 
 /** A built-in tone, or `custom:<soundId>` pointing at the user's own audio file. */
 export type AlarmSound = AlarmSoundName | `custom:${string}`;
@@ -64,7 +64,36 @@ class AudioEngineClass {
       return;
     }
     this.startLoop(name as AlarmSoundName);
-    this.onSoundStarted?.();
+    this.reportSynthStarted();
+  }
+
+  /**
+   * Reports that a built-in tone is audible — but only once it actually is.
+   *
+   * <p>The native side rings a fallback tone whenever the OS wakes the app for an alarm, and it
+   * stands that tone down the moment this page reports that it has taken over. Reporting a tone
+   * while the AudioContext is still suspended would therefore silence both sides at once: the
+   * notification stays on screen with nothing behind it. So resume first, retry briefly, and only
+   * report a running context — if it never runs, the native fallback simply keeps ringing.
+   */
+  private reportSynthStarted(attempt = 0): void {
+    const token = this.token;
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (ctx.state === "running") {
+      this.onSoundStarted?.();
+      return;
+    }
+    try {
+      void ctx.resume().catch(() => {});
+    } catch {
+      /* resume unavailable — the retry below still runs */
+    }
+    if (attempt >= 20) return;
+    setTimeout(() => {
+      if (token !== this.token) return;
+      this.reportSynthStarted(attempt + 1);
+    }, 400);
   }
 
   /**
@@ -190,7 +219,10 @@ class AudioEngineClass {
       // The sound is gone from storage, or nothing on this device can play it. Ring the default
       // tone rather than leaving the alarm silent.
       if (!bytes || token !== this.token) {
-        if (token === this.token) this.startLoop("chime");
+        if (token === this.token) {
+          this.startLoop("chime");
+          this.reportSynthStarted();
+        }
         return;
       }
       const decoded = await this.decodeWithTimeout(bytes, DECODE_TIMEOUT_MS);
@@ -360,6 +392,160 @@ class AudioEngineClass {
         this.playBio();
         this.loopTimer = setTimeout(() => this.startLoop(name), 4000);
         break;
+      case "study":
+        this.playStudy();
+        this.loopTimer = setTimeout(() => this.startLoop(name), this.studyLoopMs);
+        break;
+      case "romantic":
+        this.playRomantic();
+        this.loopTimer = setTimeout(() => this.startLoop(name), this.romanticLoopMs);
+        break;
+    }
+  }
+
+  /** Duck to `level` (0–1) so the spoken announcement can sit clearly on top, then restore. */
+  setMusicLevel(level: number): void {
+    if (this.masterGain) {
+      try {
+        this.masterGain.gain.setTargetAtTime(level, this.ctx!.currentTime, 0.08);
+      } catch {
+        this.masterGain.gain.value = level;
+      }
+    }
+  }
+
+  /* ---------- study: a calm, loopable piano lullaby (C major) ---------- */
+
+  private readonly studyLoopMs = 16000;
+
+  private playStudy(): void {
+    if (!this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+    const f = (n: number) => 440 * Math.pow(2, (n - 69) / 12);
+    const beat = 0.5; // 120 BPM, 2 bars per chord
+
+    const chords: { bass: number; notes: number[] }[] = [
+      { bass: 36, notes: [48, 55, 60, 64] }, // Cmaj7
+      { bass: 33, notes: [45, 52, 57, 60] }, // Am7
+      { bass: 29, notes: [41, 48, 53, 57] }, // Fmaj7
+      { bass: 31, notes: [43, 50, 55, 59] }, // G6
+    ];
+    const phrase: [number, number, number][] = [
+      [72, 0.0, 1.3],
+      [71, 1.5, 1.2],
+      [69, 3.0, 1.1],
+      [72, 4.0, 1.2],
+      [74, 5.6, 0.6],
+      [72, 6.3, 1.1],
+      [77, 8.0, 1.3],
+      [72, 9.6, 0.8],
+      [69, 11.0, 1.1],
+      [67, 12.0, 1.2],
+      [69, 13.4, 1.0],
+      [71, 14.6, 1.2],
+    ];
+
+    const addNote = (t0: number, midi: number, dur: number, amp: number, decay: number) => {
+      const f0 = f(midi);
+      // A few soft partials mimic a piano's quick attack + ringing decay.
+      ([[1, 1], [2, 0.45], [3, 0.2], [4, 0.07]] as const).forEach(([mult, level]) => {
+        const osc = this.ctx!.createOscillator();
+        const g = this.ctx!.createGain();
+        osc.type = "sine";
+        osc.frequency.value = f0 * mult;
+        const t = now + t0;
+        const peak = amp * level;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(peak, t + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur + decay * 2.2);
+        osc.connect(g);
+        g.connect(this.masterGain!);
+        osc.start(t);
+        osc.stop(t + dur + decay * 2.2 + 0.05);
+        this.activeOscillators.push(osc);
+      });
+    };
+
+    const chordSec = 4;
+    for (let ci = 0; ci < chords.length; ci++) {
+      const tBase = ci * chordSec;
+      const chord = chords[ci];
+      addNote(tBase, chord.bass, 1.2, 0.11, 0.4);
+      addNote(tBase + beat * 3, chord.bass, 1.2, 0.09, 0.4);
+      const seq = [...chord.notes.map((n) => n + 12), chord.notes[0] + 24];
+      for (let k = 0; k < 8; k++) {
+        addNote(tBase + (k * beat) / 2, seq[k % seq.length], 0.8, 0.033, 0.3);
+      }
+    }
+    for (const [midi, t0, dur] of phrase) {
+      addNote(t0, midi, dur, 0.13, 0.75);
+    }
+  }
+
+  /* ---------- romantic: a warm, slow loop (G - D/F# - Em7 - Cmaj7) ---------- */
+
+  private readonly romanticLoopMs = 19200;
+
+  private playRomantic(): void {
+    if (!this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+    const f = (n: number) => 440 * Math.pow(2, (n - 69) / 12);
+    const beat = 60 / 104; // 104 BPM, 2 bars per chord
+
+    const chords: { bass: number; notes: number[] }[] = [
+      { bass: 31, notes: [43, 50, 55, 59] }, // G
+      { bass: 30, notes: [42, 50, 57, 62] }, // D/F#
+      { bass: 28, notes: [40, 47, 52, 55] }, // Em7
+      { bass: 24, notes: [36, 43, 48, 52] }, // Cmaj7
+    ];
+    const phrase: [number, number, number][] = [
+      [71, 0.0, 1.5],
+      [74, 1.9, 1.3],
+      [71, 3.6, 1.2],
+      [69, 4.8, 1.4],
+      [66, 6.6, 1.1],
+      [69, 7.9, 1.2],
+      [72, 9.6, 1.5],
+      [71, 11.4, 0.8],
+      [69, 12.5, 1.3],
+      [67, 14.4, 1.3],
+      [64, 16.0, 1.4],
+      [67, 17.6, 1.4],
+    ];
+
+    const addNote = (t0: number, midi: number, dur: number, amp: number, decay: number) => {
+      const f0 = f(midi);
+      ([[1, 1], [2, 0.45], [3, 0.2], [4, 0.07]] as const).forEach(([mult, level]) => {
+        const osc = this.ctx!.createOscillator();
+        const g = this.ctx!.createGain();
+        osc.type = "sine";
+        osc.frequency.value = f0 * mult;
+        const t = now + t0;
+        const peak = amp * level;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(peak, t + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur + decay * 2.2);
+        osc.connect(g);
+        g.connect(this.masterGain!);
+        osc.start(t);
+        osc.stop(t + dur + decay * 2.2 + 0.05);
+        this.activeOscillators.push(osc);
+      });
+    };
+
+    const chordSec = 4.8;
+    for (let ci = 0; ci < chords.length; ci++) {
+      const tBase = ci * chordSec;
+      const chord = chords[ci];
+      addNote(tBase, chord.bass, 1.6, 0.09, 0.6);
+      addNote(tBase + beat * 3, chord.bass, 1.6, 0.07, 0.6);
+      const seq = [...chord.notes.map((n) => n + 12), chord.notes[0] + 24];
+      for (let k = 0; k < 14; k++) {
+        addNote(tBase + (k * beat) / 2, seq[k % seq.length], 1.0, 0.026, 0.4);
+      }
+    }
+    for (const [midi, t0, dur] of phrase) {
+      addNote(t0, midi, dur, 0.11, 0.85);
     }
   }
 

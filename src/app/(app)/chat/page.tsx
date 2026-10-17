@@ -23,6 +23,7 @@ import {
   CircleDot,
   Trash2,
   StopCircle,
+  Copy,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
@@ -30,7 +31,9 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
   VideoCallOverlay,
   type CallPeer,
+  type CallKind,
 } from "@/features/chat/components/video-call-overlay";
+import { MediaLightbox, type LightboxMedia } from "@/features/chat/components/media-lightbox";
 
 function VideoIcon({ className }: { className?: string }) {
   return (
@@ -216,6 +219,12 @@ interface Conversation {
   unread: number;
 }
 
+interface DmReaction {
+  emoji: string;
+  count: number;
+  mine?: boolean;
+}
+
 interface Dm {
   id: string;
   senderId: string;
@@ -225,6 +234,10 @@ interface Dm {
   mediaName: string | null;
   readAt: string | null;
   createdAt: string;
+  reactions?: DmReaction[];
+  /** Optimistic bubble that has not been confirmed by the server yet. */
+  pending?: boolean;
+  failed?: boolean;
 }
 
 interface StatusItem {
@@ -244,7 +257,44 @@ interface StatusItem {
   viewers?: { userId: string; name: string; image: string | null; viewedAt: string }[];
 }
 
-const POLL_MS = 4000;
+const POLL_MS = 3000;
+
+/** Quick reactions offered when a message is tapped. */
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+
+/**
+ * Merge a server snapshot with locally-pending bubbles. The poller must never drop an
+ * optimistic message that is still in flight, otherwise a sent message flashes away until
+ * the next poll picks it up.
+ */
+function mergeMessages(server: Dm[], local: Dm[]): Dm[] {
+  const serverIds = new Set(server.map((m) => m.id));
+  const inFlight = local.filter((m) => (m.pending || m.failed) && !serverIds.has(m.id));
+  if (!inFlight.length) return server;
+  return [...server, ...inFlight].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/** Recompute a bubble's reaction pills after reacting/reacting-off, before the server answers. */
+function optimisticReaction(list: DmReaction[] | undefined, next: string): DmReaction[] {
+  const previous = list ?? [];
+  const mineNow = previous.find((r) => r.mine)?.emoji ?? null;
+  const out = previous
+    .map((r) => ({ ...r, mine: false }))
+    .filter((r) => {
+      if (r.emoji === mineNow) r.count -= 1;
+      return r.count > 0;
+    });
+  if (next) {
+    const hit = out.find((r) => r.emoji === next);
+    if (hit) {
+      hit.count += 1;
+      hit.mine = true;
+    } else {
+      out.push({ emoji: next, count: 1, mine: true });
+    }
+  }
+  return out;
+}
 
 const C = {
   bg: "var(--background)",
@@ -360,29 +410,71 @@ function Avatar({
   );
 }
 
-function mediaBubble(m: Dm, onDownload: (url: string, name: string) => void) {
+function mediaBubble(
+  m: Dm,
+  onDownload: (url: string, name: string) => void,
+  onOpen?: (media: LightboxMedia) => void,
+) {
   if (!m.mediaUrl) return null;
+  const name = fileNameFromUrl(m.mediaUrl, m.mediaName);
   let body: ReactNode;
   if (m.mediaType === "image") {
-    body = <img src={m.mediaUrl} alt={m.mediaName || "image"} className="max-h-64 rounded-lg object-cover" />;
+    body = (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpen?.({ url: m.mediaUrl as string, type: "image", name });
+        }}
+        className="block overflow-hidden rounded-lg"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={m.mediaUrl} alt={m.mediaName || "image"} className="max-h-64 object-cover" />
+      </button>
+    );
   } else if (m.mediaType === "video") {
-    body = <video src={m.mediaUrl} controls className="max-h-64 rounded-lg" />;
+    // A still preview that opens the full-screen player, the way a messaging app behaves.
+    body = (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpen?.({ url: m.mediaUrl as string, type: "video", name });
+        }}
+        className="relative block overflow-hidden rounded-lg"
+      >
+        <video src={m.mediaUrl} preload="metadata" muted playsInline className="max-h-64 rounded-lg" />
+        <span className="absolute inset-0 grid place-items-center bg-black/25">
+          <span className="grid h-12 w-12 place-items-center rounded-full bg-black/60 text-white">
+            ▶
+          </span>
+        </span>
+      </button>
+    );
   } else if (m.mediaType === "audio") {
-    body = <audio src={m.mediaUrl} controls className="max-w-full" />;
+    body = <audio src={m.mediaUrl} controls className="max-w-full" onClick={(e) => e.stopPropagation()} />;
   } else {
     body = (
-      <a href={m.mediaUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+      <a
+        href={m.mediaUrl}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="underline underline-offset-2"
+      >
         📎 {m.mediaName || "File"}
       </a>
     );
   }
-  const name = fileNameFromUrl(m.mediaUrl, m.mediaName);
   return (
     <div className="space-y-1.5">
       {body}
       <button
         type="button"
-        onClick={() => onDownload(m.mediaUrl as string, name)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDownload(m.mediaUrl as string, name);
+        }}
         className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors hover:bg-white/10"
       >
         <Download className="h-3 w-3" /> Save {name}
@@ -393,7 +485,14 @@ function mediaBubble(m: Dm, onDownload: (url: string, name: string) => void) {
 
 export default function ChatPage() {
   const { data: session } = useSession();
-  const me = session?.user?.id;
+  const sessionUserId = session?.user?.id;
+  // The Android app has no NextAuth cookie, so its offline session carries a synthetic id
+  // ("offline-user") that can never equal a real sender id — which made every bubble render as
+  // received and hid "Delete for everyone". The chat API is the authority on who we are, so
+  // adopt the id it reports ("offline-user" offline, the real id online) and fall back to the
+  // session for the web, where a real session already exists.
+  const [chatMeId, setChatMeId] = useState<string | null>(null);
+  const me = chatMeId ?? sessionUserId;
   const myName = session?.user?.name || "";
   const myImage = (session?.user as { image?: string | null })?.image || null;
   const { showToast } = useToast();
@@ -429,9 +528,13 @@ export default function ChatPage() {
   const [contactOpen, setContactOpen] = useState(false);
   const [callPeer, setCallPeer] = useState<CallPeer | null>(null);
   const [callRole, setCallRole] = useState<"caller" | "callee">("caller");
+  const [callKind, setCallKind] = useState<CallKind>("video");
   const [recording, setRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [recordingError, setRecordingError] = useState("");
+  /** The message whose tap-menu (react / copy / delete) is open. */
+  const [actionMsg, setActionMsg] = useState<Dm | null>(null);
+  const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
   const [statuses, setStatuses] = useState<StatusItem[]>([]);
   const [composerOpen, setComposerOpen] = useState(false);
   const [statusText, setStatusText] = useState("");
@@ -459,6 +562,9 @@ export default function ChatPage() {
   const nearBottomRef = useRef(true);
   const prevActiveRef = useRef<string | null>(null);
   const activeRoomRef = useRef<string | null>(null);
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set when a long-press opened the menu, so the click that follows does not re-open it.
+  const suppressTapRef = useRef(false);
 
   const handleMessagesScroll = () => {
     const el = messagesScrollRef.current;
@@ -481,18 +587,22 @@ export default function ChatPage() {
 
   const activeUser = users.find((u) => u.id === activeId) || null;
 
-  // ---- Video calls -----------------------------------------------------
+  // ---- Voice & video calls --------------------------------------------
   // The overlay handles signaling (offer/answer/ICE) and the callee's own
   // `hello`. Nothing extra to send here — mounting the overlay starts the call.
-  const startCall = useCallback((u: ChatUser) => {
+  const startCall = useCallback((u: ChatUser, kind: CallKind = "video") => {
+    setCallKind(kind);
     setCallRole("caller");
     setCallPeer({ id: u.id, name: u.fullName || u.name, avatar: u.image });
   }, []);
 
-  const startCallWith = useCallback(() => {
-    if (!activeUser) return;
-    startCall(activeUser);
-  }, [activeUser, startCall]);
+  const startCallWith = useCallback(
+    (kind: CallKind) => {
+      if (!activeUser) return;
+      startCall(activeUser, kind);
+    },
+    [activeUser, startCall]
+  );
 
   const closeCall = useCallback(() => {
     setCallPeer(null);
@@ -504,12 +614,14 @@ export default function ChatPage() {
       if (res.ok) {
         const data = await res.json();
         setConversations(data.conversations || []);
+        if (typeof data.me === "string" && data.me) setChatMeId(data.me);
       } else if (res.status === 500) {
         // Serverless DB may be resuming from idle — retry once.
         const retry = await fetch("/api/chat/conversations");
         if (retry.ok) {
           const data = await retry.json();
           setConversations(data.conversations || []);
+          if (typeof data.me === "string" && data.me) setChatMeId(data.me);
         }
       }
     } catch {
@@ -539,7 +651,12 @@ export default function ChatPage() {
         if (res.ok) data = await res.json();
         else if (res.status !== 500) break;
       }
-      if (data) setMessages(data.messages || []);
+      if (data) {
+        const next = data.messages || [];
+        // Merge rather than replace so an in-flight optimistic bubble is not wiped out
+        // by a poll that raced the POST.
+        setMessages((prev) => mergeMessages(next, prev));
+      }
     } catch {
       /* ignore */
     } finally {
@@ -557,6 +674,17 @@ export default function ChatPage() {
         });
       } catch {
         /* ignore */
+      }
+      // The thread is on screen now, so take away any system notification for it (the Android
+      // shell keeps one per partner until it is tapped or the conversation is read here).
+      try {
+        (
+          window as unknown as {
+            BioPulseBridge?: { dismissChatNotification?: (id: string) => void };
+          }
+        ).BioPulseBridge?.dismissChatNotification?.(partnerId);
+      } catch {
+        /* bridge unavailable */
       }
       setMessages((prev) =>
         prev.map((m) =>
@@ -625,6 +753,33 @@ export default function ChatPage() {
     activeRoomRef.current = null;
     setMessages([]);
     setMobilePane("list");
+  }, []);
+
+  // Open a specific conversation when arriving from a message notification
+  // (/chat?partner=<id>), then drop the query so a reload does not re-open it.
+  useEffect(() => {
+    try {
+      const pid = new URLSearchParams(window.location.search).get("partner");
+      if (pid) {
+        openChat(pid);
+        window.history.replaceState(null, "", "/chat");
+      }
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Ask once for notification permission so new-message notifications can appear on
+  // the web/PWA. The Android app uses the native bridge and needs no permission here.
+  useEffect(() => {
+    try {
+      if (typeof Notification !== "undefined" && Notification.permission === "default") {
+        void Notification.requestPermission();
+      }
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   // Apply a pending status reply once the target chat is active.
@@ -853,17 +1008,26 @@ export default function ChatPage() {
   }, [viewerProgress, viewerItems]);
 
   useEffect(() => {
-    const poll = setInterval(
-      () => {
-        loadConversations();
-        if (activeRoomRef.current) {
-          loadMessages(activeRoomRef.current);
-          markRead(activeRoomRef.current);
-        }
-      },
-      POLL_MS,
-    );
-    return () => clearInterval(poll);
+    const tick = () => {
+      // While the app is in the background the native DM watcher (MediaPlaybackService)
+      // owns delivery, so the page poller stands down and protects the battery.
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      loadConversations();
+      if (activeRoomRef.current) {
+        loadMessages(activeRoomRef.current);
+        markRead(activeRoomRef.current);
+      }
+    };
+    const poll = setInterval(tick, POLL_MS);
+    // Catch up immediately after returning to the app (the interval may have been frozen).
+    const onVisible = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(poll);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [loadConversations, loadMessages, markRead]);
 
   // Real-time via Supabase broadcast
@@ -907,10 +1071,13 @@ export default function ChatPage() {
       try {
         const res = await fetch("/api/chat/call-signal/incoming", { cache: "no-store" });
         if (!res.ok || stopped) return;
-        const data = (await res.json()) as { caller?: CallPeer & { callId: string } };
+        const data = (await res.json()) as {
+          caller?: CallPeer & { callId: string; kind?: CallKind };
+        };
         const caller = data.caller;
         if (!caller?.id || caller.id === me) return;
         if (callPeerRef.current) return; // already in a call
+        setCallKind(caller.kind === "voice" ? "voice" : "video");
         setCallRole("callee");
         setCallPeer({ id: caller.id, name: caller.name, avatar: caller.avatar });
       } catch {
@@ -938,35 +1105,63 @@ export default function ChatPage() {
     mediaName?: string;
   }) => {
     if (!activeId || !me) return;
+    const room = activeId;
+    // Show the bubble immediately; the server round-trip (and the poller) only reconciles it.
+    const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimistic: Dm = {
+      id: tempId,
+      senderId: me,
+      text: payload.text ?? "",
+      mediaUrl: payload.mediaUrl ?? null,
+      mediaType: payload.mediaType ?? null,
+      mediaName: payload.mediaName ?? null,
+      readAt: null,
+      createdAt: new Date().toISOString(),
+      reactions: [],
+      pending: true,
+    };
+    nearBottomRef.current = true;
+    setMessages((prev) => [...prev, optimistic]);
     setSending(true);
     try {
       const res = await fetch("/api/chat/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ partnerId: activeId, ...payload }),
+        body: JSON.stringify({ partnerId: room, ...payload }),
       });
       if (res.status === 401) {
+        setMessages((prev) => prev.filter((m) => m.id !== tempId));
         forceReLogin();
         return;
       }
       if (res.ok) {
-        await fetch("/api/chat/messages?partnerId=" + encodeURIComponent(activeId) + "&limit=200")
-          .then((r) => r.json())
-          .then((d) => setMessages(d.messages || []));
+        const data = await res.json().catch(() => null);
+        const saved: Dm | null = data?.message ?? null;
+        setMessages((prev) => {
+          if (!saved) return prev.map((m) => (m.id === tempId ? { ...m, pending: false } : m));
+          // A poll may already have delivered the real row — then just drop the placeholder.
+          if (prev.some((m) => m.id === saved.id)) return prev.filter((m) => m.id !== tempId);
+          return prev.map((m) => (m.id === tempId ? { ...saved, reactions: saved.reactions ?? [] } : m));
+        });
         loadConversations();
         if (isSupabaseConfigured) {
           await supabase.channel("dm-events").send({
             type: "broadcast",
             event: "new",
-            payload: { room: activeId, from: me, at: new Date().toISOString() },
+            payload: { room, from: me, at: new Date().toISOString() },
           });
         }
-        setText("");
       } else {
         const d = await res.json().catch(() => ({}));
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m)),
+        );
         showToast(d.error || "Failed to send", "error");
       }
     } catch {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m)),
+      );
       showToast("Failed to send", "error");
     } finally {
       setSending(false);
@@ -976,7 +1171,109 @@ export default function ChatPage() {
   const handleSendText = () => {
     const t = text.trim();
     if (!t) return;
+    // Clear the composer at once — the bubble is already on screen and waiting for the
+    // round-trip is exactly the lag we are removing. A failure keeps the bubble in a
+    // "failed" state instead of losing the text.
+    setText("");
+    setEmojiOpen(false);
     sendMessage({ text: t });
+  };
+
+  const beginLongPress = (m: Dm) => {
+    if (longPressRef.current) clearTimeout(longPressRef.current);
+    longPressRef.current = setTimeout(() => {
+      // Swallow the click that ends this same touch, but not the next one.
+      suppressTapRef.current = true;
+      window.setTimeout(() => {
+        suppressTapRef.current = false;
+      }, 700);
+      setActionMsg(m);
+    }, 420);
+  };
+
+  const endLongPress = () => {
+    if (longPressRef.current) {
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+  };
+
+  const tapMessage = (m: Dm) => {
+    if (suppressTapRef.current) return;
+    // Media bubbles open the viewer on tap; the menu is reachable by long-press.
+    if (m.mediaUrl && (m.mediaType === "image" || m.mediaType === "video")) {
+      setLightbox({ url: m.mediaUrl, type: m.mediaType, name: m.mediaName });
+      return;
+    }
+    setActionMsg(m);
+  };
+
+  const openMedia = (media: LightboxMedia) => {
+    if (suppressTapRef.current) return;
+    setLightbox(media);
+  };
+
+  const reactToMessage = async (messageId: string, emoji: string) => {
+    const target = messages.find((m) => m.id === messageId);
+    const already = target?.reactions?.some((r) => r.emoji === emoji && r.mine) ?? false;
+    const next = already ? "" : emoji;
+    setActionMsg(null);
+    // Paint the change straight away, then let the server confirm the tally.
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageId ? { ...m, reactions: optimisticReaction(m.reactions, next) } : m)),
+    );
+    try {
+      const res = await fetch("/api/chat/reactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId, emoji: next }),
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (Array.isArray(data?.reactions)) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === messageId ? { ...m, reactions: data.reactions } : m)),
+          );
+        }
+      }
+    } catch {
+      /* the next poll reconciles */
+    }
+  };
+
+  const deleteMessage = async (messageId: string, scope: "me" | "everyone") => {
+    setActionMsg(null);
+    setMessages((prev) => prev.filter((m) => m.id !== messageId));
+    try {
+      const res = await fetch("/api/chat/messages", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId, scope }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || "Could not delete the message", "error");
+        if (activeId) loadMessages(activeId);
+        return;
+      }
+      showToast(scope === "everyone" ? "Deleted for everyone" : "Deleted for you", "success");
+      loadConversations();
+    } catch {
+      showToast("Could not delete the message", "error");
+      if (activeId) loadMessages(activeId);
+    }
+  };
+
+  const copyMessage = async (m: Dm) => {
+    setActionMsg(null);
+    const value = m.mediaUrl && !m.text ? m.mediaUrl : m.text;
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      showToast("Copied", "success");
+    } catch {
+      showToast("Could not copy", "error");
+    }
   };
 
   const saveMedia = (url: string, name: string) => {
@@ -1178,7 +1475,7 @@ export default function ChatPage() {
   });
 
   return (
-    <div className="flex h-[calc(100dvh-4rem)] flex-col overflow-hidden text-foreground md:mx-auto md:h-[calc(100dvh-2.5rem)] md:max-w-6xl md:rounded-[2rem] md:border md:border-white/[0.09] md:bg-white/[0.03] md:shadow-2xl md:backdrop-blur-2xl">
+    <div className="flex h-[calc(100dvh-70px)] flex-col overflow-hidden text-foreground md:mx-auto md:h-[calc(100dvh-2.5rem)] md:max-w-6xl md:rounded-[2rem] md:border md:border-white/[0.09] md:bg-white/[0.03] md:shadow-2xl md:backdrop-blur-2xl">
       {/* OUTSIDE: header + tabs + list */}
       <div
         className={cn(
@@ -1425,21 +1722,35 @@ export default function ChatPage() {
               ) : (
                 <ul className="divide-y divide-border/60">
                   {users.map((u) => (
-                    <li key={u.id}>
+                    <li
+                      key={u.id}
+                      className="flex items-center gap-1.5 px-3 py-2.5 transition-all duration-200 ease-premium hover:bg-accent/50"
+                    >
                       <button
-                        onClick={() => startCall(u)}
-                        className="flex w-full items-center gap-3 px-3 py-3 text-left transition-all duration-200 ease-premium hover:bg-accent/50 active:bg-accent/80"
+                        onClick={() => startCall(u, "video")}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
                       >
                         <Avatar src={u.image} name={u.fullName} size={44} />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-[15px] font-medium">{u.fullName}</p>
                           <p className="text-xs text-muted-foreground">
-                            {u.status === "online" ? "Online now" : "Tap to start a call"}
+                            {u.status === "online" ? "Online now" : "Tap for video call"}
                           </p>
                         </div>
-                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/12 text-primary transition-all duration-200 ease-spring hover:scale-110 hover:bg-primary hover:text-primary-foreground">
-                          <VideoIcon className="h-[18px] w-[18px]" />
-                        </span>
+                      </button>
+                      <button
+                        onClick={() => startCall(u, "voice")}
+                        aria-label={`Voice call ${u.fullName}`}
+                        className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition-all duration-200 ease-spring hover:scale-110 hover:bg-primary hover:text-primary-foreground"
+                      >
+                        <Phone className="h-[18px] w-[18px]" />
+                      </button>
+                      <button
+                        onClick={() => startCall(u, "video")}
+                        aria-label={`Video call ${u.fullName}`}
+                        className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/12 text-primary transition-all duration-200 ease-spring hover:scale-110 hover:bg-primary hover:text-primary-foreground"
+                      >
+                        <VideoIcon className="h-[18px] w-[18px]" />
                       </button>
                     </li>
                   ))}
@@ -1511,14 +1822,15 @@ export default function ChatPage() {
               </div>
               <div className="flex items-center gap-4 text-muted-foreground">
                 <button
-                  onClick={startCallWith}
+                  onClick={() => startCallWith("video")}
                   aria-label="Start video call"
                   className="pressable hover:text-primary"
                 >
                   <Video className="h-5 w-5" />
                 </button>
                 <button
-                  onClick={() => showToast("Voice calls are not available yet.", "info")}
+                  onClick={() => startCallWith("voice")}
+                  aria-label="Start voice call"
                   className="hover:text-foreground"
                 >
                   <Phone className="h-5 w-5" />
@@ -1567,7 +1879,7 @@ export default function ChatPage() {
             <div
               ref={messagesScrollRef}
               onScroll={handleMessagesScroll}
-              className="relative z-10 min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-1"
+              className="relative z-10 min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-3 py-4"
             >
               {loadingMsgs && messages.length === 0 ? (
                 <div className="flex justify-center py-10">
@@ -1588,34 +1900,69 @@ export default function ChatPage() {
                         </div>
                       )}
                       <div className={cn("flex", mine ? "justify-end" : "justify-start")}>
-                        <div
-                          className={cn(
-                            "relative max-w-[80%] animate-bubble-in px-4 py-2 text-[14.5px] font-medium shadow-lg backdrop-blur-sm",
-                            mine
-                              ? "rounded-3xl rounded-br-lg bg-gradient-aurora text-white shadow-glow"
-                              : "rounded-3xl rounded-bl-lg border border-white/[0.09] bg-white/[0.06] text-foreground",
-                          )}
-                        >
-                          {mediaBubble(m, saveMedia)}
-                          {m.text && (
-                            <p className="whitespace-pre-wrap break-words pr-9 leading-relaxed text-inherit">
-                              {m.text}
-                            </p>
-                          )}
+                        <div className={cn("flex max-w-[80%] flex-col", mine ? "items-end" : "items-start")}>
                           <div
+                            onClick={() => tapMessage(m)}
+                            onTouchStart={() => beginLongPress(m)}
+                            onTouchEnd={endLongPress}
+                            onTouchMove={endLongPress}
+                            onTouchCancel={endLongPress}
                             className={cn(
-                              "mt-0.5 flex items-center justify-end gap-1 text-[11px]",
-                              mine ? "text-white/75" : "text-muted-foreground",
+                              "relative animate-bubble-in px-4 py-2 text-[14.5px] font-medium shadow-lg backdrop-blur-sm",
+                              "cursor-pointer select-none active:brightness-95",
+                              mine
+                                ? "rounded-3xl rounded-br-lg bg-gradient-aurora text-white shadow-glow"
+                                : "rounded-3xl rounded-bl-lg border border-white/[0.09] bg-white/[0.06] text-foreground",
+                              actionMsg?.id === m.id && "ring-2 ring-violet/70",
                             )}
                           >
-                            <span>{formatTime(m.createdAt)}</span>
-                            {mine &&
-                              (m.readAt ? (
-                                <CheckCheck className="h-3.5 w-3.5 text-white/90" />
-                              ) : (
-                                <Check className="h-4 w-4" />
-                              ))}
+                            {mediaBubble(m, saveMedia, openMedia)}
+                            {m.text && (
+                              <p className="whitespace-pre-wrap break-words pr-9 leading-relaxed text-inherit">
+                                {m.text}
+                              </p>
+                            )}
+                            <div
+                              className={cn(
+                                "mt-0.5 flex items-center justify-end gap-1 text-[11px]",
+                                mine ? "text-white/75" : "text-muted-foreground",
+                              )}
+                            >
+                              <span>{formatTime(m.createdAt)}</span>
+                              {mine &&
+                                (m.pending ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : m.failed ? (
+                                  <span className="font-semibold" title="Not sent">
+                                    !
+                                  </span>
+                                ) : m.readAt ? (
+                                  <CheckCheck className="h-3.5 w-3.5 text-white/90" />
+                                ) : (
+                                  <Check className="h-4 w-4" />
+                                ))}
+                            </div>
                           </div>
+                          {(m.reactions?.length ?? 0) > 0 && (
+                            <div className={cn("-mt-1 flex flex-wrap gap-1 px-1", mine ? "justify-end" : "justify-start")}>
+                              {m.reactions!.map((r) => (
+                                <button
+                                  key={r.emoji}
+                                  type="button"
+                                  onClick={() => reactToMessage(m.id, r.emoji)}
+                                  className={cn(
+                                    "flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[11px] leading-none shadow-sm backdrop-blur-sm",
+                                    r.mine
+                                      ? "border-violet/60 bg-violet/20 text-foreground"
+                                      : "border-white/15 bg-black/30 text-foreground",
+                                  )}
+                                >
+                                  <span>{r.emoji}</span>
+                                  {r.count > 1 && <span className="font-semibold">{r.count}</span>}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1677,7 +2024,7 @@ export default function ChatPage() {
                 </div>
               )}
               {recording ? (
-                <div className="flex h-[60px] items-center gap-3 border-t border-border bg-card px-3 py-2.5">
+                <div className="flex min-h-[60px] items-center gap-3 border-t border-border bg-card px-3 pt-2.5 pb-[calc(env(safe-area-inset-bottom)+10px)]">
                   <button
                     onClick={cancelRecording}
                     aria-label="Cancel recording"
@@ -1703,7 +2050,7 @@ export default function ChatPage() {
                   </button>
                 </div>
               ) : (
-                <div className="flex items-center gap-2 border-t border-white/[0.07] bg-white/[0.03] px-3 py-3 backdrop-blur-xl">
+                <div className="flex items-center gap-2 border-t border-white/[0.07] bg-white/[0.03] px-3 pt-3 pb-[calc(env(safe-area-inset-bottom)+12px)] backdrop-blur-xl">
                   <button
                     onClick={() => setEmojiOpen((o) => !o)}
                     className={cn("pressable grid h-11 w-11 shrink-0 place-items-center rounded-2xl transition-colors", emojiOpen ? "bg-gradient-aurora text-white" : "text-muted-foreground hover:bg-white/[0.07] hover:text-foreground")}
@@ -1721,6 +2068,15 @@ export default function ChatPage() {
                       }
                     }}
                     placeholder="Type a message"
+                    onFocus={() => {
+                      // The keyboard shrinks the WebView (windowSoftInputMode=adjustResize);
+                      // snap back to the newest message once the resize has settled.
+                      nearBottomRef.current = true;
+                      window.setTimeout(() => {
+                        const el = messagesScrollRef.current;
+                        if (el) el.scrollTop = el.scrollHeight;
+                      }, 300);
+                    }}
                     className="h-12 flex-1 rounded-2xl border border-white/[0.08] bg-white/[0.04] px-4 text-[14.5px] font-medium text-foreground placeholder:text-muted-foreground/70 outline-none transition-all duration-300 ease-smooth focus:border-violet/50 focus:bg-white/[0.07]"
                   />
                   <label className="pressable grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-2xl text-muted-foreground transition-colors hover:bg-white/[0.07] hover:text-foreground">
@@ -2107,6 +2463,76 @@ export default function ChatPage() {
         </div>
       )}
 
+      {/* Message actions: react, copy, delete for me / for everyone */}
+      {actionMsg && (
+        <>
+          <div
+            className="fixed inset-0 z-[75] bg-black/50 backdrop-blur-[2px]"
+            onClick={() => setActionMsg(null)}
+          />
+          <div className="fixed inset-x-0 bottom-0 z-[76] animate-fade-up rounded-t-3xl border-t border-white/10 bg-[var(--popover)] px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+16px)] shadow-2xl md:left-1/2 md:bottom-6 md:w-[420px] md:-translate-x-1/2 md:rounded-3xl">
+            <div className="mb-3 flex items-center justify-between gap-1">
+              {QUICK_REACTIONS.map((e) => {
+                const active = actionMsg.reactions?.some((r) => r.emoji === e && r.mine);
+                return (
+                  <button
+                    key={e}
+                    type="button"
+                    onClick={() => reactToMessage(actionMsg.id, e)}
+                    className={cn(
+                      "grid h-11 w-11 place-items-center rounded-full text-2xl transition-transform active:scale-90",
+                      active ? "bg-violet/25 ring-2 ring-violet/70" : "bg-white/[0.06] hover:bg-white/[0.12]",
+                    )}
+                  >
+                    {e}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="space-y-1">
+              {(actionMsg.text || actionMsg.mediaUrl) && (
+                <button
+                  type="button"
+                  onClick={() => copyMessage(actionMsg)}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium hover:bg-white/[0.06]"
+                >
+                  <Copy className="h-4 w-4 text-muted-foreground" />
+                  Copy
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => deleteMessage(actionMsg.id, "me")}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium hover:bg-white/[0.06]"
+              >
+                <Trash2 className="h-4 w-4 text-muted-foreground" />
+                Delete for me
+              </button>
+              {actionMsg.senderId === me && !actionMsg.pending && (
+                <button
+                  type="button"
+                  onClick={() => deleteMessage(actionMsg.id, "everyone")}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium text-destructive hover:bg-destructive/10"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete for everyone
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setActionMsg(null)}
+              className="mt-1 w-full rounded-xl px-3 py-3 text-center text-sm font-medium text-muted-foreground hover:bg-white/[0.06]"
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Full-screen image / video viewer with pinch zoom */}
+      <MediaLightbox media={lightbox} onClose={() => setLightbox(null)} />
+
       {/* Full-screen premium video call */}
       {callPeer && me && (
         <VideoCallOverlay
@@ -2115,6 +2541,7 @@ export default function ChatPage() {
           selfName={myName}
           selfAvatar={myImage}
           role={callRole}
+          kind={callKind}
           onClose={closeCall}
         />
       )}

@@ -7,7 +7,7 @@ export type AlarmPriority = z.infer<typeof AlarmPriority>;
 export const AlarmKind = z.enum(["fixed", "reminder", "snooze", "hydration", "review"]);
 export type AlarmKind = z.infer<typeof AlarmKind>;
 
-export const AlarmSound = z.enum(["chime", "digital", "bio"]);
+export const AlarmSound = z.enum(["chime", "digital", "bio", "study", "romantic"]);
 export type AlarmSound = z.infer<typeof AlarmSound>;
 
 export interface Alarm {

@@ -26,6 +26,9 @@ export interface CallPeer {
   avatar?: string | null;
 }
 
+/** A voice call is audio-only; a video call adds the camera. */
+export type CallKind = "voice" | "video";
+
 export interface VideoCallOverlayProps {
   /** null = closed */
   peer: CallPeer | null;
@@ -33,6 +36,8 @@ export interface VideoCallOverlayProps {
   selfName: string;
   selfAvatar?: string | null;
   role: "caller" | "callee";
+  /** Audio-only when "voice". Drives capture constraints and which controls show. */
+  kind?: CallKind;
   onClose: () => void;
 }
 
@@ -49,6 +54,7 @@ export function VideoCallOverlay({
   selfName,
   selfAvatar,
   role,
+  kind = "video",
   onClose,
 }: VideoCallOverlayProps) {
   const [state, setState] = React.useState<CallState>("idle");
@@ -65,11 +71,14 @@ export function VideoCallOverlay({
   const pcRef = React.useRef<RTCPeerConnection | null>(null);
   const callIdRef = React.useRef<string | null>(null);
   const peerIdRef = React.useRef<string | null>(null);
+  // Ringing is not answering: a callee stays silent until the user accepts.
+  const acceptedRef = React.useRef(role === "caller");
   const pendingIceRef = React.useRef<RTCIceCandidateInit[]>([]);
   const makingOfferRef = React.useRef(false);
   const startedAtRef = React.useRef<number>(0);
   const tickRef = React.useRef<number | null>(null);
   const retryTimerRef = React.useRef<number | null>(null);
+  const ringTimerRef = React.useRef<number | null>(null);
   const pollTimerRef = React.useRef<number | null>(null);
   const closedRef = React.useRef(false);
 
@@ -87,14 +96,20 @@ export function VideoCallOverlay({
     }
     peerIdRef.current = peerId;
     closedRef.current = false;
+    acceptedRef.current = role === "caller";
+    const wantVideo = kind === "video";
 
-    // 1) Get local camera/mic
+    // 1) Get local camera/mic (audio only for a voice call).
     (async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: { echoCancellation: true, noiseSuppression: true },
-        });
+        const stream = await navigator.mediaDevices.getUserMedia(
+          wantVideo
+            ? {
+                video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+                audio: { echoCancellation: true, noiseSuppression: true },
+              }
+            : { audio: { echoCancellation: true, noiseSuppression: true } }
+        );
         if (closedRef.current) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -108,8 +123,12 @@ export function VideoCallOverlay({
       } catch (e) {
         setError(
           e instanceof DOMException && e.name === "NotAllowedError"
-            ? "Camera & microphone permission denied."
-            : "Could not access camera/microphone."
+            ? wantVideo
+              ? "Camera & microphone permission denied."
+              : "Microphone permission denied."
+            : wantVideo
+              ? "Could not access camera/microphone."
+              : "Could not access the microphone."
         );
       }
     })();
@@ -131,6 +150,13 @@ export function VideoCallOverlay({
         }
         void sendOffer();
       }, 2500);
+      // Give up ringing after a while so a missed call cannot flood the relay.
+      ringTimerRef.current = window.setTimeout(() => {
+        if (pcRef.current?.connectionState === "connected") return;
+        void send({ kind: "bye" });
+        teardown();
+        onClose();
+      }, 35000);
     } else {
       void send({ kind: "hello" });
     }
@@ -140,7 +166,7 @@ export function VideoCallOverlay({
 
     return () => teardown();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, peerId, selfId, role]);
+  }, [isOpen, peerId, selfId, role, kind]);
 
   /* ------------------------------------------------------------------ */
   /* Signalling — relayed over the app DB                                */
@@ -157,6 +183,8 @@ export function VideoCallOverlay({
           callId,
           toId: to,
           kind: payload.kind,
+          // Lets the peer render "Incoming voice/video call" correctly.
+          callKind: kind,
           sdp: payload.sdp ?? null,
           ice: payload.ice ?? null,
         }),
@@ -164,7 +192,7 @@ export function VideoCallOverlay({
     } catch {
       /* transient network error — the caller retries */
     }
-  }, []);
+  }, [kind]);
 
   const pullSignals = React.useCallback(async () => {
     const callId = callIdRef.current;
@@ -279,7 +307,7 @@ export function VideoCallOverlay({
     try {
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
+        offerToReceiveVideo: kind === "video",
       });
       await pc.setLocalDescription(offer);
       setConnectingMsg("Ringing…");
@@ -287,7 +315,7 @@ export function VideoCallOverlay({
     } finally {
       makingOfferRef.current = false;
     }
-  }, [ensurePc, send]);
+  }, [ensurePc, send, kind]);
 
   const handleSignal = React.useCallback(
     async (sig: SignalPayload) => {
@@ -312,6 +340,9 @@ export function VideoCallOverlay({
       }
 
       if (sig.kind === "offer" && sig.sdp) {
+        // A callee must not negotiate (or let audio play) until it has accepted.
+        // The caller re-offers on its retry timer once it sees our "accept".
+        if (role === "callee" && !acceptedRef.current) return;
         const desc = sig.sdp;
         const collision =
           pc.signalingState !== "stable" && makingOfferRef.current;
@@ -368,6 +399,10 @@ export function VideoCallOverlay({
     if (retryTimerRef.current) {
       clearInterval(retryTimerRef.current);
       retryTimerRef.current = null;
+    }
+    if (ringTimerRef.current) {
+      clearTimeout(ringTimerRef.current);
+      ringTimerRef.current = null;
     }
     if (pollTimerRef.current) {
       clearInterval(pollTimerRef.current);
@@ -430,6 +465,7 @@ export function VideoCallOverlay({
   const accept = React.useCallback(async () => {
     // The caller re-offers on its retry timer once it sees this accept, so we
     // only need to flip into the connecting state and answer the next offer.
+    acceptedRef.current = true;
     setState("connecting");
     setConnectingMsg("Connecting…");
     await send({ kind: "accept" });
@@ -443,9 +479,10 @@ export function VideoCallOverlay({
 
   if (!isOpen) return null;
 
+  const isVideo = kind === "video";
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");
-  const showRemote = state === "active";
+  const showRemote = state === "active" && isVideo;
 
   return (
     <div className="fixed inset-0 z-[100] animate-fade-in bg-black">
@@ -507,10 +544,16 @@ export function VideoCallOverlay({
                   : state === "connecting"
                     ? connectingMsg || "Connecting…"
                     : state === "incoming"
-                      ? "Incoming video call"
+                      ? isVideo
+                        ? "Incoming video call"
+                        : "Incoming voice call"
                       : error
-                        ? "Camera unavailable"
-                        : "Starting call…"}
+                        ? isVideo
+                          ? "Camera unavailable"
+                          : "Microphone unavailable"
+                        : isVideo
+                          ? "Starting call…"
+                          : "Starting voice call…"}
               </p>
             </div>
 
@@ -585,10 +628,16 @@ export function VideoCallOverlay({
             ) : (
               <p className="text-sm text-white/55">
                 {state === "incoming"
-                  ? "Incoming call"
+                  ? isVideo
+                    ? "Incoming video call"
+                    : "Incoming voice call"
                   : state === "ended"
                     ? "Call ended"
-                    : "Calling…"}
+                    : role === "caller"
+                      ? isVideo
+                        ? "Calling…"
+                        : "Voice calling…"
+                      : "Connecting…"}
               </p>
             )}
           </div>
@@ -603,12 +652,13 @@ export function VideoCallOverlay({
         </div>
       </div>
 
-      {/* Self preview (PiP) */}
+      {/* Self preview (PiP) — video calls only */}
       <div
         className={cn(
           "absolute z-10 transition-all duration-500 ease-premium",
           "bottom-32 right-3 w-24 overflow-hidden rounded-2xl border border-white/20 bg-black shadow-2xl sm:bottom-28 sm:right-6 sm:w-32",
-          state === "active" && "scale-100 opacity-100"
+          state === "active" && "scale-100 opacity-100",
+          !isVideo && "hidden"
         )}
       >
         <div className="relative aspect-[3/4] w-full">
@@ -647,14 +697,16 @@ export function VideoCallOverlay({
             {muted ? <MicOffIcon /> : <MicIcon />}
           </CallButton>
 
-          {/* Camera */}
-          <CallButton
-            active={camOff}
-            onClick={toggleCam}
-            label={camOff ? "Camera on" : "Camera off"}
-          >
-            {camOff ? <VideoOffIcon /> : <VideoIcon />}
-          </CallButton>
+          {/* Camera — video calls only */}
+          {isVideo && (
+            <CallButton
+              active={camOff}
+              onClick={toggleCam}
+              label={camOff ? "Camera on" : "Camera off"}
+            >
+              {camOff ? <VideoOffIcon /> : <VideoIcon />}
+            </CallButton>
+          )}
 
           {/* End (or accept/decline handled above) */}
           {state === "active" || state === "connecting" ? (

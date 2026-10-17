@@ -71,7 +71,7 @@ export function ReminderPortal() {
       notificationService
         .sendBrowser(`🔔 ${reminder.title}`, reminder.note || "BioPulse reminder")
         .catch(() => {});
-      holdBackgroundPlayback(true, reminder.title);
+      holdBackgroundPlayback(true, reminder.title, reminder.sound);
     },
     [startVibration],
   );

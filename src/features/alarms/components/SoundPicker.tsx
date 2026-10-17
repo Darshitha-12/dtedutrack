@@ -16,11 +16,13 @@ import {
   type CustomSoundMeta,
 } from "@/features/alarms/lib/custom-sounds";
 import { AudioEngine, type AlarmSound } from "@/features/alarms/lib/audio-engine";
-import { nativeBridge } from "@/lib/native-shell";
+import { nativeBridge, nativeBridgeExt } from "@/lib/native-shell";
 import { Music, Plus, Play, Square, Trash2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const BUILT_INS = [
+  { value: "study", label: "Study Music (soft pad)" },
+  { value: "romantic", label: "Romantic (warm music)" },
   { value: "chime", label: "Crystal Chimes" },
   { value: "digital", label: "Digital Buzzer" },
   { value: "bio", label: "Bio-Alert Sweep" },
@@ -43,19 +45,43 @@ export function SoundPicker<T extends string = string>({
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
+  const [phoneCopy, setPhoneCopy] = useState<Record<string, boolean>>({});
   const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const hasNativeApi = Boolean(nativeBridgeExt()?.hasCustomSound);
+
+  /**
+   * Whether the sound also exists in the phone's native alarm storage — the copy the native
+   * player rings from when the app is closed. Shown per sound because "added to the library"
+   * and "reachable by the closed-app alarm" are two different things, and the fallback to the
+   * system ringtone is otherwise invisible.
+   */
+  const refreshPhoneCopy = useCallback((list: CustomSoundMeta[]) => {
+    const b = nativeBridgeExt();
+    if (!b?.hasCustomSound) return;
+    const next: Record<string, boolean> = {};
+    for (const s of list) {
+      try {
+        next[s.id] = b.hasCustomSound(s.id) === true;
+      } catch {
+        next[s.id] = false;
+      }
+    }
+    setPhoneCopy(next);
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
       const list = await listCustomSounds();
       setSounds(list);
+      refreshPhoneCopy(list);
       return list;
     } catch {
       return [];
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshPhoneCopy]);
 
   useEffect(() => {
     void refresh();
@@ -63,6 +89,14 @@ export function SoundPicker<T extends string = string>({
     window.addEventListener(SOUNDS_CHANGED_EVENT, onChanged);
     return () => window.removeEventListener(SOUNDS_CHANGED_EVENT, onChanged);
   }, [refresh]);
+
+  // The native copy transfer runs right after add and on scheduler retries, so poll briefly
+  // while the picker is open until the badge turns green.
+  useEffect(() => {
+    if (sounds.length === 0 || !hasNativeApi) return;
+    const timer = setInterval(() => refreshPhoneCopy(sounds), 4000);
+    return () => clearInterval(timer);
+  }, [sounds, hasNativeApi, refreshPhoneCopy]);
 
   useEffect(() => {
     // Leaving the picker should not leave a preview running.
@@ -265,6 +299,23 @@ export function SoundPicker<T extends string = string>({
                   <span className="shrink-0 text-[10px] text-muted-foreground">
                     {formatDuration(s.duration) || formatBytes(s.size)}
                   </span>
+                  {hasNativeApi && (
+                    <span
+                      className={cn(
+                        "shrink-0 text-[10px] font-medium",
+                        phoneCopy[s.id]
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : "text-amber-600 dark:text-amber-400",
+                      )}
+                      title={
+                        phoneCopy[s.id]
+                          ? "Saved in the phone's alarm storage — this sound rings even when the app is closed"
+                          : "Not in the phone's alarm storage yet: with the app closed the alarm falls back to the system tone"
+                      }
+                    >
+                      {phoneCopy[s.id] ? "phone ✓" : "phone ✗"}
+                    </span>
+                  )}
                   <button
                     type="button"
                     aria-label={playing ? "Stop preview" : `Preview ${s.name}`}
