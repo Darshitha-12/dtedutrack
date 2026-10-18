@@ -15,9 +15,68 @@ import { routeApi, isPassThrough } from "./router";
 import { installBackup } from "./backup";
 
 const GATED = process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1";
+const SYNC_BASE = (process.env.NEXT_PUBLIC_SYNC_BASE || "").replace(/\/+$/, "");
+const DEVICE_TOKEN_KEY = "biopulse.sync.token";
 
 let installed = false;
 let nativeFetch: typeof fetch | null = null;
+
+/**
+ * The device token IS this app's only credential, and an app-update keeps it in
+ * localStorage. A token minted against an older deployment/database is therefore still
+ * presented on every launch, and the server rejects it — the app only ever exits that
+ * state when the user signs in again. Ask the server once per launch: when it says the
+ * token is unknown, drop it and go to sign-in (the login page mints a fresh one).
+ * Offline or a transient failure keeps the token, so nothing logs out on its own.
+ */
+async function dropRejectedDeviceToken(): Promise<void> {
+  try {
+    if (!SYNC_BASE) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    let token = "";
+    try {
+      token = window.localStorage.getItem(DEVICE_TOKEN_KEY) || "";
+    } catch {
+      return;
+    }
+    if (!token) return;
+    const doFetch = nativeFetch || window.fetch;
+    const res = await doFetch(`${SYNC_BASE}/api/account/whoami`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (res.status !== 401) return;
+    try {
+      window.localStorage.removeItem(DEVICE_TOKEN_KEY);
+      window.localStorage.removeItem("biopulse.sync.identity");
+      window.localStorage.removeItem("biopulse.sync.meta");
+    } catch {
+      /* ignore */
+    }
+    try {
+      (
+        window as unknown as {
+          BioPulseBridge?: {
+            setChatAuth?: (token: string, userId: string) => void;
+            setChatWatch?: (on: boolean) => void;
+          };
+        }
+      ).BioPulseBridge?.setChatAuth?.("", "");
+      (
+        window as unknown as {
+          BioPulseBridge?: { setChatWatch?: (on: boolean) => void };
+        }
+      ).BioPulseBridge?.setChatWatch?.(false);
+    } catch {
+      /* native bridge is optional */
+    }
+    if (!window.location.pathname.startsWith("/login")) {
+      window.location.href = "/login";
+    }
+  } catch {
+    // Offline, host unreachable or aborted: keep the token and retry next launch.
+  }
+}
 
 async function readBody(body: BodyInit | null | undefined): Promise<{ text?: string; form?: FormData }> {
   if (body === null || body === undefined) return {};
@@ -128,6 +187,7 @@ export function install(): void {
 
 if (GATED && typeof window !== "undefined") {
   install();
+  void dropRejectedDeviceToken();
 }
 
 export function OfflineApiBootstrap(): null {

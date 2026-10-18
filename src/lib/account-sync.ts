@@ -279,7 +279,7 @@ export async function connectAccount(
   email: string,
   password: string,
   label = "device",
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; status?: number }> {
   try {
     setState({ status: "syncing", error: "" });
     const res = await fetch(url("/api/account/connect"), {
@@ -295,7 +295,7 @@ export async function connectAccount(
     if (!res.ok || !data.token) {
       const message = data.error || `Connect failed (HTTP ${res.status}).`;
       setState({ status: "error", error: message, connected: false });
-      return { ok: false, error: message };
+      return { ok: false, error: message, status: res.status };
     }
     try {
       localStorage.setItem(TOKEN_KEY, data.token);
@@ -322,7 +322,7 @@ export async function connectAccount(
     return { ok: true };
   } catch {
     setState({ status: "error", error: "Network error while connecting.", connected: false });
-    return { ok: false, error: "Network error while connecting." };
+    return { ok: false, error: "Network error while connecting.", status: 0 };
   }
 }
 

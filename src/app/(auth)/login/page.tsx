@@ -43,7 +43,10 @@ function LoginForm() {
       // "succeeding" locally and then breaking every server call.
       if (process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1") {
         const link = await connectAccount(email.trim(), password, "BioPulse device");
-        if (!link.ok && navigator.onLine) {
+        // Only a real rejection of the typed details stops the sign-in. A paused host, a
+        // 5xx, or no network at all must not: this app is offline-first and the token can
+        // be re-minted as soon as the server answers again.
+        if (!link.ok && (link.status === 400 || link.status === 401)) {
           disconnectAccount();
           setError(link.error || "Incorrect email or password.");
           return;

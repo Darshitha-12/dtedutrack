@@ -271,8 +271,8 @@ interface StatusItem {
 // how many requests each open device sends. They are only used while the page is
 // actually visible — a background WebView is frozen and the native DM watcher
 // takes over.
-const POLL_MS = 6000;
-const RING_POLL_MS = 6000;
+const POLL_MS = 10000;
+const RING_POLL_MS = 10000;
 /** Ceiling for the failure backoff: keeps a broken backend from being hammered. */
 const POLL_MAX_MS = 60_000;
 

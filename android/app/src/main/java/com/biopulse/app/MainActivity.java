@@ -89,6 +89,13 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // An install that finds the previous copy of the app still carries its OTA override
+        // preference, and that older web bundle kept being served after a brand-new APK was
+        // installed — the new code (and its auth fixes) never ran. Every APK ships a bundle at
+        // least as new as anything it downloaded before, so drop the override here, before the
+        // bridge loads the page.
+        preferBundledWebIfNewer();
+
         super.onCreate(savedInstanceState);
 
         if (current.get() == null) current = new WeakReference<>(this);
@@ -198,6 +205,64 @@ public class MainActivity extends BridgeActivity {
             startActivity(i);
         } catch (Throwable ignored) {
         }
+    }
+
+    /**
+     * Drops a stored OTA web override that is older than the bundle this APK was built with.
+     *
+     * <p>The override lives in a shared preference that survives an in-place update, so an app
+     * that once downloaded a new web layer kept serving it — even after a new APK bundled newer
+     * code. Comparing the version at startup makes each new APK authoritative again while a
+     * genuinely newer override (progress on the OTA path) is still honoured.
+     */
+    private void preferBundledWebIfNewer() {
+        try {
+            String bundled = bundledWebVersion();
+            if (bundled.isEmpty()) return;
+            android.content.SharedPreferences sp =
+                    getSharedPreferences("biopulse_webb", MODE_PRIVATE);
+            String active = sp.getString("version", "");
+            if (active == null || active.isEmpty()) return;
+            if (bundled.compareTo(active) <= 0) return;
+            sp.edit().remove("version").apply();
+            Log.i("BioPulseOTA",
+                    "dropped stale web override " + active + " for the bundled " + bundled);
+        } catch (Throwable t) {
+            Log.w("BioPulseOTA", "override version check failed: " + t.getMessage());
+        }
+    }
+
+    /** {@code <meta name="bp-version">} of the bundle inside the APK, or "" when absent. */
+    private String bundledWebVersion() {
+        for (String asset : new String[] { "public/index.html", "public/index.htm" }) {
+            java.io.InputStream in = null;
+            try {
+                in = getAssets().open(asset);
+                byte[] buf = new byte[16384];
+                int n = in.read(buf);
+                if (n <= 0) continue;
+                String head = new String(buf, 0, n, "UTF-8");
+                int at = head.indexOf("bp-version");
+                if (at < 0) continue;
+                int tagEnd = head.indexOf('>', at);
+                if (tagEnd < 0) tagEnd = head.length();
+                int attr = head.indexOf("content=\"", at);
+                if (attr < 0 || attr > tagEnd) continue;
+                int start = attr + "content=\"".length();
+                int end = head.indexOf('"', start);
+                if (end < 0) continue;
+                String version = head.substring(start, end).trim();
+                if (!version.isEmpty()) return version;
+            } catch (Throwable ignored) {
+                // Fall through to the next candidate name.
+            } finally {
+                try {
+                    if (in != null) in.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        return "";
     }
 
     @Override
