@@ -24,9 +24,18 @@ import {
   Trash2,
   StopCircle,
   Copy,
+  CloudOff,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
+import {
+  loadCachedConversations,
+  loadCachedMessages,
+  loadCachedUsers,
+  saveCachedConversations,
+  saveCachedMessages,
+  saveCachedUsers,
+} from "@/lib/chat-cache";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
   VideoCallOverlay,
@@ -550,6 +559,11 @@ export default function ChatPage() {
   const [actionMsg, setActionMsg] = useState<Dm | null>(null);
   const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
   const [statuses, setStatuses] = useState<StatusItem[]>([]);
+  /**
+   * Set when a chat request failed and the last saved snapshot is on screen, so
+   * the UI can say so instead of silently pretending the stale data is live.
+   */
+  const [staleData, setStaleData] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [statusText, setStatusText] = useState("");
   const [statusMedia, setStatusMedia] = useState<{ url: string; type: string; name: string } | null>(null);
@@ -623,63 +637,111 @@ export default function ChatPage() {
   }, []);
 
   const loadConversations = useCallback(async (): Promise<boolean> => {
-    try {
-      const res = await fetch("/api/chat/conversations");
-      if (res.ok) {
-        const data = await res.json();
-        setConversations(data.conversations || []);
-        if (typeof data.me === "string" && data.me) setChatMeId(data.me);
-        return true;
-      }
-      if (res.status === 500) {
-        // Serverless DB may be resuming from idle — retry once.
-        const retry = await fetch("/api/chat/conversations");
-        if (retry.ok) {
-          const data = await retry.json();
-          setConversations(data.conversations || []);
-          if (typeof data.me === "string" && data.me) setChatMeId(data.me);
-          return true;
+    let list: Conversation[] | null = null;
+    let me: string | undefined;
+    let degraded = true;
+    // Two attempts: the serverless database may be resuming from idle.
+    for (let attempt = 0; attempt < 2 && degraded; attempt++) {
+      try {
+        const res = await fetch("/api/chat/conversations");
+        if (!res.ok) {
+          if (res.status !== 500) break; // 401 etc. — a retry cannot help
+          continue;
         }
+        const data = await res.json();
+        list = (data.conversations || []) as Conversation[];
+        me = typeof data.me === "string" && data.me ? data.me : undefined;
+        // The Android offline shim answers 200 with `offline: true` when it could
+        // not reach the server, so that body is not a live list.
+        degraded = data.offline === true;
+        if (degraded) break;
+      } catch {
+        break;
       }
-    } catch {
-      /* ignore */
+    }
+    if (!degraded && list) {
+      setConversations(list);
+      if (me) setChatMeId(me);
+      saveCachedConversations(list, me);
+      setStaleData(false);
+      return true;
+    }
+    // The database is unreachable (quota outage, offline phone, dev server down).
+    // Replay the last saved thread list instead of blanking the pane.
+    const cached = loadCachedConversations<Conversation>();
+    if (cached) {
+      setConversations((prev) => (prev.length ? prev : cached.conversations));
+      if (cached.me) setChatMeId(cached.me);
+      setStaleData(true);
     }
     return false;
   }, []);
 
   const loadUsers = useCallback(async () => {
+    let list: ChatUser[] | null = null;
+    let degraded = true;
     try {
       const res = await fetch("/api/chat/users");
       if (res.ok) {
         const data = await res.json();
-        setUsers(data.users || []);
+        list = (data.users || []) as ChatUser[];
+        degraded = data.offline === true;
       }
     } catch {
-      /* ignore */
+      /* degraded */
+    }
+    if (!degraded && list) {
+      setUsers(list);
+      saveCachedUsers(list);
+      return;
+    }
+    // Contacts only exist server-side, so a database outage used to leave the
+    // Calls list permanently empty. Keep the last saved list on screen instead.
+    const cached = loadCachedUsers<ChatUser>();
+    const next = list && list.length ? list : cached;
+    if (next) {
+      setUsers((prev) => (prev.length ? prev : next));
+      setStaleData(true);
     }
   }, []);
 
   const loadMessages = useCallback(async (partnerId: string): Promise<boolean> => {
+    let next: Dm[] | null = null;
+    let degraded = true;
     try {
       setLoadingMsgs(true);
-      let data: { messages?: Dm[] } | null = null;
-      // Serverless DB may be resuming from idle — retry once on failure.
-      for (let attempt = 0; attempt < 2 && !data; attempt++) {
+      // Two attempts: the serverless database may be resuming from idle.
+      for (let attempt = 0; attempt < 2 && degraded; attempt++) {
         const res = await fetch(`/api/chat/messages?partnerId=${encodeURIComponent(partnerId)}&limit=200`);
-        if (res.ok) data = await res.json();
-        else if (res.status !== 500) break;
-      }
-      if (data) {
-        const next = data.messages || [];
-        // Merge rather than replace so an in-flight optimistic bubble is not wiped out
-        // by a poll that raced the POST.
-        setMessages((prev) => mergeMessages(next, prev));
-        return true;
+        if (!res.ok) {
+          if (res.status !== 500) break; // 401 etc. — a retry cannot help
+          continue;
+        }
+        const data = await res.json();
+        next = (data.messages || []) as Dm[];
+        degraded = data.offline === true;
+        if (degraded) break;
       }
     } catch {
-      /* ignore */
+      /* degraded */
     } finally {
       setLoadingMsgs(false);
+    }
+    if (!degraded && next) {
+      const list = next;
+      // Merge rather than replace so an in-flight optimistic bubble is not wiped out
+      // by a poll that raced the POST.
+      setMessages((prev) => mergeMessages(list, prev));
+      saveCachedMessages(partnerId, list);
+      return true;
+    }
+    // The database is unreachable — show the last saved thread for this partner,
+    // plus anything the offline shim returned, instead of an empty conversation.
+    const cached = loadCachedMessages<Dm>(partnerId);
+    const fallback = next && next.length ? next : cached;
+    if (fallback && fallback.length) {
+      setMessages((prev) => mergeMessages(fallback, prev));
+      setStaleData(true);
     }
     return false;
   }, []);
@@ -1693,6 +1755,12 @@ export default function ChatPage() {
         </div>
 
         {/* List / placeholder */}
+        {staleData && (
+          <div className="mx-3 mt-2 flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+            <CloudOff className="h-3.5 w-3.5 shrink-0" />
+            Offline — showing your last saved chats
+          </div>
+        )}
         <div className="min-h-0 flex-1 overflow-y-auto bg-transparent">
           {tab === "chats" ? (
             filteredConversations.length === 0 ? (
@@ -1990,6 +2058,12 @@ export default function ChatPage() {
             </div>
 
             {/* Messages */}
+            {staleData && (
+              <div className="mx-3 mt-2 flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                <CloudOff className="h-3.5 w-3.5 shrink-0" />
+                Offline — showing the last saved messages
+              </div>
+            )}
             <div
               ref={messagesScrollRef}
               onScroll={handleMessagesScroll}

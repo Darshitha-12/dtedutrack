@@ -137,6 +137,17 @@ async function proxyChat(
   return { status: res.status, body: parsed };
 }
 
+/**
+ * Tags a locally-shimmed chat response so the UI knows no server was reached.
+ *
+ * Offline the shim answers 200 with an empty list, which is indistinguishable
+ * from "you really have no contacts / no chats". Without this flag the chat page
+ * would throw away its last known snapshot and show an empty state instead.
+ */
+function offlineMark(result: Result): Result {
+  return { status: result.status, body: { ...result.body, offline: true } };
+}
+
 // Routes the offline build deliberately does NOT shim: AI features, Telegram server
 // plumbing and account creation — these pass through to the (offline) network and fail,
 // which the pages handle as "feature unavailable".
@@ -325,11 +336,11 @@ async function dispatch(req: ApiRequest): Promise<Result> {
     } catch {
       /* no network — fall through to the local store */
     }
-    if (s[2] === "conversations" && method === "GET") return chatConversations();
+    if (s[2] === "conversations" && method === "GET") return offlineMark(chatConversations());
     if (s[2] === "conversation" && method === "DELETE") return deleteConversation(req.json());
-    if (s[2] === "users" && method === "GET") return chatUsers();
+    if (s[2] === "users" && method === "GET") return offlineMark(chatUsers());
     if (s[2] === "messages") {
-      if (method === "GET") return chatMessages(query);
+      if (method === "GET") return offlineMark(chatMessages(query));
       if (method === "POST") return sendChatMessage(req.json());
       if (method === "DELETE") {
         const body = req.json();
