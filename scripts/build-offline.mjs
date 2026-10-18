@@ -162,6 +162,20 @@ function listFiles(dir, rel = "", out = []) {
   return out;
 }
 
+/**
+ * Removes installers (public/*.apk) from the export. They are published by the deployed site so
+ * phones can download them, but they must never travel inside the offline bundle or the app
+ * assets — a 33 MB APK nested inside the app would double the install size for nothing.
+ */
+function pruneExport() {
+  const outDir = path.join(root, "out");
+  for (const rel of listFiles(outDir)) {
+    if (!/\.(apk|aab)$/i.test(rel)) continue;
+    fs.rmSync(path.join(outDir, rel), { force: true });
+    console.log(`[build-offline] pruned ${rel} from the export (installer, not app content)`);
+  }
+}
+
 function injectMeta(html, name, value) {
   if (html.includes(`name="${name}"`)) return html;
   const meta = `<meta name="${name}" content="${value}" />`;
@@ -237,6 +251,10 @@ try {
 }
 
 if (!failed) {
+  // The installer we publish for phones (public/BioPulse.apk, served by the deployed site) is
+  // copied into out/ by the build. Drop it before the OTA zip is written and before cap sync, so
+  // a 33 MB APK never nests inside the offline bundle or the app's own assets.
+  pruneExport();
   // Tag the export's HTML pages and publish the OTA zip+manifest BEFORE cap sync, so the same
   // meta the APK ships with also appears in public/offline-ota (the app skips a same-version
   // download). The zip is built from the post-meta export — what the app would rightly get.
