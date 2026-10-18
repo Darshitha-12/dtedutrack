@@ -514,8 +514,17 @@ export default function ChatPage() {
   const myImage = (session?.user as { image?: string | null })?.image || null;
   const { showToast } = useToast();
 
+  // The APK has no cookie session that can expire: a 401 there only means the device
+  // token is stale. Signing out would discard the cached chats and force the user to
+  // retype their password, so keep them signed in and offer to reconnect instead.
+  const OFFLINE_BUILD = process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1";
+  const [needsReconnect, setNeedsReconnect] = useState(false);
   const signingOutRef = useRef(false);
   const forceReLogin = useCallback(async () => {
+    if (OFFLINE_BUILD) {
+      setNeedsReconnect(true);
+      return;
+    }
     if (signingOutRef.current) return;
     signingOutRef.current = true;
     try {
@@ -523,7 +532,7 @@ export default function ChatPage() {
     } catch {
       window.location.href = "/login";
     }
-  }, []);
+  }, [OFFLINE_BUILD]);
 
   const [users, setUsers] = useState<ChatUser[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -1761,6 +1770,20 @@ export default function ChatPage() {
             Offline — showing your last saved chats
           </div>
         )}
+        {needsReconnect && (
+          <div className="mx-3 mt-2 flex flex-col items-start gap-1 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-[11px] font-medium text-destructive">
+            <span>This device is not linked to your account, so new messages cannot load.</span>
+            <button
+              type="button"
+              onClick={() => {
+                window.location.href = "/settings";
+              }}
+              className="underline underline-offset-2"
+            >
+              Reconnect in Settings → Cloud sync
+            </button>
+          </div>
+        )}
         <div className="min-h-0 flex-1 overflow-y-auto bg-transparent">
           {tab === "chats" ? (
             filteredConversations.length === 0 ? (
@@ -2062,6 +2085,20 @@ export default function ChatPage() {
               <div className="mx-3 mt-2 flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
                 <CloudOff className="h-3.5 w-3.5 shrink-0" />
                 Offline — showing the last saved messages
+              </div>
+            )}
+            {needsReconnect && (
+              <div className="mx-3 mt-2 flex flex-col items-start gap-1 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-[11px] font-medium text-destructive">
+                <span>This device is not linked to your account, so new messages cannot load.</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.location.href = "/settings";
+                  }}
+                  className="underline underline-offset-2"
+                >
+                  Reconnect in Settings → Cloud sync
+                </button>
               </div>
             )}
             <div
