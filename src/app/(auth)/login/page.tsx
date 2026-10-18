@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
 import { credentialsSignIn } from "@/lib/client-auth";
-import { connectAccount, hasToken } from "@/lib/account-sync";
+import { connectAccount, disconnectAccount } from "@/lib/account-sync";
 import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,15 +36,24 @@ function LoginForm() {
     setError("");
     setLoading(true);
     try {
+      // The APK has no cookie session, so the device token IS the credential and it
+      // must be minted on every sign-in: a token left over from an older database
+      // would otherwise be kept and leave Messages / cloud sync unauthenticated.
+      // A wrong password therefore fails here (when online) instead of silently
+      // "succeeding" locally and then breaking every server call.
+      if (process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1") {
+        const link = await connectAccount(email.trim(), password, "BioPulse device");
+        if (!link.ok && navigator.onLine) {
+          disconnectAccount();
+          setError(link.error || "Incorrect email or password.");
+          return;
+        }
+      }
+
       const r = await credentialsSignIn(email.trim(), password, callbackUrl);
       if (!r.ok) {
         setError(r.error || "Sign-in failed. Please try again.");
         return;
-      }
-      // In the offline APK there is no cookie session, so link this device to the
-      // account (mint a device token) to enable cloud sync across devices.
-      if (process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1" && !hasToken()) {
-        void connectAccount(email.trim(), password, "BioPulse device").catch(() => {});
       }
       // Refresh the cached session so the sidebar/topbar show the identity
       // that was just signed in (the offline shim re-reads it from the store).

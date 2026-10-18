@@ -27,9 +27,15 @@ export async function POST(req: Request) {
       );
     }
 
-    const { name, email, password } = parsed.data;
+    const { name, password } = parsed.data;
+    // Store emails lower-case (and match without case) so sign-in is
+    // case-insensitive and the same address can never register twice.
+    const email = parsed.data.email.trim().toLowerCase();
 
-    const existingUser = await db.user.findUnique({ where: { email } });
+    const existingUser = await db.user.findFirst({
+      where: { email: { equals: email, mode: "insensitive" } },
+      select: { id: true },
+    });
     if (existingUser) {
       return NextResponse.json(
         { error: "An account with this email already exists" },

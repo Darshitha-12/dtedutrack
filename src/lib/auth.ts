@@ -33,8 +33,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           });
           if (!otp) return null;
 
-          const user = await db.user.findUnique({
-            where: { email: otpEmail },
+          const user = await db.user.findFirst({
+            where: { email: { equals: otpEmail, mode: "insensitive" } },
             select: { id: true, email: true, name: true, image: true, emailVerified: true },
           });
           if (!user) return null;
@@ -56,8 +56,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         const { email, password } = parsed.data;
 
-        const user = await db.user.findUnique({ 
-          where: { email },
+        // Email is stored lower-case, but match case-insensitively so a legacy row
+        // (or a user typing "Kavindya@x.com") still signs in to the same account.
+        const user = await db.user.findFirst({
+          where: { email: { equals: email.trim(), mode: "insensitive" } },
           select: { id: true, email: true, name: true, passwordHash: true, image: true },
         });
         if (!user || !user.passwordHash) return null;

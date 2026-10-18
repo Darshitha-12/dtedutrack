@@ -39,9 +39,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const email = parsed.data.email.trim().toLowerCase();
-    const user = await db.user.findUnique({
-      where: { email },
+    const email = parsed.data.email.trim();
+    const user = await db.user.findFirst({
+      where: { email: { equals: email, mode: "insensitive" } },
       select: { id: true, email: true, name: true, passwordHash: true },
     });
     if (!user || !user.passwordHash) {
