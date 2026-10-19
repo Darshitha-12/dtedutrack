@@ -152,7 +152,7 @@ npx prisma db seed
 හරියට දාලා confirm කරන්න (Neon `?sslmode=require`).
 
 **Auth login error / secret** → `AUTH_SECRET` + `NEXTAUTH_SECRET` හරියට දාන්න.
-(`AUTH_SECRET` = `uVOn9NW3YqpGk+azPVCXaNwWfyC2bCOjSyBUCH879Ss=`)
+(`AUTH_SECRET` = `<your-32-byte-base64-secret>`)
 
 **Port error:** Next.js Railway එකේ `process.env.PORT` එක use කරනවා.
 `next start` ඒක auto detect කරනවා (default 3000). සාමාන්‍යයෙන් කිසිම ප්‍රශ්නයක් නෑ.
