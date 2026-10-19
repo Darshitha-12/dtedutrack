@@ -49,6 +49,8 @@ import {
   chatUsers,
   chatMessages,
   sendChatMessage,
+  editChatMessage,
+  chatTyping,
   clearChatMessages,
   deleteChatMessage,
   reactChatMessage,
@@ -342,12 +344,14 @@ async function dispatch(req: ApiRequest): Promise<Result> {
     if (s[2] === "messages") {
       if (method === "GET") return offlineMark(chatMessages(query));
       if (method === "POST") return sendChatMessage(req.json());
+      if (method === "PATCH") return editChatMessage(req.json());
       if (method === "DELETE") {
         const body = req.json();
         if (typeof body.messageId === "string" && body.messageId) return deleteChatMessage(body);
         return clearChatMessages(body);
       }
     }
+    if (s[2] === "typing") return chatTyping();
     if (s[2] === "reactions" && method === "POST") return reactChatMessage(req.json());
     if (s[2] === "read" && method === "POST") return chatRead(req.json());
     if (s[2] === "presence" && method === "POST") return chatPresence(req.json());

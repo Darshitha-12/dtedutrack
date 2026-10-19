@@ -93,6 +93,20 @@ export function chatMessages(query: URLSearchParams): Result {
       mediaName: m.mediaName,
       readAt: m.readAt,
       createdAt: m.createdAt,
+      editedAt: m.editedAt ?? null,
+      forwarded: m.forwarded === true,
+      replyTo: (() => {
+        if (!m.replyToId) return null;
+        const quoted = state.chatMessages.find((x) => x.id === m.replyToId);
+        if (!quoted) return null;
+        return {
+          id: quoted.id,
+          senderId: quoted.senderId,
+          text: quoted.text,
+          mediaType: quoted.mediaType,
+          mediaName: quoted.mediaName,
+        };
+      })(),
       reactions: (state.chatReactions ?? [])
         .filter((r) => r.messageId === m.id)
         .map((r) => ({ emoji: r.emoji, count: 1, mine: true })),
@@ -112,6 +126,7 @@ export function sendChatMessage(body: Record<string, unknown>): Result {
   const text = typeof body.text === "string" ? body.text : "";
   const mediaUrl = typeof body.mediaUrl === "string" ? body.mediaUrl : null;
   if (!text && !mediaUrl) return { status: 400, body: { error: "Message is empty" } };
+  const replyToId = typeof body.replyToId === "string" ? body.replyToId : null;
   const msg: StoredChatMessage = {
     id: uid(),
     senderId: meId(),
@@ -122,8 +137,14 @@ export function sendChatMessage(body: Record<string, unknown>): Result {
     mediaName: typeof body.mediaName === "string" ? body.mediaName : null,
     readAt: null,
     createdAt: nowIso(),
+    replyToId,
+    editedAt: null,
+    forwarded: body.forwarded === true,
   };
   mutate((s) => s.chatMessages.push(msg));
+  const quoted = replyToId
+    ? getState().chatMessages.find((m) => m.id === replyToId) ?? null
+    : null;
   return {
     status: 201,
     body: {
@@ -136,9 +157,56 @@ export function sendChatMessage(body: Record<string, unknown>): Result {
         mediaName: msg.mediaName,
         readAt: msg.readAt,
         createdAt: msg.createdAt,
+        editedAt: null,
+        forwarded: msg.forwarded === true,
+        replyTo: quoted
+          ? {
+              id: quoted.id,
+              senderId: quoted.senderId,
+              text: quoted.text,
+              mediaType: quoted.mediaType,
+              mediaName: quoted.mediaName,
+            }
+          : null,
       },
     },
   };
+}
+
+/** Edit a text message in the offline store (the 15-minute rule still applies). */
+export function editChatMessage(body: Record<string, unknown>): Result {
+  const messageId = typeof body.messageId === "string" ? body.messageId : "";
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  if (!messageId) return { status: 400, body: { error: "messageId required" } };
+  if (!text) return { status: 400, body: { error: "Message is empty" } };
+  const existing = getState().chatMessages.find((m) => m.id === messageId);
+  if (!existing) return { status: 404, body: { error: "Message not found" } };
+  if (!isMe(existing.senderId)) {
+    return { status: 403, body: { error: "You can only edit your own messages" } };
+  }
+  if (existing.mediaUrl) {
+    return { status: 400, body: { error: "Media messages cannot be edited" } };
+  }
+  if (Date.now() - new Date(existing.createdAt).getTime() > 15 * 60 * 1000) {
+    return {
+      status: 403,
+      body: { error: "Messages can only be edited within 15 minutes of sending" },
+    };
+  }
+  const editedAt = nowIso();
+  mutate((s) => {
+    const m = s.chatMessages.find((x) => x.id === messageId);
+    if (m) {
+      m.text = text;
+      m.editedAt = editedAt;
+    }
+  });
+  return { status: 200, body: { message: { id: messageId, text, editedAt } } };
+}
+
+/** Typing indicators need a second account, so offline there is never anyone typing. */
+export function chatTyping(): Result {
+  return { status: 200, body: { ok: true, typing: false } };
 }
 
 export function clearChatMessages(body: Record<string, unknown>): Result {

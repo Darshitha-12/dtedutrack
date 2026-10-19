@@ -256,6 +256,9 @@ export interface StoredChatMessage {
   mediaName: string | null;
   readAt: string | null;
   createdAt: string;
+  replyToId?: string | null;
+  editedAt?: string | null;
+  forwarded?: boolean;
 }
 
 export interface StoredStatus {

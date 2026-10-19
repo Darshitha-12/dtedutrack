@@ -25,6 +25,14 @@ import {
   StopCircle,
   Copy,
   CloudOff,
+  Reply,
+  Forward,
+  Pencil,
+  Info,
+  Star,
+  Pin,
+  BellOff,
+  Bell,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
@@ -234,6 +242,15 @@ interface DmReaction {
   mine?: boolean;
 }
 
+/** Compact preview of the message a reply quotes. */
+interface DmReplyPreview {
+  id: string;
+  senderId: string;
+  text: string;
+  mediaType: string | null;
+  mediaName: string | null;
+}
+
 interface Dm {
   id: string;
   senderId: string;
@@ -243,10 +260,22 @@ interface Dm {
   mediaName: string | null;
   readAt: string | null;
   createdAt: string;
+  /** Quoted message, when this bubble is a reply. */
+  replyTo?: DmReplyPreview | null;
+  /** Set when the sender edited the text after sending. */
+  editedAt?: string | null;
+  /** Forwarded from another conversation. */
+  forwarded?: boolean;
   reactions?: DmReaction[];
   /** Optimistic bubble that has not been confirmed by the server yet. */
   pending?: boolean;
   failed?: boolean;
+}
+
+/** Local per-chat preferences (pin / mute). Kept on the device so they work offline. */
+interface ChatPref {
+  pinned?: boolean;
+  muted?: boolean;
 }
 
 interface StatusItem {
@@ -289,6 +318,40 @@ function mergeMessages(server: Dm[], local: Dm[]): Dm[] {
   const inFlight = local.filter((m) => (m.pending || m.failed) && !serverIds.has(m.id));
   if (!inFlight.length) return server;
   return [...server, ...inFlight].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/** One-line label for a media-only message (used by reply previews and search). */
+function mediaPreviewLabel(type: string | null, name: string | null): string {
+  if (type === "image") return "📷 Photo";
+  if (type === "video") return "🎬 Video";
+  if (type === "audio") return "🎤 Voice note";
+  if (type) return `📎 ${name || "File"}`;
+  return "";
+}
+
+/** Wrap every case-insensitive match of `query` in a <mark>, for in-chat search. */
+function highlightText(text: string, query: string): ReactNode {
+  const needle = query.trim();
+  if (!needle) return text;
+  const lower = text.toLowerCase();
+  const target = needle.toLowerCase();
+  if (!lower.includes(target)) return text;
+  const parts: ReactNode[] = [];
+  let from = 0;
+  let at = lower.indexOf(target);
+  let key = 0;
+  while (at >= 0) {
+    if (at > from) parts.push(text.slice(from, at));
+    parts.push(
+      <mark key={key++} className="rounded bg-yellow-300 px-0.5 text-black">
+        {text.slice(at, at + target.length)}
+      </mark>,
+    );
+    from = at + target.length;
+    at = lower.indexOf(target, from);
+  }
+  if (from < text.length) parts.push(text.slice(from));
+  return parts;
 }
 
 /** Recompute a bubble's reaction pills after reacting/reacting-off, before the server answers. */
@@ -544,6 +607,133 @@ export default function ChatPage() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  // Device-local chat preferences. They deliberately do not need the server: pinning a
+  // chat or starring a message must keep working in the offline APK.
+  useEffect(() => {
+    if (!me) return;
+    try {
+      const raw = localStorage.getItem(`biopulse-chat-stars:${me}`);
+      setStarredIds(new Set(raw ? (JSON.parse(raw) as string[]) : []));
+    } catch {
+      setStarredIds(new Set());
+    }
+    try {
+      const raw = localStorage.getItem(`biopulse-chat-prefs:${me}`);
+      setChatPrefs(raw ? (JSON.parse(raw) as Record<string, ChatPref>) : {});
+    } catch {
+      setChatPrefs({});
+    }
+  }, [me]);
+
+  const persistStarred = useCallback(
+    (next: Set<string>) => {
+      if (!me) return;
+      try {
+        localStorage.setItem(`biopulse-chat-stars:${me}`, JSON.stringify([...next]));
+      } catch {
+        /* storage full / private mode */
+      }
+    },
+    [me],
+  );
+
+  const persistChatPrefs = useCallback(
+    (next: Record<string, ChatPref>) => {
+      if (!me) return;
+      try {
+        localStorage.setItem(`biopulse-chat-prefs:${me}`, JSON.stringify(next));
+      } catch {
+        /* storage full / private mode */
+      }
+    },
+    [me],
+  );
+
+  // ---- "typing…" -------------------------------------------------------
+  // Writes are throttled to one every couple of seconds and stop on send/blur, so a
+  // fast typist cannot turn the composer into a write storm on the free database.
+  const typingSentRef = useRef(0);
+  const typingStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopTypingRef = useRef<() => void>(() => {});
+
+  const sendTypingState = (partnerId: string, typing: boolean) => {
+    if (!partnerId) return;
+    fetch("/api/chat/typing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ partnerId, typing }),
+    }).catch(() => {
+      /* the TTL expires it anyway */
+    });
+  };
+
+  const notifyTyping = () => {
+    if (!activeId || editTarget) return;
+    const now = Date.now();
+    if (now - typingSentRef.current > 2500) {
+      typingSentRef.current = now;
+      sendTypingState(activeId, true);
+    }
+    if (typingStopRef.current) clearTimeout(typingStopRef.current);
+    typingStopRef.current = setTimeout(() => {
+      typingSentRef.current = 0;
+      if (activeId) sendTypingState(activeId, false);
+    }, 3200);
+  };
+
+  const stopTyping = () => {
+    if (typingStopRef.current) {
+      clearTimeout(typingStopRef.current);
+      typingStopRef.current = null;
+    }
+    if (typingSentRef.current && activeId) sendTypingState(activeId, false);
+    typingSentRef.current = 0;
+  };
+  stopTypingRef.current = stopTyping;
+
+  // Poll the partner's typing flag a little faster than messages, and only while this
+  // thread is open and visible.
+  useEffect(() => {
+    setPeerTyping(false);
+    if (!activeId || !me) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let failStreak = 0;
+
+    const schedule = (ms: number) => {
+      if (!stopped) timer = setTimeout(check, ms);
+    };
+
+    async function check() {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        schedule(4000);
+        return;
+      }
+      try {
+        const res = await fetch(
+          `/api/chat/typing?partnerId=${encodeURIComponent(activeId as string)}`,
+          { cache: "no-store" },
+        );
+        if (res.ok) {
+          const data = (await res.json()) as { typing?: boolean };
+          if (!stopped) setPeerTyping(data.typing === true);
+          failStreak = 0;
+        } else {
+          failStreak = Math.min(failStreak + 1, 4);
+        }
+      } catch {
+        failStreak = Math.min(failStreak + 1, 4);
+      }
+      schedule(Math.min(8000, 2500 * 2 ** failStreak));
+    }
+
+    schedule(1200);
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [activeId, me]);
   const [text, setText] = useState("");
   const [replyDraft, setReplyDraft] = useState("");
   const [search, setSearch] = useState("");
@@ -564,9 +754,28 @@ export default function ChatPage() {
   const [recording, setRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [recordingError, setRecordingError] = useState("");
-  /** The message whose tap-menu (react / copy / delete) is open. */
+  /** The message whose tap-menu (reply / react / copy / edit / delete) is open. */
   const [actionMsg, setActionMsg] = useState<Dm | null>(null);
   const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
+  /** Message being quoted in the composer. */
+  const [replyTarget, setReplyTarget] = useState<Dm | null>(null);
+  /** Own message being edited in the composer (WhatsApp's 15-minute window). */
+  const [editTarget, setEditTarget] = useState<Dm | null>(null);
+  /** Message being forwarded (opens the "Forward to" sheet). */
+  const [forwardMsg, setForwardMsg] = useState<Dm | null>(null);
+  /** Message whose Sent/Read info is open. */
+  const [infoMsg, setInfoMsg] = useState<Dm | null>(null);
+  /** Partner is typing in the open thread (polled). */
+  const [peerTyping, setPeerTyping] = useState(false);
+  /** In-chat search. */
+  const [msgSearchOpen, setMsgSearchOpen] = useState(false);
+  const [msgSearch, setMsgSearch] = useState("");
+  /** Starred message ids for this account (device-local, works offline). */
+  const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
+  const [starredOpen, setStarredOpen] = useState(false);
+  /** Pinned / muted chats for this account (device-local, works offline). */
+  const [chatPrefs, setChatPrefs] = useState<Record<string, ChatPref>>({});
+  const composerRef = useRef<HTMLInputElement>(null);
   const [statuses, setStatuses] = useState<StatusItem[]>([]);
   /**
    * Set when a chat request failed and the last saved snapshot is on screen, so
@@ -842,10 +1051,15 @@ export default function ChatPage() {
 
   const openChat = useCallback(
     (id: string) => {
+      stopTypingRef.current();
       setActiveId(id);
       activeRoomRef.current = id;
       setMobilePane("chat");
       setNewChatOpen(false);
+      setReplyTarget(null);
+      setEditTarget(null);
+      setMsgSearchOpen(false);
+      setMsgSearch("");
       // Drop the previous thread first: its bubbles would otherwise keep rendering under the
       // new partner until the fetch lands, and since ownership is derived from the partner they
       // would all paint as ours — the very "both sides on one side" glitch.
@@ -860,9 +1074,14 @@ export default function ChatPage() {
   );
 
   const closeChat = useCallback(() => {
+    stopTypingRef.current();
     setActiveId(null);
     activeRoomRef.current = null;
     setMessages([]);
+    setReplyTarget(null);
+    setEditTarget(null);
+    setMsgSearchOpen(false);
+    setMsgSearch("");
     setMobilePane("list");
   }, []);
 
@@ -1274,9 +1493,11 @@ export default function ChatPage() {
     mediaUrl?: string;
     mediaType?: string;
     mediaName?: string;
+    forwarded?: boolean;
   }) => {
     if (!activeId || !me) return;
     const room = activeId;
+    const quoted = replyTarget;
     // Show the bubble immediately; the server round-trip (and the poller) only reconciles it.
     const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const optimistic: Dm = {
@@ -1288,9 +1509,23 @@ export default function ChatPage() {
       mediaName: payload.mediaName ?? null,
       readAt: null,
       createdAt: new Date().toISOString(),
+      replyTo: quoted
+        ? {
+            id: quoted.id,
+            senderId: quoted.senderId,
+            text: quoted.text,
+            mediaType: quoted.mediaType,
+            mediaName: quoted.mediaName,
+          }
+        : null,
+      editedAt: null,
+      forwarded: payload.forwarded === true,
       reactions: [],
       pending: true,
     };
+    stopTyping();
+    setReplyTarget(null);
+    setEditTarget(null);
     nearBottomRef.current = true;
     setMessages((prev) => [...prev, optimistic]);
     setSending(true);
@@ -1298,7 +1533,11 @@ export default function ChatPage() {
       const res = await fetch("/api/chat/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ partnerId: room, ...payload }),
+        body: JSON.stringify({
+          partnerId: room,
+          ...payload,
+          replyToId: quoted?.id,
+        }),
       });
       if (res.status === 401) {
         setMessages((prev) => prev.filter((m) => m.id !== tempId));
@@ -1342,13 +1581,148 @@ export default function ChatPage() {
   const handleSendText = () => {
     const t = text.trim();
     if (!t) return;
+    if (editTarget) {
+      void saveEdit(t);
+      return;
+    }
     // Clear the composer at once — the bubble is already on screen and waiting for the
     // round-trip is exactly the lag we are removing. A failure keeps the bubble in a
     // "failed" state instead of losing the text.
     setText("");
     setEmojiOpen(false);
+    stopTyping();
     sendMessage({ text: t });
   };
+
+  /** Save an edit inside WhatsApp's 15-minute window and paint it immediately. */
+  const saveEdit = async (value: string) => {
+    const target = editTarget;
+    if (!target) return;
+    setEditTarget(null);
+    setText("");
+    setEmojiOpen(false);
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === target.id ? { ...m, text: value, editedAt: new Date().toISOString() } : m,
+      ),
+    );
+    try {
+      const res = await fetch("/api/chat/messages", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId: target.id, text: value }),
+      });
+      if (res.status === 401) {
+        forceReLogin();
+        return;
+      }
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || "Could not edit the message", "error");
+        if (activeId) loadMessages(activeId);
+        return;
+      }
+      const d = await res.json().catch(() => null);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === target.id ? { ...m, editedAt: d?.message?.editedAt ?? m.editedAt } : m,
+        ),
+      );
+      showToast("Message edited", "success");
+      loadConversations();
+    } catch {
+      showToast("Could not edit the message", "error");
+      if (activeId) loadMessages(activeId);
+    }
+  };
+
+  const startReply = (m: Dm) => {
+    setActionMsg(null);
+    setEditTarget(null);
+    setReplyTarget(m);
+    window.setTimeout(() => composerRef.current?.focus(), 50);
+  };
+
+  const startEdit = (m: Dm) => {
+    setActionMsg(null);
+    setReplyTarget(null);
+    setEditTarget(m);
+    setText(m.text);
+    window.setTimeout(() => composerRef.current?.focus(), 50);
+  };
+
+  const startForward = (m: Dm) => {
+    setActionMsg(null);
+    setForwardMsg(m);
+  };
+
+  const doForward = async (partnerId: string) => {
+    const m = forwardMsg;
+    if (!m) return;
+    setForwardMsg(null);
+    try {
+      const res = await fetch("/api/chat/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          partnerId,
+          text: m.text,
+          mediaUrl: m.mediaUrl || undefined,
+          mediaType: m.mediaType || undefined,
+          mediaName: m.mediaName || undefined,
+          forwarded: true,
+        }),
+      });
+      if (res.status === 401) {
+        forceReLogin();
+        return;
+      }
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || "Could not forward the message", "error");
+        return;
+      }
+      showToast("Message forwarded", "success");
+      loadConversations();
+      if (partnerId === activeId) loadMessages(partnerId);
+    } catch {
+      showToast("Could not forward the message", "error");
+    }
+  };
+
+  const toggleStarred = (messageId: string) => {
+    setActionMsg(null);
+    const had = starredIds.has(messageId);
+    const next = new Set(starredIds);
+    if (had) next.delete(messageId);
+    else next.add(messageId);
+    setStarredIds(next);
+    persistStarred(next);
+    showToast(had ? "Removed from starred" : "Message starred", "success");
+  };
+
+  const updateChatPref = (partnerId: string, patch: ChatPref) => {
+    setChatPrefs((prev) => {
+      const next = { ...prev, [partnerId]: { ...prev[partnerId], ...patch } };
+      persistChatPrefs(next);
+      return next;
+    });
+  };
+
+  const togglePinChat = (partnerId: string) => {
+    const pinned = !chatPrefs[partnerId]?.pinned;
+    updateChatPref(partnerId, { pinned });
+    setMenuOpen("none");
+    showToast(pinned ? "Chat pinned" : "Chat unpinned", "success");
+  };
+
+  const toggleMuteChat = (partnerId: string) => {
+    const muted = !chatPrefs[partnerId]?.muted;
+    updateChatPref(partnerId, { muted });
+    setMenuOpen("none");
+    showToast(muted ? "Notifications muted" : "Notifications unmuted", "success");
+  };
+
 
   const beginLongPress = (m: Dm) => {
     if (longPressRef.current) clearTimeout(longPressRef.current);
@@ -1645,9 +2019,48 @@ export default function ChatPage() {
     [activeId, me],
   );
 
-  const filteredConversations = conversations.filter(
-    (c) => c.name.toLowerCase().includes(search.toLowerCase()),
-  );
+  /** WhatsApp only allows editing your own text within 15 minutes. */
+  const canEditMessage = (m: Dm) =>
+    isMine(m) &&
+    !m.pending &&
+    !m.mediaUrl &&
+    !!m.text &&
+    Date.now() - new Date(m.createdAt).getTime() < 15 * 60 * 1000;
+
+  const activeDisplayName = activeConv?.name || activeUser?.name || "User";
+  const normalizedMsgSearch = msgSearch.trim().toLowerCase();
+  // In-chat search filters the loaded thread (text and attachment names). Filtering the
+  // rendered list also keeps day dividers and reply anchors correct.
+  const visibleMessages = normalizedMsgSearch
+    ? messages.filter((m) =>
+        `${m.text} ${m.mediaName ?? ""}`.toLowerCase().includes(normalizedMsgSearch),
+      )
+    : messages;
+  const starredInThread = messages.filter((m) => starredIds.has(m.id));
+
+  const filteredConversations = conversations
+    .filter((c) => c.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      const pinA = chatPrefs[a.id]?.pinned ? 1 : 0;
+      const pinB = chatPrefs[b.id]?.pinned ? 1 : 0;
+      if (pinA !== pinB) return pinB - pinA;
+      return a.lastMessageAt < b.lastMessageAt ? 1 : -1;
+    });
+
+  // Forward destinations: existing chats first, then contacts without a thread yet.
+  const forwardTargets: { id: string; name: string; image: string | null; online: boolean }[] = [];
+  for (const c of conversations) {
+    forwardTargets.push({ id: c.id, name: c.name, image: c.image, online: c.status === "online" });
+  }
+  for (const u of users) {
+    if (forwardTargets.some((x) => x.id === u.id)) continue;
+    forwardTargets.push({
+      id: u.id,
+      name: u.fullName || u.name,
+      image: u.image,
+      online: u.status === "online",
+    });
+  }
 
   const filteredNewChat = users.filter((u) => {
     const q = newChatSearch.toLowerCase();
@@ -1818,13 +2231,24 @@ export default function ChatPage() {
                       <p className={cn("truncate text-[15px] text-foreground", activeId === c.id ? "font-extrabold" : "font-semibold")}>
                         {c.name}
                       </p>
-                      <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
+                      <span className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-muted-foreground">
+                        {chatPrefs[c.id]?.pinned && <Pin className="h-3 w-3" />}
+                        {chatPrefs[c.id]?.muted && <BellOff className="h-3 w-3" />}
                         {shortDate(c.lastMessageAt)}
                       </span>
                     </div>
                     <div className="mt-0.5 flex items-center justify-between gap-2">
-                      <p className={cn("truncate text-[13px]", c.unread > 0 ? "font-medium text-foreground" : "text-muted-foreground")}>
-                        {c.lastMessage}
+                      <p
+                        className={cn(
+                          "truncate text-[13px]",
+                          peerTyping && activeId === c.id
+                            ? "font-medium text-primary"
+                            : c.unread > 0
+                              ? "font-medium text-foreground"
+                              : "text-muted-foreground",
+                        )}
+                      >
+                        {peerTyping && activeId === c.id ? "typing…" : c.lastMessage}
                       </p>
                       {c.unread > 0 && (
                         <span className="shrink-0 rounded-full bg-gradient-aurora px-2 py-0.5 text-[11px] font-extrabold text-white shadow-glow">
@@ -2022,10 +2446,29 @@ export default function ChatPage() {
                   {activeConv?.name || activeUser?.name || "User"}
                 </p>
                 <p className="truncate text-xs font-medium text-muted-foreground">
-                  {lastSeenLabel(activeConv?.lastSeen || activeUser?.lastSeen || null, activeConv?.status || activeUser?.status || "offline")}
+                  {peerTyping ? (
+                    <span className="font-semibold text-primary">typing…</span>
+                  ) : chatPrefs[activeId || ""]?.muted ? (
+                    <span className="inline-flex items-center gap-1">
+                      <BellOff className="h-3 w-3" />
+                      {lastSeenLabel(activeConv?.lastSeen || activeUser?.lastSeen || null, activeConv?.status || activeUser?.status || "offline")}
+                    </span>
+                  ) : (
+                    lastSeenLabel(activeConv?.lastSeen || activeUser?.lastSeen || null, activeConv?.status || activeUser?.status || "offline")
+                  )}
                 </p>
               </div>
               <div className="flex items-center gap-4 text-muted-foreground">
+                <button
+                  onClick={() => {
+                    setMsgSearchOpen((open) => !open);
+                    setMsgSearch("");
+                  }}
+                  aria-label="Search in chat"
+                  className="hover:text-foreground"
+                >
+                  <Search className="h-5 w-5" />
+                </button>
                 <button
                   onClick={() => startCallWith("video")}
                   aria-label="Start video call"
@@ -2062,6 +2505,32 @@ export default function ChatPage() {
                           <UserRound className="h-4 w-4 text-muted-foreground" /> Contact info
                         </button>
                         <button
+                          onClick={() => activeId && togglePinChat(activeId)}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted"
+                        >
+                          <Pin className="h-4 w-4 text-muted-foreground" />{" "}
+                          {activeId && chatPrefs[activeId]?.pinned ? "Unpin chat" : "Pin chat"}
+                        </button>
+                        <button
+                          onClick={() => activeId && toggleMuteChat(activeId)}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted"
+                        >
+                          {activeId && chatPrefs[activeId]?.muted ? (
+                            <Bell className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <BellOff className="h-4 w-4 text-muted-foreground" />
+                          )}{" "}
+                          {activeId && chatPrefs[activeId]?.muted
+                            ? "Unmute notifications"
+                            : "Mute notifications"}
+                        </button>
+                        <button
+                          onClick={() => { setStarredOpen(true); setMenuOpen("none"); }}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted"
+                        >
+                          <Star className="h-4 w-4 text-muted-foreground" /> Starred messages
+                        </button>
+                        <button
                           onClick={clearMessages}
                           className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted"
                         >
@@ -2079,6 +2548,36 @@ export default function ChatPage() {
                 </div>
               </div>
             </div>
+
+            {/* In-chat search */}
+            {msgSearchOpen && (
+              <div className="relative z-10 flex items-center gap-2 border-b border-white/[0.07] bg-white/[0.05] px-3 py-2 backdrop-blur-xl">
+                <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <input
+                  autoFocus
+                  value={msgSearch}
+                  onChange={(e) => setMsgSearch(e.target.value)}
+                  placeholder="Search in chat"
+                  className="h-9 min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 text-sm text-foreground placeholder:text-muted-foreground/70 outline-none focus:border-violet/50"
+                />
+                <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
+                  {msgSearch.trim()
+                    ? `${visibleMessages.length} result${visibleMessages.length === 1 ? "" : "s"}`
+                    : ""}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMsgSearch("");
+                    setMsgSearchOpen(false);
+                  }}
+                  aria-label="Close search"
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
 
             {/* Messages */}
             {staleData && (
@@ -2110,13 +2609,17 @@ export default function ChatPage() {
                 <div className="flex justify-center py-10">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
+              ) : visibleMessages.length === 0 && normalizedMsgSearch ? (
+                <div className="py-10 text-center text-sm font-medium text-muted-foreground">
+                  No messages found
+                </div>
               ) : (
-                messages.map((m, i) => {
+                visibleMessages.map((m, i) => {
                   const mine = isMine(m);
-                  const prev = messages[i - 1];
+                  const prev = visibleMessages[i - 1];
                   const showDay = !prev || formatDay(prev.createdAt) !== formatDay(m.createdAt);
                   return (
-                    <div key={m.id}>
+                    <div key={m.id} id={`msg-${m.id}`}>
                       {showDay && (
                         <div className="my-3 flex justify-center">
                           <span className="rounded-full border border-border/70 bg-elevated/70 px-3 py-1 text-[11px] font-medium text-muted-foreground shadow-sm backdrop-blur-sm">
@@ -2141,10 +2644,50 @@ export default function ChatPage() {
                               actionMsg?.id === m.id && "ring-2 ring-violet/70",
                             )}
                           >
+                            {m.forwarded && (
+                              <div
+                                className={cn(
+                                  "mb-1 flex items-center gap-1 text-[10.5px] italic",
+                                  mine ? "text-white/75" : "text-muted-foreground",
+                                )}
+                              >
+                                <Forward className="h-3 w-3" /> Forwarded
+                              </div>
+                            )}
+                            {m.replyTo && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  document
+                                    .getElementById(`msg-${m.replyTo?.id}`)
+                                    ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                                }}
+                                className={cn(
+                                  "mb-1.5 block w-full overflow-hidden rounded-lg border-l-[3px] px-2 py-1 text-left text-[12px]",
+                                  mine
+                                    ? "border-white/75 bg-black/20 text-white/85"
+                                    : "border-violet-400 bg-black/20 text-muted-foreground",
+                                )}
+                              >
+                                <span className="block truncate font-bold">
+                                  {m.replyTo.senderId === activeId ? activeDisplayName : "You"}
+                                </span>
+                                <span className="block truncate">
+                                  {m.replyTo.text ||
+                                    mediaPreviewLabel(
+                                      m.replyTo.mediaType,
+                                      m.replyTo.mediaName,
+                                    )}
+                                </span>
+                              </button>
+                            )}
                             {mediaBubble(m, saveMedia, openMedia)}
                             {m.text && (
                               <p className="whitespace-pre-wrap break-words pr-9 leading-relaxed text-inherit">
-                                {m.text}
+                                {normalizedMsgSearch
+                                  ? highlightText(m.text, msgSearch)
+                                  : m.text}
                               </p>
                             )}
                             <div
@@ -2153,6 +2696,10 @@ export default function ChatPage() {
                                 mine ? "text-white/75" : "text-muted-foreground",
                               )}
                             >
+                              {starredIds.has(m.id) && (
+                                <Star className="h-3 w-3 fill-current" aria-label="Starred" />
+                              )}
+                              {m.editedAt && <span className="italic">edited</span>}
                               <span>{formatTime(m.createdAt)}</span>
                               {mine &&
                                 (m.pending ? (
@@ -2248,6 +2795,42 @@ export default function ChatPage() {
                   </div>
                 </div>
               )}
+              {(replyTarget || editTarget) && (
+                <div className="flex items-center gap-2 border-t border-white/[0.07] bg-white/[0.06] px-3 py-2 backdrop-blur-xl">
+                  <div className="min-w-0 flex-1 border-l-[3px] border-violet-400 pl-2">
+                    <p className="truncate text-[11px] font-bold text-violet-300">
+                      {editTarget
+                        ? "Editing message"
+                        : `Replying to ${
+                            replyTarget && replyTarget.senderId === activeId
+                              ? activeDisplayName
+                              : "yourself"
+                          }`}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {editTarget?.text ||
+                        replyTarget?.text ||
+                        mediaPreviewLabel(
+                          replyTarget?.mediaType ?? null,
+                          replyTarget?.mediaName ?? null,
+                        )}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const wasEditing = !!editTarget;
+                      setReplyTarget(null);
+                      setEditTarget(null);
+                      if (wasEditing) setText("");
+                    }}
+                    aria-label="Cancel reply or edit"
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
               {recording ? (
                 <div className="flex min-h-[60px] items-center gap-3 border-t border-border bg-card px-3 pt-2.5 pb-[calc(env(safe-area-inset-bottom)+10px)]">
                   <button
@@ -2284,15 +2867,20 @@ export default function ChatPage() {
                     <Smile className="h-6 w-6" />
                   </button>
                   <input
+                    ref={composerRef}
                     value={text}
-                    onChange={(e) => setText(e.target.value)}
+                    onChange={(e) => {
+                      setText(e.target.value);
+                      if (e.target.value.trim()) notifyTyping();
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
                         handleSendText();
                       }
                     }}
-                    placeholder="Type a message"
+                    placeholder={editTarget ? "Edit message" : "Type a message"}
+                    onBlur={stopTyping}
                     onFocus={() => {
                       // The keyboard shrinks the WebView (windowSoftInputMode=adjustResize);
                       // snap back to the newest message once the resize has settled.
@@ -2715,6 +3303,64 @@ export default function ChatPage() {
               })}
             </div>
             <div className="space-y-1">
+              {!actionMsg.pending && (
+                <button
+                  type="button"
+                  onClick={() => startReply(actionMsg)}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium hover:bg-white/[0.06]"
+                >
+                  <Reply className="h-4 w-4 text-muted-foreground" />
+                  Reply
+                </button>
+              )}
+              {!actionMsg.pending && (actionMsg.text || actionMsg.mediaUrl) && (
+                <button
+                  type="button"
+                  onClick={() => startForward(actionMsg)}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium hover:bg-white/[0.06]"
+                >
+                  <Forward className="h-4 w-4 text-muted-foreground" />
+                  Forward
+                </button>
+              )}
+              {canEditMessage(actionMsg) && (
+                <button
+                  type="button"
+                  onClick={() => startEdit(actionMsg)}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium hover:bg-white/[0.06]"
+                >
+                  <Pencil className="h-4 w-4 text-muted-foreground" />
+                  Edit
+                </button>
+              )}
+              {!actionMsg.pending && (
+                <button
+                  type="button"
+                  onClick={() => toggleStarred(actionMsg.id)}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium hover:bg-white/[0.06]"
+                >
+                  <Star
+                    className={cn(
+                      "h-4 w-4 text-muted-foreground",
+                      starredIds.has(actionMsg.id) && "fill-current text-amber-400",
+                    )}
+                  />
+                  {starredIds.has(actionMsg.id) ? "Unstar message" : "Star message"}
+                </button>
+              )}
+              {isMine(actionMsg) && !actionMsg.pending && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActionMsg(null);
+                    setInfoMsg(actionMsg);
+                  }}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium hover:bg-white/[0.06]"
+                >
+                  <Info className="h-4 w-4 text-muted-foreground" />
+                  Message info
+                </button>
+              )}
               {(actionMsg.text || actionMsg.mediaUrl) && (
                 <button
                   type="button"
@@ -2753,6 +3399,164 @@ export default function ChatPage() {
             </button>
           </div>
         </>
+      )}
+
+      {/* Forward picker */}
+      {forwardMsg && (
+        <div
+          className="fixed inset-0 z-[80] flex items-end justify-center bg-background/80 md:items-center md:p-6"
+          onClick={() => setForwardMsg(null)}
+        >
+          <div
+            className="flex max-h-[80dvh] w-full flex-col overflow-hidden rounded-t-3xl border border-border bg-card shadow-2xl md:max-w-md md:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h2 className="text-base font-semibold">Forward to</h2>
+              <button
+                type="button"
+                onClick={() => setForwardMsg(null)}
+                aria-label="Close"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto py-1">
+              {forwardTargets.length === 0 ? (
+                <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+                  No contacts to forward to yet.
+                </p>
+              ) : (
+                forwardTargets.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => void doForward(t.id)}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted"
+                  >
+                    <Avatar src={t.image} name={t.name} online={t.online} size={40} />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{t.name}</span>
+                    <Forward className="h-4 w-4 text-muted-foreground" />
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Message info: sent / delivered / read timestamps */}
+      {infoMsg && (
+        <div
+          className="fixed inset-0 z-[80] grid place-items-center bg-background/80 p-6"
+          onClick={() => setInfoMsg(null)}
+        >
+          <div
+            className="w-full max-w-sm overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h2 className="text-base font-semibold">Message info</h2>
+              <button
+                type="button"
+                onClick={() => setInfoMsg(null)}
+                aria-label="Close"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-3 px-4 py-4 text-sm">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">Sent</p>
+                <p className="font-medium">
+                  {formatDay(infoMsg.createdAt)} · {formatTime(infoMsg.createdAt)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">
+                  {infoMsg.readAt ? "Read" : "Delivered"}
+                </p>
+                <p className="font-medium">
+                  {infoMsg.readAt
+                    ? `${formatDay(infoMsg.readAt)} · ${formatTime(infoMsg.readAt)}`
+                    : "Not read yet"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">To</p>
+                <p className="font-medium">{activeDisplayName}</p>
+              </div>
+              {infoMsg.editedAt && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">Edited</p>
+                  <p className="font-medium">
+                    {formatDay(infoMsg.editedAt)} · {formatTime(infoMsg.editedAt)}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Starred messages in this chat */}
+      {starredOpen && (
+        <div
+          className="fixed inset-0 z-[80] flex items-end justify-center bg-background/80 md:items-center md:p-6"
+          onClick={() => setStarredOpen(false)}
+        >
+          <div
+            className="flex max-h-[80dvh] w-full flex-col overflow-hidden rounded-t-3xl border border-border bg-card shadow-2xl md:max-w-md md:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h2 className="flex items-center gap-2 text-base font-semibold">
+                <Star className="h-4 w-4 fill-current text-amber-400" /> Starred messages
+              </h2>
+              <button
+                type="button"
+                onClick={() => setStarredOpen(false)}
+                aria-label="Close"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto py-1">
+              {starredInThread.length === 0 ? (
+                <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+                  No starred messages in this chat yet.
+                </p>
+              ) : (
+                [...starredInThread].reverse().map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => {
+                      setStarredOpen(false);
+                      window.setTimeout(() => {
+                        document
+                          .getElementById(`msg-${m.id}`)
+                          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      }, 150);
+                    }}
+                    className="flex w-full flex-col gap-0.5 border-b border-border/50 px-4 py-3 text-left hover:bg-muted"
+                  >
+                    <span className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                      <span>{formatDay(m.createdAt)} · {formatTime(m.createdAt)}</span>
+                      <span>{isMine(m) ? "You" : activeDisplayName}</span>
+                    </span>
+                    <span className="line-clamp-2 text-sm font-medium">
+                      {m.text || mediaPreviewLabel(m.mediaType, m.mediaName)}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Full-screen image / video viewer with pinch zoom */}

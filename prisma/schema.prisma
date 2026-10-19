@@ -889,6 +889,12 @@ model DirectMessage {
   mediaType  String? // image, video, audio
   mediaName  String?
   readAt     DateTime?
+  /** Quoted message this one replies to (WhatsApp-style reply). */
+  replyToId  String?
+  /** Set when the sender edits the text; WhatsApp only allows 15 minutes. */
+  editedAt   DateTime?
+  /** True when this bubble was forwarded from another chat. */
+  forwarded  Boolean   @default(false)
   createdAt  DateTime  @default(now())
 
   @@index([senderId, createdAt])

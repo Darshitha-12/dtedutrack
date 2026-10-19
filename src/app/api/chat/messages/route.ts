@@ -6,6 +6,7 @@ import { sendChatNotification } from "@/lib/fcm";
 import { CALL_SIGNAL_MEDIA_TYPE } from "@/lib/call-signal";
 import { chatPreflight, resolveChatUser } from "@/lib/chat-api";
 import {
+  ensureDmExtras,
   hideMessageForUser,
   loadHiddenMessageIds,
   loadThreadReactions,
@@ -22,7 +23,19 @@ const sendSchema = z.object({
   mediaUrl: z.string().max(14_000_000).optional(),
   mediaType: z.string().max(20).optional(),
   mediaName: z.string().max(255).optional(),
+  /** Id of the message this one quotes (WhatsApp reply). */
+  replyToId: z.string().max(64).optional(),
+  /** Marks a bubble as "Forwarded". */
+  forwarded: z.boolean().optional(),
 });
+
+const editSchema = z.object({
+  messageId: z.string().min(1),
+  text: z.string().trim().min(1).max(4000),
+});
+
+/** WhatsApp's edit window, measured from the original send time. */
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 async function pushDirectMessage(receiverId: string, senderId: string, text: string) {
   try {
@@ -57,6 +70,9 @@ export async function GET(req: Request) {
     const limit = Math.min(Math.max(Number(searchParams.get("limit")) || 50, 1), 200);
     const me = meUser.id;
 
+    // Creates the DM side tables and the reply/edit columns on a cold database.
+    await ensureDmExtras();
+
     // Messages this user removed with "delete for me" stay on the server for the other side.
     const hidden = await loadHiddenMessageIds(me);
 
@@ -78,22 +94,60 @@ export async function GET(req: Request) {
       },
       orderBy: { createdAt: "asc" },
       take: limit,
+      select: {
+        id: true,
+        senderId: true,
+        text: true,
+        mediaUrl: true,
+        mediaType: true,
+        mediaName: true,
+        readAt: true,
+        createdAt: true,
+        replyToId: true,
+        editedAt: true,
+        forwarded: true,
+      },
     });
+
+    // Resolve quoted messages in one query instead of N per bubble. A quote whose
+    // original was deleted for everyone simply comes back as null.
+    const replyIds = [...new Set(messages.map((m) => m.replyToId).filter((id): id is string => !!id))];
+    const quoted = replyIds.length
+      ? await db.directMessage.findMany({
+          where: { id: { in: replyIds } },
+          select: { id: true, senderId: true, text: true, mediaType: true, mediaName: true },
+        })
+      : [];
+    const quotedById = new Map(quoted.map((q) => [q.id, q]));
 
     const reactions = await loadThreadReactions(me, partnerId);
 
     return NextResponse.json({
-      messages: messages.map((m) => ({
-        id: m.id,
-        senderId: m.senderId,
-        text: m.text,
-        mediaUrl: m.mediaUrl,
-        mediaType: m.mediaType,
-        mediaName: m.mediaName,
-        readAt: m.readAt?.toISOString() || null,
-        createdAt: m.createdAt.toISOString(),
-        reactions: reactions.get(m.id) ?? [],
-      })),
+      messages: messages.map((m) => {
+        const quote = m.replyToId ? quotedById.get(m.replyToId) : null;
+        return {
+          id: m.id,
+          senderId: m.senderId,
+          text: m.text,
+          mediaUrl: m.mediaUrl,
+          mediaType: m.mediaType,
+          mediaName: m.mediaName,
+          readAt: m.readAt?.toISOString() || null,
+          createdAt: m.createdAt.toISOString(),
+          editedAt: m.editedAt?.toISOString() || null,
+          forwarded: m.forwarded,
+          replyTo: quote
+            ? {
+                id: quote.id,
+                senderId: quote.senderId,
+                text: quote.text,
+                mediaType: quote.mediaType,
+                mediaName: quote.mediaName,
+              }
+            : null,
+          reactions: reactions.get(m.id) ?? [],
+        };
+      }),
     });
   } catch (error) {
     console.error("Direct messages GET error:", error);
@@ -117,7 +171,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
     }
 
-    const { partnerId, text, mediaUrl, mediaType, mediaName } = parsed.data;
+    const { partnerId, text, mediaUrl, mediaType, mediaName, replyToId, forwarded } =
+      parsed.data;
     const me = meUser.id;
 
     if (partnerId === me) {
@@ -127,12 +182,36 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Message is empty" }, { status: 400 });
     }
 
+    await ensureDmExtras();
+
     const partner = await db.user.findUnique({
       where: { id: partnerId },
       select: { id: true },
     });
     if (!partner) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    // A quote must belong to this same thread; otherwise it could leak a message from
+    // another conversation into the reply preview.
+    let quote: {
+      id: string;
+      senderId: string;
+      text: string;
+      mediaType: string | null;
+      mediaName: string | null;
+    } | null = null;
+    if (replyToId) {
+      quote = await db.directMessage.findFirst({
+        where: {
+          id: replyToId,
+          OR: [
+            { senderId: me, receiverId: partnerId },
+            { senderId: partnerId, receiverId: me },
+          ],
+        },
+        select: { id: true, senderId: true, text: true, mediaType: true, mediaName: true },
+      });
     }
 
     const message = await db.directMessage.create({
@@ -143,6 +222,8 @@ export async function POST(req: Request) {
         mediaUrl: mediaUrl || null,
         mediaType: mediaType || null,
         mediaName: mediaName || null,
+        replyToId: quote?.id ?? null,
+        forwarded: forwarded === true,
       },
     });
 
@@ -159,6 +240,9 @@ export async function POST(req: Request) {
           mediaName: message.mediaName,
           readAt: message.readAt?.toISOString() || null,
           createdAt: message.createdAt.toISOString(),
+          editedAt: null,
+          forwarded: message.forwarded,
+          replyTo: quote,
           reactions: [],
         },
       },
@@ -166,6 +250,72 @@ export async function POST(req: Request) {
     );
   } catch (error) {
     console.error("Direct messages POST error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+/**
+ * Edit a text message. WhatsApp limits this to the sender and to 15 minutes after
+ * sending, so media messages and older bubbles are rejected instead of silently
+ * rewriting history.
+ */
+export async function PATCH(req: Request) {
+  try {
+    const meUser = await resolveChatUser(req);
+    if (!meUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const parsed = editSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
+    }
+
+    const me = meUser.id;
+    await ensureDmExtras();
+
+    const message = await db.directMessage.findUnique({
+      where: { id: parsed.data.messageId },
+      select: { id: true, senderId: true, mediaUrl: true, createdAt: true },
+    });
+    if (!message) {
+      return NextResponse.json({ error: "Message not found" }, { status: 404 });
+    }
+    if (message.senderId !== me) {
+      return NextResponse.json(
+        { error: "You can only edit your own messages" },
+        { status: 403 },
+      );
+    }
+    if (message.mediaUrl) {
+      return NextResponse.json(
+        { error: "Media messages cannot be edited" },
+        { status: 400 },
+      );
+    }
+    if (Date.now() - message.createdAt.getTime() > EDIT_WINDOW_MS) {
+      return NextResponse.json(
+        { error: "Messages can only be edited within 15 minutes of sending" },
+        { status: 403 },
+      );
+    }
+
+    const updated = await db.directMessage.update({
+      where: { id: message.id },
+      data: { text: parsed.data.text, editedAt: new Date() },
+      select: { id: true, text: true, editedAt: true },
+    });
+
+    return NextResponse.json({
+      message: {
+        id: updated.id,
+        text: updated.text,
+        editedAt: updated.editedAt?.toISOString() || null,
+      },
+    });
+  } catch (error) {
+    console.error("Direct messages PATCH error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
