@@ -11,7 +11,7 @@
   # TEMP DIAGNOSTIC: capture the build log and ship it to ntfy when the build
   # fails (Netlify's log API returns 404 for this site). Revert to plain
   # "npm run build" once the failure is understood.
-  command = "npm run build > /tmp/b.log 2>&1; code=$?; if [ $code -ne 0 ]; then tail -c 4000 /tmp/b.log | curl -s -H 'Title: biopulse build failed' --data-binary @- https://ntfy.sh/dtedutrack-diag-7f3a91 >/dev/null 2>&1; fi; tail -n 120 /tmp/b.log; exit $code"
+  command = "node scripts/ci-build.mjs"
   publish = ".next"
 
 [build.environment]
