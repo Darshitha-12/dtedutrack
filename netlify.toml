@@ -8,20 +8,12 @@
 # is what makes login, Messages and the WebRTC call signalling work here.
 
 [build]
-  # TEMP DIAGNOSTIC: capture the build log and ship it to ntfy when the build
-  # fails (Netlify's log API returns 404 for this site). Revert to plain
-  # "npm run build" once the failure is understood.
-  command = "node scripts/ci-build.mjs"
+  command = "npm run build"
   publish = ".next"
 
 [build.environment]
   NODE_VERSION = "20"
   NEXT_TELEMETRY_DISABLED = "1"
-
-# TEMP DIAGNOSTIC: reports build lifecycle + onError payload to ntfy.
-# Remove this block and the tools/netlify-diag directory once done.
-[[plugins]]
-  package = "./tools/netlify-diag"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
