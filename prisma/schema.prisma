@@ -1,5 +1,10 @@
 generator client {
   provider = "prisma-client-js"
+  // The app runs the query engine inside serverless functions on the hosts we
+  // deploy to (Netlify/Netlify Functions = AWS Lambda on Amazon Linux 2023),
+  // so the engine must also be generated for that platform, not just the
+  // machine that happens to run `prisma generate`.
+  binaryTargets = ["native", "rhel-openssl-3.0.x", "rhel-openssl-1.0.x"]
 }
 
 datasource db {

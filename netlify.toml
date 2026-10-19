@@ -1,0 +1,26 @@
+# Netlify deploy configuration (free plan, no credit card required).
+#
+# This file only affects Netlify builds/deploys; Vercel and the offline APK
+# export ignore it entirely.
+#
+# The Next.js Runtime (@netlify/plugin-nextjs) turns the App Router pages, the
+# API routes under src/app/api and middleware.ts into Netlify Functions, which
+# is what makes login, Messages and the WebRTC call signalling work here.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+  NEXT_TELEMETRY_DISABLED = "1"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# The phone app talks to these API routes constantly (chat polling + call
+# signalling), so keep them out of the CDN cache and let them run every time.
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Cache-Control = "no-store, max-age=0"
