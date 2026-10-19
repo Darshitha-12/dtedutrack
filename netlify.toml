@@ -18,6 +18,11 @@
   NODE_VERSION = "20"
   NEXT_TELEMETRY_DISABLED = "1"
 
+# TEMP DIAGNOSTIC: reports build lifecycle + onError payload to ntfy.
+# Remove this block and the tools/netlify-diag directory once done.
+[[plugins]]
+  package = "./tools/netlify-diag"
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
