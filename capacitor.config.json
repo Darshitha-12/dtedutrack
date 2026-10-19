@@ -3,8 +3,8 @@
   "appName": "BioPulse",
   "webDir": "out",
   "server": {
-    "url": "https://dtedutrack-euc4.vercel.app",
-    "cleartext": false
+    "url": "https://biopulse-study.netlify.app",
+    "cleartext": true
   },
   "android": {
     "allowMixedContent": false
