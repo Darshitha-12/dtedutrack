@@ -286,7 +286,7 @@ export function chatStatuses(): Result {
   const state = getState();
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
   const statuses = state.statuses
-    .filter((s) => new Date(s.createdAt).getTime() >= cutoff)
+    .filter((s) => s.pinned || new Date(s.createdAt).getTime() >= cutoff)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map((s) => ({
       id: s.id,
@@ -294,8 +294,14 @@ export function chatStatuses(): Result {
       name: s.userId === ME ? state.profile.name : "Unknown",
       image: s.userId === ME ? state.profile.image : null,
       text: s.text,
+      caption: s.caption ?? null,
       imageUrl: s.imageUrl,
       imageType: s.imageType,
+      bgColor: s.bgColor ?? null,
+      font: s.font ?? null,
+      pinned: s.pinned === true,
+      editedAt: s.editedAt ?? null,
+      expiresAt: new Date(new Date(s.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString(),
       createdAt: s.createdAt,
       viewCount: 0,
       myReaction: null,
@@ -317,17 +323,69 @@ export function createStatus(body: Record<string, unknown>): Result {
     text: text || null,
     imageUrl,
     imageType: typeof body.imageType === "string" ? body.imageType : null,
+    caption: typeof body.caption === "string" ? body.caption : null,
+    // A background only applies to a text-only update, mirroring the server.
+    bgColor: !imageUrl && typeof body.bgColor === "string" ? body.bgColor : null,
+    font: !imageUrl && typeof body.font === "string" ? body.font : null,
+    pinned: body.keep === true,
+    editedAt: null,
     createdAt: nowIso(),
   };
   mutate((s) => s.statuses.push(status));
   return { status: 201, body: { status: { id: status.id, createdAt: status.createdAt } } };
 }
 
-export function deleteOwnStatuses(): Result {
+/** Delete one of mine, or every one of mine when no id is given. */
+export function deleteOwnStatuses(body?: Record<string, unknown>): Result {
+  const statusId = typeof body?.statusId === "string" ? body.statusId : "";
+  if (!statusId) {
+    mutate((s) => {
+      s.statuses = s.statuses.filter((x) => x.userId !== ME);
+    });
+    return { status: 200, body: { ok: true, deleted: "all" } };
+  }
+  const existing = getState().statuses.find((s) => s.id === statusId);
+  if (!existing) return { status: 404, body: { error: "Status not found" } };
   mutate((s) => {
-    s.statuses = s.statuses.filter((x) => x.userId !== ME);
+    s.statuses = s.statuses.filter((x) => x.id !== statusId);
   });
-  return { status: 200, body: { ok: true } };
+  return { status: 200, body: { ok: true, deleted: "one" } };
+}
+
+export function editStatus(body: Record<string, unknown>): Result {
+  const statusId = typeof body.statusId === "string" ? body.statusId : "";
+  if (!statusId) return { status: 400, body: { error: "statusId required" } };
+  const existing = getState().statuses.find((s) => s.id === statusId);
+  if (!existing) return { status: 404, body: { error: "Status not found" } };
+  if (existing.userId !== ME) {
+    return { status: 403, body: { error: "You can only edit your own status" } };
+  }
+  const editedAt = nowIso();
+  mutate((s) => {
+    const item = s.statuses.find((x) => x.id === statusId);
+    if (!item) return;
+    if (typeof body.text === "string") item.text = body.text.trim() || null;
+    if (typeof body.caption === "string") item.caption = body.caption.trim() || null;
+    if (!item.imageUrl && typeof body.bgColor === "string") item.bgColor = body.bgColor;
+    if (!item.imageUrl && typeof body.font === "string") item.font = body.font;
+    item.editedAt = editedAt;
+  });
+  return { status: 200, body: { status: { id: statusId, editedAt } } };
+}
+
+/** Keep / unkeep one of my updates as a highlight. */
+export function pinStatus(body: Record<string, unknown>): Result {
+  const statusId = typeof body.statusId === "string" ? body.statusId : "";
+  if (!statusId) return { status: 400, body: { error: "statusId required" } };
+  const existing = getState().statuses.find((s) => s.id === statusId);
+  if (!existing) return { status: 404, body: { error: "Status not found" } };
+  if (existing.userId !== ME) return { status: 403, body: { error: "Not your status" } };
+  const pinned = body.pinned === true;
+  mutate((s) => {
+    const item = s.statuses.find((x) => x.id === statusId);
+    if (item) item.pinned = pinned;
+  });
+  return { status: 200, body: { ok: true, pinned } };
 }
 
 export function viewStatus(body: Record<string, unknown>): Result {
@@ -345,6 +403,16 @@ export function reactStatus(body: Record<string, unknown>): Result {
     return { status: 404, body: { error: "Status not found" } };
   }
   return { status: 200, body: { myReaction: null, reactions: [] } };
+}
+
+/** Forwarding a status needs a second account; offline there is no one to forward to. */
+export function forwardStatus(): Result {
+  return { status: 404, body: { error: "No contacts to forward to" } };
+}
+
+/** Muting a contact's status needs a second account, so it is a no-op offline. */
+export function muteStatus(body: Record<string, unknown>): Result {
+  return { status: 200, body: { ok: true, muted: body.muted === true } };
 }
 
 export async function uploadChatMedia(form: FormData | undefined): Promise<Result> {

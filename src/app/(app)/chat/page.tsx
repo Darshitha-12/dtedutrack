@@ -33,6 +33,10 @@ import {
   Pin,
   BellOff,
   Bell,
+  Eye,
+  Edit2,
+  VolumeX,
+  StarOff,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
@@ -284,8 +288,14 @@ interface StatusItem {
   name: string;
   image: string | null;
   text: string | null;
+  caption: string | null;
   imageUrl: string | null;
   imageType: string | null;
+  bgColor: string | null;
+  font: string | null;
+  pinned: boolean;
+  editedAt: string | null;
+  expiresAt: string | null;
   createdAt: string;
   viewCount: number;
   myReaction: string | null;
@@ -293,6 +303,45 @@ interface StatusItem {
   seenByFew: boolean;
   viewedByMe: boolean;
   viewers?: { userId: string; name: string; image: string | null; viewedAt: string }[];
+}
+
+/** WhatsApp-style solid backgrounds for text-only updates. */
+const STATUS_BACKGROUNDS = [
+  "#0f172a",
+  "#1e293b",
+  "#334155",
+  "#7c2d12",
+  "#14532d",
+  "#164e63",
+  "#4c1d95",
+  "#831843",
+  "#3f3f46",
+  "#0c4a6e",
+];
+
+const STATUS_FONTS: { id: "classic" | "serif" | "bold" | "script"; label: string; className: string }[] = [
+  { id: "classic", label: "Aa", className: "font-sans" },
+  { id: "serif", label: "Aa", className: "font-serif" },
+  { id: "bold", label: "Aa", className: "font-sans font-extrabold" },
+  { id: "script", label: "Aa", className: "italic font-serif" },
+];
+
+/** Resolve a stored font id to its Tailwind class. */
+function statusFontClass(font: string | null): string {
+  const found = STATUS_FONTS.find((f) => f.id === font);
+  return found ? found.className : "font-sans";
+}
+
+/** "expires in 6 h" style label for my own highlights list. */
+function statusExpiryLabel(expiresAt: string | null, pinned: boolean): string {
+  if (pinned) return "Kept as highlight";
+  if (!expiresAt) return "Expires in 24 hours";
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (ms <= 0) return "Expired";
+  const hrs = Math.floor(ms / 3_600_000);
+  if (hrs >= 1) return `${hrs} h left`;
+  const mins = Math.max(1, Math.floor(ms / 60_000));
+  return `${mins} min left`;
 }
 
 // Poll cadence. Chat delivery here is poll-based (the Supabase realtime channel
@@ -786,6 +835,21 @@ export default function ChatPage() {
   const [statusText, setStatusText] = useState("");
   const [statusMedia, setStatusMedia] = useState<{ url: string; type: string; name: string } | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
+  /** Text-status styling (WhatsApp background + font picker). */
+  const [statusBg, setStatusBg] = useState(STATUS_BACKGROUNDS[0]);
+  const [statusFont, setStatusFont] = useState<"classic" | "serif" | "bold" | "script">("classic");
+  /** Keep this update past 24h as a highlight. */
+  const [statusKeep, setStatusKeep] = useState(false);
+  /** Editing an existing one of my updates (null = posting a new one). */
+  const [statusEditing, setStatusEditing] = useState<StatusItem | null>(null);
+  /** Muted status authors (synced from the server feed). */
+  const [mutedStatusUsers, setMutedStatusUsers] = useState<Set<string>>(new Set());
+  /** Status item being forwarded into a chat. */
+  const [statusForwardItem, setStatusForwardItem] = useState<StatusItem | null>(null);
+  /** The "..." menu inside the status list / viewer. */
+  const [statusMenuFor, setStatusMenuFor] = useState<{ item: StatusItem; mine: boolean } | null>(null);
+  /** My kept highlights. */
+  const [highlightsOpen, setHighlightsOpen] = useState(false);
   const [viewerItems, setViewerItems] = useState<StatusItem[] | null>(null);
   const [viewerIdx, setViewerIdx] = useState(0);
   const [viewerProgress, setViewerProgress] = useState(0);
@@ -1126,6 +1190,7 @@ export default function ChatPage() {
       if (res.ok) {
         const data = await res.json();
         setStatuses(data.statuses || []);
+        if (Array.isArray(data.mutedUserIds)) setMutedStatusUsers(new Set(data.mutedUserIds));
       }
     } catch {
       /* ignore */
@@ -1152,29 +1217,54 @@ export default function ChatPage() {
     };
   }, [tab, loadStatuses]);
 
+  const resetComposer = () => {
+    setStatusText("");
+    setStatusMedia(null);
+    setStatusBg(STATUS_BACKGROUNDS[0]);
+    setStatusFont("classic");
+    setStatusKeep(false);
+    setStatusEditing(null);
+  };
+
   const postStatus = async () => {
     const t = statusText.trim();
     if ((!t && !statusMedia) || !me) return;
     setStatusBusy(true);
     try {
+      const editing = statusEditing;
       const res = await fetch("/api/chat/status", {
-        method: "POST",
+        method: editing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: t || undefined,
-          imageUrl: statusMedia?.url || undefined,
-          imageType: statusMedia?.type || undefined,
-        }),
+        body: JSON.stringify(
+          editing
+            ? {
+                statusId: editing.id,
+                text: t || undefined,
+                caption: statusMedia ? t || undefined : undefined,
+                bgColor: !statusMedia ? statusBg : undefined,
+                font: !statusMedia ? statusFont : undefined,
+              }
+            : {
+                text: t || undefined,
+                imageUrl: statusMedia?.url || undefined,
+                imageType: statusMedia?.type || undefined,
+                // For media updates the typed text becomes the caption (WhatsApp caption box).
+                caption: statusMedia ? t || undefined : undefined,
+                bgColor: !statusMedia ? statusBg : undefined,
+                font: !statusMedia ? statusFont : undefined,
+                keep: statusKeep,
+              },
+        ),
       });
       if (res.status === 401) {
         forceReLogin();
         return;
       }
       if (res.ok) {
-        setStatusText("");
-        setStatusMedia(null);
+        resetComposer();
         setComposerOpen(false);
         loadStatuses();
+        showToast(editing ? "Status updated" : "Status shared", "success");
       } else {
         const d = await res.json().catch(() => ({}));
         showToast(d.error || "Could not add status", "error");
@@ -1183,6 +1273,141 @@ export default function ChatPage() {
       showToast("Could not add status", "error");
     } finally {
       setStatusBusy(false);
+    }
+  };
+
+  /** Start editing an existing update of mine in the composer sheet. */
+  const startEditStatus = (item: StatusItem) => {
+    setStatusMenuFor(null);
+    setViewerItems(null);
+    setStatusEditing(item);
+    setStatusText(item.caption || item.text || "");
+    setStatusBg(item.bgColor || STATUS_BACKGROUNDS[0]);
+    setStatusFont(
+      (STATUS_FONTS.find((f) => f.id === item.font)?.id || "classic") as
+        | "classic"
+        | "serif"
+        | "bold"
+        | "script",
+    );
+    setStatusKeep(item.pinned);
+    // Editing replaces the media with whatever is attached in the composer; keep it.
+    setStatusMedia(
+      item.imageUrl ? { url: item.imageUrl, type: item.imageType || "image", name: "status" } : null,
+    );
+    setComposerOpen(true);
+  };
+
+  /** Delete one of my updates, or hide someone else's from my feed. */
+  const deleteStatusItem = async (item: StatusItem) => {
+    setStatusMenuFor(null);
+    setViewerItems(null);
+    try {
+      const res = await fetch("/api/chat/status", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statusId: item.id }),
+      });
+      if (res.status === 401) {
+        forceReLogin();
+        return;
+      }
+      if (res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setStatuses((prev) => prev.filter((s) => s.id !== item.id));
+        showToast(d.deleted === "hidden" ? "Hidden from your status feed" : "Status deleted", "success");
+      } else {
+        showToast("Could not delete status", "error");
+      }
+    } catch {
+      showToast("Could not delete status", "error");
+    }
+  };
+
+  /** Keep / unkeep an update as a highlight. */
+  const toggleKeepStatus = async (item: StatusItem) => {
+    setStatusMenuFor(null);
+    const pinned = !item.pinned;
+    try {
+      const res = await fetch("/api/chat/status", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statusId: item.id, pinned }),
+      });
+      if (res.status === 401) {
+        forceReLogin();
+        return;
+      }
+      if (res.ok) {
+        setStatuses((prev) => prev.map((s) => (s.id === item.id ? { ...s, pinned } : s)));
+        showToast(pinned ? "Kept as highlight" : "Highlight removed", "success");
+      } else {
+        showToast("Could not update highlight", "error");
+      }
+    } catch {
+      showToast("Could not update highlight", "error");
+    }
+  };
+
+  /** Mute / unmute a contact's status updates. */
+  const toggleMuteStatus = async (userId: string) => {
+    setStatusMenuFor(null);
+    const muted = !mutedStatusUsers.has(userId);
+    try {
+      const res = await fetch("/api/chat/status/mute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mutedId: userId, muted }),
+      });
+      if (res.status === 401) {
+        forceReLogin();
+        return;
+      }
+      if (res.ok) {
+        // Muting hides their updates immediately; unmuting brings them back on reload.
+        setMutedStatusUsers((prev) => {
+          const next = new Set(prev);
+          if (muted) next.add(userId);
+          else next.delete(userId);
+          return next;
+        });
+        if (muted) setStatuses((prev) => prev.filter((s) => s.userId !== userId));
+        else loadStatuses();
+        showToast(muted ? "Status muted" : "Status unmuted", "success");
+      } else {
+        showToast("Could not update mute", "error");
+      }
+    } catch {
+      showToast("Could not update mute", "error");
+    }
+  };
+
+  /** Forward a status into a chat. */
+  const doForwardStatus = async (item: StatusItem, toId: string) => {
+    const from = statusForwardItem ?? item;
+    setStatusForwardItem(null);
+    setStatusMenuFor(null);
+    setViewerItems(null);
+    try {
+      const res = await fetch("/api/chat/status/forward", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statusId: from.id, toId }),
+      });
+      if (res.status === 401) {
+        forceReLogin();
+        return;
+      }
+      if (res.ok) {
+        showToast("Status forwarded", "success");
+        loadConversations();
+        if (toId === activeId) loadMessages(toId);
+      } else {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || "Could not forward status", "error");
+      }
+    } catch {
+      showToast("Could not forward status", "error");
     }
   };
 
@@ -1226,21 +1451,40 @@ export default function ChatPage() {
   };
 
   const myStatusItems = statuses.filter((s) => s.userId === me);
-  const otherGroups: { userId: string; name: string; image: string | null; items: StatusItem[] }[] = [];
+  /** My kept highlights: pinned items survive the 24h window. */
+  const myHighlights = myStatusItems.filter((s) => s.pinned);
+  /** Items that will disappear in 24h (the normal "My status" ring). */
+  const myRecentItems = myStatusItems.filter((s) => !s.pinned);
+  const otherGroups: {
+    userId: string;
+    name: string;
+    image: string | null;
+    items: StatusItem[];
+    unseen: number;
+  }[] = [];
   for (const s of statuses) {
     if (s.userId === me) continue;
+    if (mutedStatusUsers.has(s.userId)) continue;
     let g = otherGroups.find((x) => x.userId === s.userId);
     if (!g) {
-      g = { userId: s.userId, name: s.name, image: s.image, items: [] };
+      g = { userId: s.userId, name: s.name, image: s.image, items: [], unseen: 0 };
       otherGroups.push(g);
     }
     g.items.push(s);
+    if (!s.viewedByMe) g.unseen += 1;
   }
-  otherGroups.sort((a, b) => new Date(b.items[0].createdAt).getTime() - new Date(a.items[0].createdAt).getTime());
+  // Unseen contacts float to the top, then the most recent update.
+  otherGroups.sort((a, b) => {
+    if ((a.unseen > 0) !== (b.unseen > 0)) return a.unseen > 0 ? -1 : 1;
+    return new Date(b.items[0].createdAt).getTime() - new Date(a.items[0].createdAt).getTime();
+  });
 
-  const openStatusViewer = (items: StatusItem[]) => {
+  /** Total unseen updates across contacts, for the tab badge. */
+  const unseenStatusCount = otherGroups.reduce((n, g) => n + g.unseen, 0);
+
+  const openStatusViewer = (items: StatusItem[], startIdx = 0) => {
     setViewerItems(items);
-    setViewerIdx(0);
+    setViewerIdx(startIdx);
     setViewerProgress(0);
     setViewerReactionsOpen(false);
     setViewerViewersOpen(false);
@@ -2261,77 +2505,166 @@ export default function ChatPage() {
               ))
             )
           ) : tab === "status" ? (
-            <div>
-              <button
-                onClick={() => (myStatusItems.length > 0 ? openStatusViewer(myStatusItems) : setComposerOpen(true))}
-                className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-muted"
-              >
-                <div className="shrink-0 rounded-full bg-gradient-to-tr from-bio to-chem p-[2px]">
-                  <Avatar src={myImage} name={myName} size={50} />
+            <div className="pb-6">
+              {/* ---- My status: ring, quick add and a "..." menu ---- */}
+              <div className="mx-2 mt-2 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-1">
+                <div className="flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-white/[0.04]">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      myRecentItems.length > 0
+                        ? openStatusViewer(myRecentItems)
+                        : setComposerOpen(true)
+                    }
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                  >
+                    <div
+                      className={cn(
+                        "grid h-[58px] w-[58px] shrink-0 place-items-center rounded-full p-[2px]",
+                        myRecentItems.length > 0
+                          ? "bg-gradient-to-tr from-bio to-chem"
+                          : "bg-white/[0.09]",
+                      )}
+                    >
+                      <div className="grid h-full w-full place-items-center rounded-full bg-[var(--background)] p-[2px]">
+                        <Avatar src={myImage} name={myName} size={48} />
+                      </div>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[15px] font-bold text-foreground">My status</p>
+                      <p className="truncate text-xs font-medium text-muted-foreground">
+                        {myRecentItems.length + myHighlights.length > 0
+                          ? [
+                              myRecentItems.length > 0
+                                ? `${myRecentItems.length} update${myRecentItems.length > 1 ? "s" : ""}`
+                                : null,
+                              myHighlights.length > 0 ? `${myHighlights.length} highlight${myHighlights.length > 1 ? "s" : ""}` : null,
+                              myStatusItems.reduce((n, s) => n + s.viewCount, 0) === 0
+                                ? "no views yet"
+                                : `👁 ${myStatusItems.reduce((n, s) => n + s.viewCount, 0)}`,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ") +
+                            ` · ${statusTime(myStatusItems[0].createdAt)}`
+                          : "Tap to share a status update"}
+                      </p>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setComposerOpen(true)}
+                    aria-label="Add status"
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-gradient-aurora text-white shadow-glow transition-transform active:scale-90"
+                  >
+                    <MessageSquarePlus className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStatusMenuFor(
+                        myStatusItems[0]
+                          ? { item: myStatusItems[0], mine: true }
+                          : { item: statuses[0], mine: true },
+                      )
+                    }
+                    aria-label="My status options"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:text-foreground"
+                  >
+                    <MoreVertical className="h-5 w-5" />
+                  </button>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[15px] font-medium text-foreground">My status</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {myStatusItems.length > 0
-                      ? `${myStatusItems.length} update${myStatusItems.length > 1 ? "s" : ""} · ${
-                          myStatusItems.reduce((n, s) => n + s.viewCount, 0) === 0
-                            ? "no views yet"
-                            : myStatusItems.reduce((n, s) => n + s.viewCount, 0) > 20
-                              ? "seen by many"
-                              : myStatusItems.reduce((n, s) => n + s.viewCount, 0) >= 5
-                                ? "seen by several"
-                                : "seen by few"
-                        } · ${statusTime(myStatusItems[0].createdAt)}`
-                      : "Tap to add a status update"}
-                  </p>
-                </div>
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary text-white">
-                  <MessageSquarePlus className="h-5 w-5" />
-                </span>
-              </button>
-              {myStatusItems.length > 0 && (
-                <button
-                  onClick={clearMyStatus}
-                  className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-xs font-medium text-red-400 hover:bg-muted"
-                >
-                  <Trash2 className="h-3.5 w-3.5" /> Clear my status
-                </button>
-              )}
 
-              <div className="flex items-center gap-2 border-t border-border px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                <CircleDot className="h-4 w-4" /> Recent updates
+                {(myHighlights.length > 0 || myRecentItems.length > 0) && (
+                  <div className="flex gap-1.5 border-t border-white/[0.06] px-2 py-2">
+                    {myHighlights.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setHighlightsOpen(true)}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-white/[0.05] py-2 text-xs font-semibold text-foreground hover:bg-white/[0.09]"
+                      >
+                        <Star className="h-3.5 w-3.5 fill-current text-amber-400" /> Highlights
+                      </button>
+                    )}
+                    {myRecentItems.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearMyStatus}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-white/[0.05] py-2 text-xs font-semibold text-red-400 hover:bg-white/[0.09]"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Clear my status
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* ---- Recent updates from contacts ---- */}
+              <div className="mt-3 flex items-center justify-between px-4 py-1.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Recent updates
+                </span>
+                {unseenStatusCount > 0 && (
+                  <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
+                    {unseenStatusCount} unseen
+                  </span>
+                )}
               </div>
 
               {otherGroups.length === 0 ? (
                 <div className="flex flex-col items-center justify-center px-6 py-10 text-center">
-                  <div className="mb-3 grid h-16 w-16 place-items-center rounded-full bg-muted">
+                  <div className="mb-3 grid h-16 w-16 place-items-center rounded-full bg-white/[0.05]">
                     <CircleDot className="h-7 w-7 text-muted-foreground" />
                   </div>
-                  <p className="text-sm font-medium text-foreground">No updates yet</p>
+                  <p className="text-sm font-semibold text-foreground">No updates yet</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Statuses from your contacts appear here for 24 hours.
+                    Updates from your study buddies appear here for 24 hours.
                   </p>
                 </div>
               ) : (
                 otherGroups.map((g) => {
-                  const allSeen = g.items.every((s) => s.viewedByMe || s.userId === me);
+                  const allSeen = g.unseen === 0;
                   return (
-                    <button
+                    <div
                       key={g.userId}
-                      onClick={() => openStatusViewer(g.items)}
-                      className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-muted"
+                      className="group mx-2 flex items-center gap-3 rounded-2xl border border-transparent px-2 py-2 transition-all duration-200 hover:border-white/[0.07] hover:bg-white/[0.05]"
                     >
-                      <div className={cn("shrink-0 rounded-full p-[2px]", allSeen ? "bg-muted" : "bg-gradient-to-tr from-bio to-chem")}>
-                        <Avatar src={g.image} name={g.name} size={50} />
-                      </div>
-                      <div className="min-w-0 flex-1 border-b border-border/50 pb-2">
-                        <p className="truncate text-[15px] font-medium text-foreground">{g.name}</p>
-                        <p className="text-xs text-muted-foreground">{statusTime(g.items[0].createdAt)}</p>
-                      </div>
-                      <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
-                        {g.items.length} · 👁 {g.items[0].viewCount}
-                      </span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => openStatusViewer(g.items)}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                      >
+                        <div
+                          className={cn(
+                            "grid h-[54px] w-[54px] shrink-0 place-items-center rounded-full p-[2px]",
+                            allSeen ? "bg-white/[0.10]" : "bg-gradient-to-tr from-bio to-chem",
+                          )}
+                        >
+                          <div className="grid h-full w-full place-items-center rounded-full bg-[var(--background)] p-[2px]">
+                            <Avatar src={g.image} name={g.name} size={44} />
+                          </div>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[15px] font-bold text-foreground">{g.name}</p>
+                          <p className="truncate text-xs font-medium text-muted-foreground">
+                            {statusTime(g.items[0].createdAt)}
+                            {g.items.length > 1 ? ` · ${g.items.length} updates` : ""}
+                          </p>
+                        </div>
+                        {!allSeen && (
+                          <span className="shrink-0 rounded-full bg-gradient-aurora px-2 py-0.5 text-[10px] font-extrabold text-white shadow-glow">
+                            {g.unseen}
+                          </span>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStatusMenuFor({ item: g.items[0], mine: false })}
+                        aria-label={`${g.name} status options`}
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted-foreground opacity-60 transition-opacity hover:text-foreground group-hover:opacity-100"
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </button>
+                    </div>
                   );
                 })
               )}
@@ -3042,65 +3375,174 @@ export default function ChatPage() {
       {/* STATUS COMPOSER SHEET */}
       {composerOpen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-background/80 p-0 md:items-center md:p-6">
-          <div className="flex h-[70dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-card md:h-auto md:max-w-md md:rounded-2xl">
-            <div className="flex items-center justify-between border-b border-border bg-card px-4 py-3">
-              <div className="flex items-center gap-2">
-                <button onClick={() => setComposerOpen(false)} className="text-muted-foreground hover:text-foreground">
+          <div className="flex h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-card md:h-auto md:max-h-[88dvh] md:max-w-md md:rounded-2xl">
+            <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    resetComposer();
+                    setComposerOpen(false);
+                  }}
+                  aria-label="Close"
+                  className="text-muted-foreground hover:text-foreground"
+                >
                   <X className="h-5 w-5" />
                 </button>
-                <h2 className="text-base font-medium">Add status</h2>
+                <h2 className="text-base font-bold text-foreground">
+                  {statusEditing ? "Edit status" : "New status"}
+                </h2>
               </div>
               <button
                 onClick={postStatus}
                 disabled={statusBusy || (!statusText.trim() && !statusMedia)}
-                className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-full bg-gradient-aurora px-4 py-1.5 text-sm font-bold text-white shadow-glow transition-transform active:scale-95 disabled:opacity-40"
               >
-                {statusBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Share
+                {statusBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                {statusEditing ? "Save" : "Share"}
               </button>
             </div>
-            <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
-              <div className="flex items-center gap-3">
-                <Avatar src={myImage} name={myName} size={44} />
-                <span className="text-sm text-muted-foreground">
-                  Visible to everyone on BioPulse for 24 hours
+
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
+              <div className="mb-3 flex items-center gap-3">
+                <Avatar src={myImage} name={myName} size={40} />
+                <span className="text-xs font-medium text-muted-foreground">
+                  {statusKeep
+                    ? "Kept as a highlight — viewable anytime"
+                    : "Visible to everyone on BioPulse for 24 hours"}
                 </span>
               </div>
-              <textarea
-                value={statusText}
-                onChange={(e) => setStatusText(e.target.value)}
-                placeholder="Write a status update…"
-                maxLength={2000}
-                className="min-h-[120px] w-full resize-none rounded-xl border border-border bg-muted px-4 py-3 text-[15px] text-foreground placeholder:text-muted-foreground outline-none"
-              />
-              {statusMedia && (
-                <div className="relative">
-                  {statusMedia.type === "video" ? (
-                    <video src={statusMedia.url} controls className="max-h-56 w-full rounded-xl object-contain bg-black" />
-                  ) : (
-                    <img src={statusMedia.url} alt="status media" className="max-h-56 w-full rounded-xl object-cover" />
+
+              {/* The preview IS the editor, exactly like WhatsApp: tapping the styled card
+                  focuses the textarea sitting transparently on top of it. */}
+              <div
+                className={cn(
+                  "relative overflow-hidden rounded-2xl",
+                  statusMedia ? "bg-black" : "",
+                )}
+              >
+                {statusMedia ? (
+                  <div className="relative">
+                    {statusMedia.type === "video" ? (
+                      <video
+                        src={statusMedia.url}
+                        controls
+                        playsInline
+                        className="max-h-72 w-full bg-black object-contain"
+                      />
+                    ) : (
+                      <img
+                        src={statusMedia.url}
+                        alt="status media"
+                        className="max-h-72 w-full object-contain"
+                      />
+                    )}
+                    <button
+                      onClick={() => setStatusMedia(null)}
+                      aria-label="Remove media"
+                      className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-background/80 text-foreground backdrop-blur"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : null}
+
+                <textarea
+                  value={statusText}
+                  onChange={(e) => setStatusText(e.target.value)}
+                  placeholder={statusMedia ? "Add a caption…" : "Type a status"}
+                  maxLength={5000}
+                  className={cn(
+                    "w-full resize-none text-center text-xl font-medium leading-snug outline-none",
+                    statusMedia
+                      ? "min-h-[72px] bg-card px-4 py-3 text-left text-[15px] text-foreground placeholder:text-muted-foreground"
+                      : "min-h-[180px] px-5 py-8 text-white placeholder:text-white/45",
+                    !statusMedia && statusFontClass(statusFont),
                   )}
-                  <button
-                    onClick={() => setStatusMedia(null)}
-                    className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-background/80 text-foreground"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
+                  style={!statusMedia ? { background: statusBg } : undefined}
+                />
+              </div>
+
+              {statusMedia && (
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  The text above becomes the caption shown over your photo or video.
+                </p>
+              )}
+
+              {/* Colour / font picker only applies to a text-only update. */}
+              {!statusMedia && (
+                <div className="mt-4 flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto py-1">
+                    {STATUS_BACKGROUNDS.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setStatusBg(c)}
+                        aria-label={`Background ${c}`}
+                        className={cn(
+                          "h-8 w-8 shrink-0 rounded-full border-2 transition-transform active:scale-90",
+                          statusBg === c ? "border-white" : "border-transparent",
+                        )}
+                        style={{ background: c }}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {STATUS_FONTS.map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setStatusFont(f.id)}
+                        aria-label={`Font ${f.id}`}
+                        className={cn(
+                          "grid h-9 w-9 place-items-center rounded-full text-sm transition-colors",
+                          f.className,
+                          statusFont === f.id
+                            ? "bg-gradient-aurora text-white"
+                            : "bg-white/[0.06] text-foreground hover:bg-white/[0.12]",
+                        )}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-border py-3 text-sm font-medium text-muted-foreground hover:bg-accent">
-                <Paperclip className="h-4 w-4" /> Add photo or video
-                <input
-                  type="file"
-                  accept="image/*,video/*"
-                  className="hidden"
-                  disabled={statusBusy}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) pickStatusImage(f);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
+
+              <div className="mt-4 flex items-center gap-2">
+                <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-white/15 py-3 text-sm font-semibold text-muted-foreground transition-colors hover:bg-white/[0.05]">
+                  <Paperclip className="h-4 w-4" />
+                  {statusMedia ? "Replace media" : "Add photo or video"}
+                  <input
+                    type="file"
+                    accept="image/*,video/*"
+                    className="hidden"
+                    disabled={statusBusy}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) pickStatusImage(f);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setStatusKeep((k) => !k)}
+                  title="Keep this update past 24 hours as a highlight"
+                  className={cn(
+                    "flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-semibold transition-colors",
+                    statusKeep
+                      ? "bg-amber-400/20 text-amber-300"
+                      : "bg-white/[0.06] text-muted-foreground hover:bg-white/[0.12]",
+                  )}
+                >
+                  <Star className={cn("h-4 w-4", statusKeep && "fill-current")} />
+                  Keep
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -3157,21 +3599,39 @@ export default function ChatPage() {
                 <img src={viewerItems[viewerIdx].imageUrl} alt="status" className="h-full w-full object-contain" />
               )
             ) : (
-              <div className="flex h-full items-center justify-center p-8">
-                <div className="w-full rounded-2xl border border-border bg-card p-6 text-center">
-                  <p className="whitespace-pre-wrap text-lg text-foreground">{viewerItems[viewerIdx].text}</p>
+              <div className="flex h-full items-center justify-center p-6">
+                <div
+                  className={cn(
+                    "flex min-h-[40vh] w-full max-w-md items-center justify-center rounded-2xl p-8 text-center",
+                    statusFontClass(viewerItems[viewerIdx].font),
+                  )}
+                  style={{ background: viewerItems[viewerIdx].bgColor || "#0f172a" }}
+                >
+                  <p className="whitespace-pre-wrap text-2xl font-medium leading-snug text-white">
+                    {viewerItems[viewerIdx].text}
+                  </p>
                 </div>
+              </div>
+            )}
+            {viewerItems[viewerIdx].caption && viewerItems[viewerIdx].imageUrl && (
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-4 pb-3 pt-10">
+                <p className="whitespace-pre-wrap text-center text-sm font-medium text-white drop-shadow">
+                  {viewerItems[viewerIdx].caption}
+                </p>
               </div>
             )}
             <button onClick={viewerPrev} aria-label="Previous" className="absolute inset-y-0 left-0 w-1/3" />
             <button onClick={viewerNext} aria-label="Next" className="absolute inset-y-0 right-0 w-1/3" />
           </div>
           <div className="flex items-center justify-between gap-2 px-4 py-3 text-center text-[11px] text-muted-foreground">
-            <span className="min-w-0 flex-1">Hold to pause · Tap right or left to move</span>
+            <span className="min-w-0 flex-1 truncate">
+              {viewerItems[viewerIdx].pinned ? "★ Highlight · " : ""}
+              Hold to pause · Tap right or left to move
+            </span>
             {viewerItems[viewerIdx].userId === me && (
               <button
                 onClick={() => setViewerViewersOpen(true)}
-                className="shrink-0 rounded-full border border-border bg-card px-2 py-0.5 font-medium text-foreground active:bg-muted"
+                className="shrink-0 rounded-full border border-white/15 bg-white/[0.06] px-2 py-0.5 font-semibold text-foreground active:bg-white/[0.12]"
               >
                 👁 {viewerItems[viewerIdx].viewCount} {viewerItems[viewerIdx].viewCount === 1 ? "view" : "views"}
               </button>
@@ -3217,7 +3677,26 @@ export default function ChatPage() {
               Reply
             </button>
             <button
-              onClick={viewerNext}
+              onClick={() => setStatusForwardItem(viewerItems[viewerIdx])}
+              className="flex flex-col items-center gap-1 rounded-lg px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Forward className="h-5 w-5" />
+              Forward
+            </button>
+            <button
+              onClick={() =>
+                setStatusMenuFor({
+                  item: viewerItems[viewerIdx],
+                  mine: viewerItems[viewerIdx].userId === me,
+                })
+              }
+              className="flex flex-col items-center gap-1 rounded-lg px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <MoreVertical className="h-5 w-5" />
+              More
+            </button>
+            <button
+              onClick={() => setViewerItems(null)}
               className="flex flex-col items-center gap-1 rounded-lg px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               <X className="h-5 w-5" />
@@ -3274,6 +3753,221 @@ export default function ChatPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* STATUS ACTION SHEET */}
+      {statusMenuFor && (
+        <>
+          <div
+            className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-[2px]"
+            onClick={() => setStatusMenuFor(null)}
+          />
+          <div className="fixed inset-x-0 bottom-0 z-[81] animate-fade-up rounded-t-3xl border-t border-white/10 bg-[var(--popover)] px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+16px)] shadow-2xl md:left-1/2 md:bottom-6 md:w-[380px] md:-translate-x-1/2 md:rounded-3xl">
+            <div className="mb-2 flex items-center gap-3 px-2 py-2">
+              <Avatar src={statusMenuFor.item.image} name={statusMenuFor.item.name} size={40} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-bold text-foreground">{statusMenuFor.item.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {statusTime(statusMenuFor.item.createdAt)}
+                  {statusMenuFor.item.pinned ? " · Highlight" : ""}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col">
+              {statusMenuFor.mine ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openStatusViewer([statusMenuFor.item]);
+                      setStatusMenuFor(null);
+                    }}
+                    className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-left text-sm font-medium text-foreground hover:bg-white/[0.06]"
+                  >
+                    <Eye className="h-4 w-4 text-muted-foreground" />
+                    View status
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => startEditStatus(statusMenuFor.item)}
+                    className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-left text-sm font-medium text-foreground hover:bg-white/[0.06]"
+                  >
+                    <Edit2 className="h-4 w-4 text-muted-foreground" />
+                    Edit status
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleKeepStatus(statusMenuFor.item)}
+                    className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-left text-sm font-medium text-foreground hover:bg-white/[0.06]"
+                  >
+                    <Star className={cn("h-4 w-4 text-muted-foreground", statusMenuFor.item.pinned && "fill-amber-400 text-amber-400")} />
+                    {statusMenuFor.item.pinned ? "Remove from highlights" : "Keep as highlight"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteStatusItem(statusMenuFor.item)}
+                    className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-left text-sm font-medium text-red-400 hover:bg-red-500/10"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete status
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openStatusViewer([statusMenuFor.item]);
+                      setStatusMenuFor(null);
+                    }}
+                    className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-left text-sm font-medium text-foreground hover:bg-white/[0.06]"
+                  >
+                    <Eye className="h-4 w-4 text-muted-foreground" />
+                    View status
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStatusForwardItem(statusMenuFor.item);
+                      setStatusMenuFor(null);
+                      setViewerItems(null);
+                    }}
+                    className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-left text-sm font-medium text-foreground hover:bg-white/[0.06]"
+                  >
+                    <Forward className="h-4 w-4 text-muted-foreground" />
+                    Forward status
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => replyToStatus(statusMenuFor.item)}
+                    className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-left text-sm font-medium text-foreground hover:bg-white/[0.06]"
+                  >
+                    <MessageCircle className="h-4 w-4 text-muted-foreground" />
+                    Reply to status
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteStatusItem(statusMenuFor.item)}
+                    className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-left text-sm font-medium text-foreground hover:bg-white/[0.06]"
+                  >
+                    <Trash2 className="h-4 w-4 text-muted-foreground" />
+                    Delete for me
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleMuteStatus(statusMenuFor.item.userId)}
+                    className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-left text-sm font-medium text-red-400 hover:bg-red-500/10"
+                  >
+                    <VolumeX className="h-4 w-4" />
+                    {mutedStatusUsers.has(statusMenuFor.item.userId) ? "Unmute updates" : "Mute updates"}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* STATUS FORWARD PICKER */}
+      {statusForwardItem && (
+        <>
+          <div
+            className="fixed inset-0 z-[85] bg-black/60 backdrop-blur-[2px]"
+            onClick={() => setStatusForwardItem(null)}
+          />
+          <div className="fixed inset-x-0 bottom-0 z-[86] flex h-[70dvh] flex-col animate-fade-up rounded-t-3xl border-t border-white/10 bg-[var(--popover)] shadow-2xl md:left-1/2 md:bottom-6 md:h-[60dvh] md:w-[420px] md:-translate-x-1/2 md:rounded-3xl">
+            <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3">
+              <h3 className="text-base font-bold text-foreground">Send to</h3>
+              <button onClick={() => setStatusForwardItem(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 py-2">
+              {conversations.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-muted-foreground">No chats yet.</p>
+              ) : (
+                conversations.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => doForwardStatus(statusForwardItem, c.id)}
+                    className="flex w-full items-center gap-3 rounded-2xl px-2 py-2.5 text-left hover:bg-white/[0.06]"
+                  >
+                    <Avatar src={c.image} name={c.name} size={44} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-foreground">{c.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {typeof c.lastMessage === "string" && c.lastMessage ? mediaPreviewLabel(null, null) === "" ? "Message" : mediaPreviewLabel(null, null) : "Tap to send"}
+                      </p>
+                    </div>
+                    <Forward className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* HIGHLIGHTS MODAL */}
+      {highlightsOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-[88] bg-black/70 backdrop-blur-[2px]"
+            onClick={() => setHighlightsOpen(false)}
+          />
+          <div className="fixed inset-x-4 top-1/2 z-[89] max-h-[70dvh] w-auto -translate-y-1/2 animate-scale-in flex-col overflow-hidden rounded-3xl border border-white/10 bg-[var(--popover)] shadow-2xl md:left-1/2 md:-translate-x-1/2 md:w-[420px]">
+            <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3">
+              <div className="flex items-center gap-2">
+                <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+                <h3 className="text-base font-bold text-foreground">My highlights</h3>
+              </div>
+              <button onClick={() => setHighlightsOpen(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 py-2">
+              {myHighlights.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-muted-foreground">No highlights yet.</p>
+              ) : (
+                myHighlights.map((item) => (
+                  <div key={item.id} className="flex items-center gap-3 rounded-2xl px-2 py-2.5 hover:bg-white/[0.06]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHighlightsOpen(false);
+                        openStatusViewer([item]);
+                      }}
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    >
+                      <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 p-[2px]">
+                        <div className="grid h-full w-full place-items-center rounded-full bg-[var(--background)] p-[2px]">
+                          <Avatar src={myImage} name={myName} size={38} />
+                        </div>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-bold text-foreground">
+                          {item.text || item.caption || (item.imageUrl ? "Photo/video update" : "Status")}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {statusTime(item.createdAt)} · {statusExpiryLabel(item.expiresAt, item.pinned)}
+                        </p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleKeepStatus(item)}
+                      aria-label="Remove highlight"
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-amber-400 hover:bg-white/[0.06]"
+                    >
+                      <StarOff className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </>
       )}
 
       {/* Message actions: react, copy, delete for me / for everyone */}

@@ -924,13 +924,64 @@ model UserStatus {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   text      String?  @db.Text
   imageUrl  String?
-  imageType String? // image (video uploads stay in chat for now)
+  imageType String? // image | video
+  /** Caption shown over a photo/video update (WhatsApp caption box). */
+  caption   String?  @db.Text
+  /** Solid background for a text-only update (WhatsApp colour picker). */
+  bgColor   String?
+  /** Font style for a text-only update: classic | serif | bold | script. */
+  font      String?
+  /** Default 24h; a highlight pins the item past expiry. */
+  expiresAt DateTime @default(now())
+  /** Set when the item was kept as a highlight instead of expiring. */
+  pinned    Boolean  @default(false)
+  editedAt  DateTime?
   createdAt DateTime @default(now())
   views     StatusView[]
   reactions StatusReaction[]
 
   @@index([userId, createdAt])
   @@map("user_statuses")
+}
+
+// ============================================================
+// STATUS EXTRAS: mutes, per-user hides and forwards
+// ============================================================
+
+/** A user who muted another user's status updates. */
+model StatusMute {
+  id        String   @id @default(uuid())
+  userId    String
+  mutedId   String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, mutedId])
+  @@index([userId])
+  @@map("status_mutes")
+}
+
+/** "Delete for me" on someone else's status item. */
+model StatusHide {
+  id        String   @id @default(uuid())
+  userId    String
+  statusId  String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, statusId])
+  @@index([userId])
+  @@map("status_hides")
+}
+
+/** A status item re-shared into a chat (WhatsApp "Forward status"). */
+model StatusForward {
+  id        String   @id @default(uuid())
+  statusId  String
+  fromId    String
+  toId      String
+  createdAt DateTime @default(now())
+
+  @@index([statusId])
+  @@map("status_forwards")
 }
 
 // ============================================================

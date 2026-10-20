@@ -267,6 +267,11 @@ export interface StoredStatus {
   text: string | null;
   imageUrl: string | null;
   imageType: string | null;
+  caption?: string | null;
+  bgColor?: string | null;
+  font?: string | null;
+  pinned?: boolean;
+  editedAt?: string | null;
   createdAt: string;
 }
 

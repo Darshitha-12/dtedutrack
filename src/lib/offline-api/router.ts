@@ -60,8 +60,12 @@ import {
   chatStatuses,
   createStatus,
   deleteOwnStatuses,
+  editStatus,
+  pinStatus,
   viewStatus,
   reactStatus,
+  forwardStatus,
+  muteStatus,
   uploadChatMedia,
   callSignalPost,
   callSignalGet,
@@ -358,9 +362,13 @@ async function dispatch(req: ApiRequest): Promise<Result> {
     if (s[2] === "status") {
       if (s[3] === "view" && method === "POST") return viewStatus(req.json());
       if (s[3] === "reaction" && method === "POST") return reactStatus(req.json());
+      if (s[3] === "forward" && method === "POST") return forwardStatus();
+      if (s[3] === "mute" && method === "POST") return muteStatus(req.json());
       if (method === "GET") return chatStatuses();
       if (method === "POST") return createStatus(req.json());
-      if (method === "DELETE") return deleteOwnStatuses();
+      if (method === "PATCH") return editStatus(req.json());
+      if (method === "PUT") return pinStatus(req.json());
+      if (method === "DELETE") return deleteOwnStatuses(req.json());
     }
     if (s[2] === "upload" && method === "POST") return uploadChatMedia(req.form);
     if (s[2] === "call-signal") {
