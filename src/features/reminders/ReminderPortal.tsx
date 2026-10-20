@@ -2,18 +2,23 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioEngine } from "@/features/alarms/lib/audio-engine";
-import { holdBackgroundPlayback } from "@/features/alarms/lib/background-playback";
+import {
+  hasNativeRingBridge,
+  holdBackgroundPlayback,
+} from "@/features/alarms/lib/background-playback";
 import { notificationService } from "@/services/notification";
 import { ReminderPopup } from "@/features/reminders/components/ReminderPopup";
 import {
   loadReminders,
   normalizeReminderSound,
   reminderMatches,
+  reminderSpeech,
   saveReminders,
   toDateKey,
   REMINDERS_STORAGE_KEY,
 } from "@/features/reminders/types";
 import type { Reminder, ReminderSound } from "@/features/reminders/types";
+import { speechService } from "@/services/speech";
 
 const POLL_MS = 15000;
 
@@ -41,6 +46,16 @@ export function ReminderPortal() {
   const remindersRef = useRef<Reminder[]>([]);
   const snoozeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const vibrationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const speechTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /** Stop the spoken announcement (dismiss / snooze / unmount). */
+  const stopSpeech = useCallback(() => {
+    if (speechTimerRef.current !== null) {
+      clearInterval(speechTimerRef.current);
+      speechTimerRef.current = null;
+    }
+    speechService.stop();
+  }, []);
 
   const refresh = useCallback(() => {
     remindersRef.current = loadReminders();
@@ -71,9 +86,18 @@ export function ReminderPortal() {
       notificationService
         .sendBrowser(`🔔 ${reminder.title}`, reminder.note || "BioPulse reminder")
         .catch(() => {});
-      holdBackgroundPlayback(true, reminder.title, reminder.sound);
+      // Voice announce: the APK speaks the text over the tone ("" = voice off),
+      // the browser speaks it here and repeats it while the popup is up.
+      const speech = reminderSpeech(reminder);
+      stopSpeech();
+      holdBackgroundPlayback(true, reminder.title, reminder.sound, speech);
+      if (speech && !hasNativeRingBridge() && speechService.isSupported()) {
+        const say = () => speechService.speak(speech);
+        say();
+        speechTimerRef.current = setInterval(say, 20000);
+      }
     },
-    [startVibration],
+    [startVibration, stopSpeech],
   );
 
   const checkDue = useCallback(() => {
@@ -91,10 +115,11 @@ export function ReminderPortal() {
 
   const dismiss = useCallback(() => {
     AudioEngine.stop();
+    stopSpeech();
     stopVibration();
     holdBackgroundPlayback(false);
     setActive(null);
-  }, [stopVibration]);
+  }, [stopVibration, stopSpeech]);
 
   const snooze = useCallback(
     (minutes: number) => {
@@ -130,7 +155,7 @@ export function ReminderPortal() {
       }
     };
     const onTest = (e: Event) => {
-      const detail = (e as CustomEvent<{ sound?: ReminderSound }>).detail;
+      const detail = (e as CustomEvent<{ sound?: ReminderSound; tts?: boolean }>).detail;
       const requested = normalizeReminderSound(detail?.sound);
       fire({
         id: "test",
@@ -141,6 +166,7 @@ export function ReminderPortal() {
         days: [],
         time: "00:00",
         sound: requested,
+        tts: detail?.tts !== false,
         enabled: true,
         lastFiredKey: "",
         createdAt: Date.now(),
@@ -168,13 +194,14 @@ export function ReminderPortal() {
       window.removeEventListener("biopulse:reminders-changed", onChanged);
       window.removeEventListener("storage", onStorage);
       AudioEngine.stop();
+      stopSpeech();
       stopVibration();
       holdBackgroundPlayback(false);
       if (snoozeTimerRef.current !== null) {
         clearTimeout(snoozeTimerRef.current);
       }
     };
-  }, [refresh, fire, checkDue, stopVibration]);
+  }, [refresh, fire, checkDue, stopVibration, stopSpeech]);
 
   if (!active) return null;
   return <ReminderPopup reminder={active} onDismiss={dismiss} onSnooze={snooze} />;

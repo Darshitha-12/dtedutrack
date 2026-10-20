@@ -461,7 +461,10 @@ public class MediaPlaybackService extends Service {
         // Events scheduled by an older build carry no speech field; make one up from the label so
         // the voice always speaks instead of silently doing nothing.
         String speak = speech;
-        if (speak == null || speak.trim().isEmpty()) speak = defaultSpeechFor(label);
+        // null = a schedule that predates the speech field → make one up from the label so the
+        // voice always speaks. An explicit "" is the page asking for a silent ring (TTS off),
+        // so it is passed through untouched instead of being replaced.
+        if (speak == null) speak = defaultSpeechFor(label);
         speakSpeech(ctx, speak);
         // Arm (or re-arm) the auto-silence timer for this ring.
         sAlarmCtx = ctx.getApplicationContext();
@@ -2091,7 +2094,7 @@ public class MediaPlaybackService extends Service {
                 app.getSharedPreferences(ChatReplyReceiver.PREFS, Context.MODE_PRIVATE);
         String base = p.getString(ChatReplyReceiver.KEY_BASE, "");
         String token = p.getString(ChatReplyReceiver.KEY_TOKEN, "");
-        if (base == null || base.trim().isEmpty()) base = "https://dtedutrack-euc4.vercel.app";
+        if (base == null || base.trim().isEmpty()) base = "https://biopulse-study.netlify.app";
         base = base.trim().replaceAll("/+$", "");
         if (token == null || token.trim().isEmpty()) return; // device not linked yet
 

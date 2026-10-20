@@ -25,7 +25,7 @@ const defaultInput = (): CreateAlarmInput => ({
   priority: "normal",
   subject: "none",
   sound: "chime",
-  tts: false,
+  tts: true,
   repeatDays: [],
 });
 
@@ -181,7 +181,7 @@ export function AlarmForm({ editing, onSubmit, onCancel }: AlarmFormProps) {
                 : "bg-transparent text-muted-foreground border-border",
             )}
           >
-            {input.tts ? "TTS On" : "TTS Off"}
+            {input.tts ? "🔊 Voice On" : "🔇 Voice Off"}
           </button>
           <Button type="button" variant="outline" size="sm" onClick={testSound}>
             <Play className="h-3 w-3 mr-1" />

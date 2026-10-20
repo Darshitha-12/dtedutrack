@@ -2,8 +2,12 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { AudioEngine } from "../lib/audio-engine";
-import { holdBackgroundPlayback } from "../lib/background-playback";
+import {
+  hasNativeRingBridge,
+  holdBackgroundPlayback,
+} from "../lib/background-playback";
 import type { Alarm } from "../lib/scheduler";
+import { speechService } from "@/services/speech";
 
 export function useAlarmRinger() {
   const [currentAlarm, setCurrentAlarm] = useState<Alarm | null>(null);
@@ -11,6 +15,16 @@ export function useAlarmRinger() {
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const vibrationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const snoozeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const speechTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /** Silence the spoken announcement (dismiss, snooze, unmount). */
+  const stopSpeech = useCallback(() => {
+    if (speechTimerRef.current !== null) {
+      clearInterval(speechTimerRef.current);
+      speechTimerRef.current = null;
+    }
+    speechService.stop();
+  }, []);
 
   const requestWakeLock = useCallback(async () => {
     try {
@@ -89,23 +103,41 @@ export function useAlarmRinger() {
       };
       // Keeps the Android foreground media service (and wakelock) alive so a custom
       // MP3 keeps playing when the app is backgrounded or the screen is locked.
-      holdBackgroundPlayback(true, alarm.label, alarm.sound);
+      //
+      // Voice announce ("pronounce"): the ring should SAY what it is for. On the APK the
+      // native TTS speaks this text over the tone ("" = stay silent, honouring the TTS
+      // toggle); in the browser there is no native layer, so the page speaks it itself
+      // and keeps repeating it until the alarm is dismissed.
+      const nativeSpeaks = hasNativeRingBridge();
+      holdBackgroundPlayback(
+        true,
+        alarm.label,
+        alarm.sound,
+        alarm.tts ? alarm.label : "",
+      );
+      stopSpeech();
+      if (alarm.tts && !nativeSpeaks && speechService.isSupported()) {
+        const say = () => speechService.speak(alarm.label || "Alarm");
+        say();
+        speechTimerRef.current = setInterval(say, 20000);
+      }
       // The native full-screen skips launching when the web is the active
       // ringer, so the web is responsible for vibration in-app.
       startVibration();
       requestWakeLock();
     },
-    [getBridge, startVibration, requestWakeLock],
+    [getBridge, startVibration, requestWakeLock, stopSpeech],
   );
 
   const dismiss = useCallback(() => {
     AudioEngine.stop();
+    stopSpeech();
     stopVibration();
     releaseWakeLock();
     holdBackgroundPlayback(false);
     setCurrentAlarm(null);
     setIsRinging(false);
-  }, [stopVibration, releaseWakeLock]);
+  }, [stopVibration, releaseWakeLock, stopSpeech]);
 
   const snooze = useCallback(
     (minutes: number) => {
@@ -142,6 +174,7 @@ export function useAlarmRinger() {
   const teardownRef = useRef<() => void>(() => {});
   teardownRef.current = () => {
     AudioEngine.stop();
+    stopSpeech();
     stopVibration();
     releaseWakeLock();
     holdBackgroundPlayback(false);

@@ -41,7 +41,7 @@ public class ChatReplyReceiver extends BroadcastReceiver {
 
     private static final String TAG = "BioPulseDmReply";
     /** Fallback origin when the page has not handed one over yet. */
-    private static final String DEFAULT_BASE_URL = "https://dtedutrack-euc4.vercel.app";
+    private static final String DEFAULT_BASE_URL = "https://biopulse-study.netlify.app";
 
     @Override
     public void onReceive(Context context, Intent intent) {

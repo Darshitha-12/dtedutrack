@@ -19,11 +19,52 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+const TTS_MIGRATION_KEY = "biopulse_alarms_tts_migrated_v1";
+
+/**
+ * The voice toggle used to be a no-op (nothing read `tts`), so alarms saved back
+ * then carry `tts: false` no matter what the user picked — honouring that today
+ * would leave every pre-existing alarm silent. One-time migration: switch the
+ * voice on for alarms saved before the toggle actually worked, then never touch
+ * it again, so a later deliberate "Voice Off" still persists.
+ */
+export function migrateAlarmTts(): void {
+  try {
+    if (typeof window === "undefined") return;
+    if (localStorage.getItem(TTS_MIGRATION_KEY)) return;
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const list: Array<{ tts?: boolean }> = Array.isArray(parsed?.alarms)
+        ? parsed.alarms
+        : [];
+      let changed = false;
+      const next = list.map((a) => {
+        if (a && a.tts === false) {
+          changed = true;
+          return { ...a, tts: true };
+        }
+        return a;
+      });
+      if (changed) {
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({ ...parsed, alarms: next }),
+        );
+      }
+    }
+    localStorage.setItem(TTS_MIGRATION_KEY, String(Date.now()));
+  } catch {
+    /* storage blocked — voice just stays as saved */
+  }
+}
+
 export function useAlarms() {
   const [alarms, setAlarms] = useState<Alarm[]>([]);
   const [fired, setFired] = useState<Record<string, number>>({});
 
   const loadAlarms = useCallback(() => {
+    migrateAlarmTts();
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {

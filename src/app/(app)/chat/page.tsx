@@ -859,6 +859,14 @@ export default function ChatPage() {
   const [viewerPaused, setViewerPaused] = useState(false);
   const viewerVideoRef = useRef<HTMLVideoElement | null>(null);
   const pausedRef = useRef(false);
+  /** WhatsApp-style reply composer inside the status viewer. */
+  const [viewerReplyText, setViewerReplyText] = useState("");
+  /** Who the reply is addressed to — captured on focus so a status advancing mid-typing cannot misroute it. */
+  const [viewerReplyUser, setViewerReplyUser] = useState<{ id: string; name: string } | null>(null);
+  /** Set when a status reply should be delivered immediately once the target chat opens. */
+  const pendingStatusReplyRef = useRef<string | null>(null);
+  /** True when focusing the reply input paused a playing status video (resume on blur). */
+  const replyResumeVideoRef = useRef(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -1175,14 +1183,6 @@ export default function ChatPage() {
       /* ignore */
     }
   }, []);
-
-  // Apply a pending status reply once the target chat is active.
-  useEffect(() => {
-    if (replyDraft && activeId) {
-      setText(replyDraft);
-      setReplyDraft("");
-    }
-  }, [replyDraft, activeId]);
 
   const loadStatuses = useCallback(async () => {
     try {
@@ -1550,6 +1550,49 @@ export default function ChatPage() {
     setReplyDraft(`Re: ${quoted.slice(0, 80)}`);
   };
 
+  // Never leak a half-typed reply into the next viewer session.
+  useEffect(() => {
+    if (!viewerItems) {
+      setViewerReplyText("");
+      setViewerReplyUser(null);
+    }
+  }, [viewerItems]);
+
+  /** Typing a reply holds the story (and pauses a playing video) so nothing advances away. */
+  const onReplyFocus = () => {
+    const item = viewerItems?.[viewerIdx];
+    if (item?.userId) setViewerReplyUser({ id: item.userId, name: item.name });
+    setViewerPaused(true);
+    const v = viewerVideoRef.current;
+    if (v && !v.paused) {
+      replyResumeVideoRef.current = true;
+      v.pause();
+    }
+  };
+
+  const onReplyBlur = () => {
+    setViewerPaused(false);
+    if (replyResumeVideoRef.current) {
+      replyResumeVideoRef.current = false;
+      viewerVideoRef.current?.play().catch(() => {});
+    }
+  };
+
+  /** WhatsApp-style status reply: hop into the thread and deliver the text immediately. */
+  const sendViewerReply = () => {
+    const msg = viewerReplyText.trim();
+    const target = viewerReplyUser;
+    if (!msg || !target?.id) return;
+    setViewerReplyText("");
+    setViewerReplyUser(null);
+    replyResumeVideoRef.current = false;
+    setViewerItems(null);
+    openChat(target.id);
+    // The reply-draft effect above sends it the moment the chat becomes active.
+    pendingStatusReplyRef.current = msg;
+    setReplyDraft(msg);
+  };
+
   const viewerNext = () => {
     if (!viewerItems) return;
     const next = viewerIdx + 1;
@@ -1837,6 +1880,32 @@ export default function ChatPage() {
     stopTyping();
     sendMessage({ text: t });
   };
+
+  // Status-reply delivery: runs when the draft/chat become active without re-running
+  // on every render (sendMessage is redefined each render — read it through a ref).
+  const sendMessageRef = useRef<typeof sendMessage | null>(null);
+  sendMessageRef.current = sendMessage;
+  // Apply a pending status reply once the target chat is active. A status reply carries a
+  // pending flag and is delivered straight into the thread (WhatsApp-style); the plain
+  // "Re: …" quote flow from the menu only pre-fills the composer for a manual send.
+  useEffect(() => {
+    if (replyDraft && activeId) {
+      const pending = pendingStatusReplyRef.current;
+      pendingStatusReplyRef.current = null;
+      if (pending && pending === replyDraft) {
+        setReplyDraft("");
+        if (me && sendMessageRef.current) {
+          setText("");
+          void sendMessageRef.current({ text: pending });
+        } else {
+          setText(pending);
+        }
+        return;
+      }
+      setText(replyDraft);
+      setReplyDraft("");
+    }
+  }, [replyDraft, activeId, me]);
 
   /** Save an edit inside WhatsApp's 15-minute window and paint it immediately. */
   const saveEdit = async (value: string) => {
@@ -3670,13 +3739,6 @@ export default function ChatPage() {
               React
             </button>
             <button
-              onClick={() => replyToStatus(viewerItems[viewerIdx])}
-              className="flex flex-col items-center gap-1 rounded-lg px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <MessageCircle className="h-5 w-5" />
-              Reply
-            </button>
-            <button
               onClick={() => setStatusForwardItem(viewerItems[viewerIdx])}
               className="flex flex-col items-center gap-1 rounded-lg px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
@@ -3719,6 +3781,34 @@ export default function ChatPage() {
               ))}
             </div>
           )}
+          {viewerItems[viewerIdx].userId &&
+            viewerItems[viewerIdx].userId !== me && (
+              <div className="flex items-center gap-2 border-t border-border/60 bg-card px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+                <input
+                  value={viewerReplyText}
+                  onChange={(e) => setViewerReplyText(e.target.value)}
+                  onFocus={onReplyFocus}
+                  onBlur={onReplyBlur}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      sendViewerReply();
+                    }
+                  }}
+                  placeholder={`Reply to ${viewerReplyUser?.name ?? viewerItems[viewerIdx].name}…`}
+                  aria-label="Reply to status"
+                  className="min-w-0 flex-1 rounded-full border border-border bg-background px-4 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <button
+                  onClick={sendViewerReply}
+                  disabled={!viewerReplyText.trim()}
+                  aria-label="Send status reply"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-40"
+                >
+                  <Send className="h-4 w-4" />
+                </button>
+              </div>
+            )}
           {viewerViewersOpen && (
             <div className="fixed inset-0 z-[70] flex items-end justify-center bg-background/70 md:items-center md:p-6">
               <div className="flex max-h-[60dvh] w-full max-w-sm flex-col overflow-hidden rounded-t-2xl bg-card md:rounded-2xl">

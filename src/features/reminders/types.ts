@@ -14,6 +14,8 @@ export interface Reminder {
   days: number[];
   time: string;
   sound: ReminderSound;
+  /** Announce title/note with the TTS voice when it fires (default on). */
+  tts: boolean;
   enabled: boolean;
   lastFiredKey: string;
   createdAt: number;
@@ -27,6 +29,7 @@ export interface CreateReminderInput {
   days?: number[];
   time: string;
   sound?: ReminderSound;
+  tts?: boolean;
 }
 
 export const REMINDER_DAYS = [
@@ -72,10 +75,17 @@ export function createReminder(input: CreateReminderInput): Reminder {
     days: input.days || [],
     time: input.time,
     sound: normalizeReminderSound(input.sound),
+    tts: input.tts !== false,
     enabled: true,
     lastFiredKey: "",
     createdAt: Date.now(),
   };
+}
+
+/** The words spoken when this reminder fires; "" means the voice is switched off. */
+export function reminderSpeech(reminder: Reminder): string {
+  if (reminder.tts === false) return "";
+  return [reminder.title, reminder.note].filter(Boolean).join(". ");
 }
 
 export const REMINDER_GRACE_MINUTES = 5;
@@ -122,7 +132,12 @@ export function loadReminders(): Reminder[] {
           typeof r.time === "string" &&
           r.time.includes(":"),
       )
-      .map((r: Reminder) => ({ ...r, sound: normalizeReminderSound(r.sound) }));
+      .map((r: Reminder) => ({
+        ...r,
+        sound: normalizeReminderSound(r.sound),
+        // Reminders saved before the voice toggle existed default to speaking.
+        tts: r.tts !== false,
+      }));
   } catch {
     return [];
   }

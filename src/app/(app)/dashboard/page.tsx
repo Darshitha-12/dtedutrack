@@ -25,6 +25,7 @@ import {
   Trophy,
   Crown,
   Youtube,
+  Pencil,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -117,6 +118,9 @@ export default function DashboardPage() {
     } catch {}
     return null;
   });
+  const [examEditOpen, setExamEditOpen] = useState(false);
+  const [examDraft, setExamDraft] = useState("");
+  const [examSaving, setExamSaving] = useState(false);
   const [stats, setStats] = useState<DashboardStats>(() => {
     try {
       const raw = localStorage.getItem(DASH_CACHE);
@@ -274,6 +278,32 @@ export default function DashboardPage() {
     }
   }
 
+  /** Save a new countdown target from the dashboard card (exam date). */
+  async function saveExamDate() {
+    const value = examDraft.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return;
+    setExamSaving(true);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ examDate: value }),
+      });
+      if (res.ok && profile) {
+        const nextProfile: ProfileData = { ...profile, examDate: value };
+        setProfile(nextProfile);
+        persistCache({ profile: nextProfile });
+        setExamEditOpen(false);
+      } else {
+        alert("Exam date save failed — try again.");
+      }
+    } catch {
+      alert("Exam date save failed — check your connection.");
+    } finally {
+      setExamSaving(false);
+    }
+  }
+
   async function fetchStudyStats() {
     try {
       const res = await fetch("/api/content/progress");
@@ -374,7 +404,7 @@ export default function DashboardPage() {
 
   const examCountdown = useMemo(() => {
     const dateStr =
-      profile?.examDate && profile.examDate.trim() !== "" ? profile.examDate : "2027-08-16";
+      profile?.examDate && profile.examDate.trim() !== "" ? profile.examDate : "2027-08-03";
 
     // Parse the date-only string as a LOCAL midnight (Sri Lanka, UTC+5:30).
     // new Date("YYYY-MM-DD") would silently parse as UTC midnight, making the
@@ -586,7 +616,7 @@ export default function DashboardPage() {
                     : `Target: ${
                         profile?.examDate && profile.examDate.trim() !== ""
                           ? profile.examDate
-                          : "August 16, 2027"
+                          : "August 3, 2027"
                       }`
                 ) : (
                   <SkeletonText className="h-4 w-36 mt-1" />
@@ -619,6 +649,22 @@ export default function DashboardPage() {
             variant="outline"
             size="sm"
             className="gap-2"
+            disabled={!profile}
+            onClick={() => {
+              setExamDraft(
+                profile?.examDate && profile.examDate.trim() !== ""
+                  ? profile.examDate
+                  : "2027-08-03",
+              );
+              setExamEditOpen((o) => !o);
+            }}
+          >
+            <Pencil className="h-4 w-4" /> {examEditOpen ? "Close" : "Change date"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
             onClick={() => {
               if (!testExamAlertNow()) {
                 alert("මේ test එක app එකේ (installed) විතරයි වැඩ කරන්නේ.");
@@ -631,6 +677,25 @@ export default function DashboardPage() {
             Tonight&apos;s exam reminder, fired now
           </span>
         </div>
+        {examEditOpen && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] p-3">
+            <span className="text-xs font-medium text-muted-foreground">
+              Countdown target date
+            </span>
+            <input
+              type="date"
+              value={examDraft}
+              onChange={(e) => setExamDraft(e.target.value)}
+              className="h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+            />
+            <Button size="sm" onClick={() => void saveExamDate()} disabled={examSaving}>
+              {examSaving ? "Saving…" : "Save"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setExamEditOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        )}
       </Card>
 
       {/* 3. YT Player Card */}

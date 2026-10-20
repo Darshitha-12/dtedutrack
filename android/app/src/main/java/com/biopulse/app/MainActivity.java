@@ -693,6 +693,23 @@ public class MainActivity extends BridgeActivity {
             });
         }
 
+        /**
+         * Same as {@link #setAlarmRinging} plus the spoken announcement. {@code speech == null}
+         * lets the native side speak its default (the label itself, legacy behaviour);
+         * an empty string means the page asked for a silent ring — the alarm's voice toggle
+         * is off — so the ring sounds but says nothing.
+         */
+        @JavascriptInterface
+        public void setAlarmRingingSpeech(final boolean ringing, final String label, final String soundId, final String speech) {
+            runOnUiThread(() -> {
+                if (ringing) {
+                    MediaPlaybackService.startAlarm(MainActivity.this, label, soundId, speech);
+                } else {
+                    MediaPlaybackService.stopAlarm(MainActivity.this);
+                }
+            });
+        }
+
         @JavascriptInterface
         public void setKeepScreenOn(final boolean keepOn) {
             runOnUiThread(() -> {

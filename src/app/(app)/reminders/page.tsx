@@ -67,6 +67,7 @@ export default function RemindersPage() {
   const [time, setTime] = useState("08:00");
   const [days, setDays] = useState<number[]>([1, 3]);
   const [sound, setSound] = useState<ReminderSound>("chime");
+  const [voice, setVoice] = useState(true);
   const [library, setLibrary] = useState<CustomSoundMeta[]>([]);
 
   useEffect(() => {
@@ -112,6 +113,7 @@ export default function RemindersPage() {
         days: mode === "weekly" ? days : undefined,
         time,
         sound,
+        tts: voice,
       }),
       ...reminders,
     ];
@@ -147,7 +149,7 @@ export default function RemindersPage() {
   const testAlert = () => {
     showToast("Playing test alert now...", "info");
     window.dispatchEvent(
-      new CustomEvent("biopulse:test-reminder", { detail: { sound } }),
+      new CustomEvent("biopulse:test-reminder", { detail: { sound, tts: voice } }),
     );
   };
 
@@ -254,6 +256,21 @@ export default function RemindersPage() {
           <div className="space-y-2">
             <Label>Sound</Label>
             <SoundPicker value={sound} onChange={setSound} />
+            <button
+              type="button"
+              onClick={() => setVoice((v) => !v)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium border transition-colors",
+                voice
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-transparent text-muted-foreground border-border",
+              )}
+            >
+              {voice ? "🔊 Voice announce On" : "🔇 Voice announce Off"}
+            </button>
+            <p className="text-[11px] text-muted-foreground">
+              Speaks the title + note aloud when the reminder rings.
+            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -300,7 +317,8 @@ export default function RemindersPage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{r.title}</p>
                   <p className="truncate text-xs text-muted-foreground">
-                    {r.time} · {repeatLabel(r)} · {soundLabel(r.sound, library)}
+                    {r.time} · {repeatLabel(r)} · {soundLabel(r.sound, library)} ·{" "}
+                    {r.tts !== false ? "🔊 Voice" : "🔇 Silent"}
                   </p>
                   {r.note && (
                     <p className="mt-0.5 truncate text-xs text-muted-foreground/80">{r.note}</p>

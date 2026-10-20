@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { AlarmPopup } from "@/features/alarms/components/AlarmPopup";
 import { useAlarmRinger } from "@/features/alarms/hooks/use-alarm-ringer";
-import { STORAGE_KEY } from "@/features/alarms/hooks/use-alarms";
+import { STORAGE_KEY, migrateAlarmTts } from "@/features/alarms/hooks/use-alarms";
 import {
   checkAlarms,
   getDedupKey,
@@ -13,6 +13,7 @@ import type { Alarm } from "@/features/alarms/lib/scheduler";
 import { publishNextAlarm } from "@/features/alarms/lib/native-alarm-scheduler";
 
 function readAlarms(): { alarms: Alarm[]; fired: Record<string, number> } {
+  migrateAlarmTts();
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { alarms: [], fired: {} };
