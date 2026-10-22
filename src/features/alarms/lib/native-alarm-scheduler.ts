@@ -201,29 +201,6 @@ export function publishNextAlarm(alarms: Alarm[]): void {
     /* no offline store (online build) — alarms alone are scheduled */
   }
 
-  // Daily wake-up at 03:00: romantic background music with a spoken heads-up, every day.
-  // The announcement names the next class that day so it reads as a lesson wake-up call.
-  let wakeSpeech = `${namePrefix}උදේ 3යි. නැගිටින්න.`;
-  try {
-    const todayClassDay = (new Date(now).getDay() + 6) % 7; // store convention: 0=Mon…6=Sun
-    const laterToday = getState()
-      .classes.filter((c) => c.dayOfWeek === todayClassDay && c.startMinute >= 3 * 60)
-      .sort((a, b) => a.startMinute - b.startMinute);
-    const next = laterToday[0];
-    if (next) {
-      wakeSpeech = `${namePrefix}උදේ 3යි. නැගිටින්න. ඉදිරියේ ${next.subjectName} පන්තියයි. සූදානම් වෙන්න.`;
-    }
-  } catch {
-    /* no offline store — fall back to the generic wake-up line */
-  }
-  events.push({
-    at: nextDaily(3, 0, now),
-    label: "Wake up: 3 AM",
-    soundId: "romantic",
-    speech: wakeSpeech,
-    repeat: "daily",
-  });
-
   // Daily 12 AM (midnight) exam countdown, straight from the dashboard's exam date. The event is
   // published ONCE and marked `repeat:"daily"`: the native receiver re-arms it for the next
   // midnight itself, so the alert keeps firing every night even if the app is never opened. The
