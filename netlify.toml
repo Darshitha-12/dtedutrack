@@ -8,7 +8,7 @@
 # is what makes login, Messages and the WebRTC call signalling work here.
 
 [build]
-  command = "npm run build"
+  command = "npm run build && npx tsx prisma/seed.ts"
   publish = ".next"
 
 [build.environment]
