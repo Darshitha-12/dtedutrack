@@ -834,12 +834,33 @@ public class MediaPlaybackService extends Service {
      * Only when the selection is unavailable does it fall back to the system alarm tone, the
      * system ringtone, and finally the generic bundled tone — never silence.
      */
+    private static String sActiveSoundId;
+    private static long sNativeAlarmStartMs = 0L;
+    private static final long NATIVE_AUTO_STOP_MS = 60 * 1000L; // 1 minute for built-in tones
+    private static final long NATIVE_GYM_AUTO_STOP_MS = 10 * 60 * 1000L;
+    private static final Handler MAIN_HANDLER = new Handler(Looper.getMainLooper());
+    private static final Runnable AUTO_STOP_RUNNABLE = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                stopNativeAlarmTone();
+                stopAlarmVibration(getApplicationContextSafe());
+            } catch (Throwable ignored) {}
+        }
+    };
+    private static Context getApplicationContextSafe() {
+        // MediaPlaybackService is a service, context passed in is app context
+        return null;
+    }
+
     private static void startNativeAlarmTone(Context ctx, String soundId) {
         if (sNativeTone != null) return;
 
         sToneNote = null;
+        sActiveSoundId = soundId == null || soundId.trim().isEmpty() ? null : soundId.trim();
+        sNativeAlarmStartMs = System.currentTimeMillis();
         Context app = ctx.getApplicationContext();
-        String sound = soundId == null || soundId.trim().isEmpty() ? null : soundId.trim();
+        String sound = sActiveSoundId;
 
         // Ordered candidates: the user's selection first, then progressively weaker fallbacks —
         // never silence. Bundled tones are opened straight from raw resources with
@@ -956,6 +977,20 @@ public class MediaPlaybackService extends Service {
                 sNativeTone = attempt;
                 sToneNote = toneNoteFor(source, customSelected, customPresent, sound);
                 Log.i(TAG, streamNote + ", tone source=" + source + ", " + sToneNote);
+                // Auto-stop logic: custom sounds play longer (or let web handle), built-in
+                // stop after 1 min, gym/exercise labeled alarms stop after 10 min
+                try {
+                    MAIN_HANDLER.removeCallbacks(AUTO_STOP_RUNNABLE);
+                    boolean isCustomSound = sound != null && sound.startsWith("custom:");
+                    String labelLc = (currentTitle != null ? currentTitle : "").toLowerCase();
+                    boolean isGym = labelLc.contains("gym") || labelLc.contains("workout") || labelLc.contains("exercise");
+                    if (!isCustomSound) {
+                        long delay = isGym ? NATIVE_GYM_AUTO_STOP_MS : NATIVE_AUTO_STOP_MS;
+                        MAIN_HANDLER.postDelayed(AUTO_STOP_RUNNABLE, delay);
+                    } else if (isGym) {
+                        MAIN_HANDLER.postDelayed(AUTO_STOP_RUNNABLE, NATIVE_GYM_AUTO_STOP_MS);
+                    }
+                } catch (Throwable ignored) {}
                 return;
             } catch (Throwable t) {
                 Log.w(TAG, "tone source unavailable: " + candidate + " (" + t.getMessage() + ")");
@@ -1036,15 +1071,21 @@ public class MediaPlaybackService extends Service {
 
     private static void stopAlarmVibration(Context ctx) {
         try {
-            android.os.Vibrator v = alarmVibrator(ctx);
+            Context appCtx = ctx != null ? ctx.getApplicationContext() : null;
+            android.os.Vibrator v = alarmVibrator(appCtx != null ? appCtx : ctx);
             if (v != null) v.cancel();
         } catch (Throwable ignored) {
         }
     }
 
     public static void stopNativeAlarmTone() {
+        try {
+            MAIN_HANDLER.removeCallbacks(AUTO_STOP_RUNNABLE);
+        } catch (Throwable ignored) {}
         MediaPlayer mp = sNativeTone;
         sNativeTone = null;
+        sActiveSoundId = null;
+        sNativeAlarmStartMs = 0L;
         if (mp == null) return;
         try {
             if (mp.isPlaying()) mp.stop();

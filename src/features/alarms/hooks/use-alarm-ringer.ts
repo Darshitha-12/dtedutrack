@@ -93,7 +93,31 @@ export function useAlarmRinger() {
       } catch {
         native = false;
       }
-      AudioEngine.play(alarm.sound);
+      // Custom uploaded MP3s should play properly (not cut off early). Built-in
+      // system tones should play briefly then auto-dismiss unless user dismisses/snoozes.
+      // Also support a longer 10-minute ring for gym/exercise style alarms.
+      const isCustom = alarm.sound?.startsWith("custom:");
+      const labelLc = (alarm.label || "").toLowerCase();
+      const isGym = labelLc.includes("gym") || labelLc.includes("workout") || labelLc.includes("exercise");
+      let autoStopMs: number | null = null;
+      if (isGym) {
+        autoStopMs = 10 * 60 * 1000;
+      } else if (!isCustom) {
+        autoStopMs = 60 * 1000; // ~1 minute for built-in tones
+      }
+      AudioEngine.onAutoStop = autoStopMs
+        ? () => {
+            try {
+              stopSpeech();
+              stopVibration();
+              releaseWakeLock();
+              holdBackgroundPlayback(false);
+              setCurrentAlarm(null);
+              setIsRinging(false);
+            } catch {}
+          }
+        : null;
+      AudioEngine.play(alarm.sound, { autoStopMs });
       // The page is making sound itself now, so stand the native fallback tone down — otherwise it
       // rings underneath the chosen sound for as long as the alarm lasts. The engine calls this once
       // a custom file has actually decoded, so a failed decode leaves the fallback playing.
@@ -126,10 +150,11 @@ export function useAlarmRinger() {
       startVibration();
       requestWakeLock();
     },
-    [getBridge, startVibration, requestWakeLock, stopSpeech],
+    [getBridge, startVibration, requestWakeLock, stopSpeech, stopVibration, releaseWakeLock],
   );
 
   const dismiss = useCallback(() => {
+    AudioEngine.onAutoStop = null;
     AudioEngine.stop();
     stopSpeech();
     stopVibration();
@@ -173,6 +198,7 @@ export function useAlarmRinger() {
   // starting alarm — cancelling the media element's pending play and leaving the alarm silent.
   const teardownRef = useRef<() => void>(() => {});
   teardownRef.current = () => {
+    AudioEngine.onAutoStop = null;
     AudioEngine.stop();
     stopSpeech();
     stopVibration();

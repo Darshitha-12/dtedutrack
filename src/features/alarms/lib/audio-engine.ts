@@ -53,18 +53,49 @@ class AudioEngineClass {
    */
   onSoundStarted: (() => void) | null = null;
 
-  play(name: AlarmSound): void {
+  private autoStopTimer: ReturnType<typeof setTimeout> | null = null;
+  onAutoStop: (() => void) | null = null;
+
+  play(name: AlarmSound, options?: { autoStopMs?: number | null } | number): void {
+    let autoStopMs: number | null = null;
+    if (typeof options === "number") autoStopMs = options;
+    else if (options && typeof options === "object") autoStopMs = options.autoStopMs ?? null;
+
     this.stop();
     this.ensure();
     this.activeOscillators = [];
+    this.autoStopTimer = null;
+    this.onAutoStop = null;
 
     const customId = customSoundId(name);
     if (customId) {
       void this.startCustom(customId);
+      if (autoStopMs && autoStopMs > 0) {
+        this.autoStopTimer = setTimeout(() => {
+          this.autoStopTimer = null;
+          this.stop();
+          if (this.onAutoStop) {
+            const cb = this.onAutoStop;
+            this.onAutoStop = null;
+            cb();
+          }
+        }, autoStopMs);
+      }
       return;
     }
     this.startLoop(name as AlarmSoundName);
     this.reportSynthStarted();
+    if (autoStopMs && autoStopMs > 0) {
+      this.autoStopTimer = setTimeout(() => {
+        this.autoStopTimer = null;
+        this.stop();
+        if (this.onAutoStop) {
+          const cb = this.onAutoStop;
+          this.onAutoStop = null;
+          cb();
+        }
+      }, autoStopMs);
+    }
   }
 
   /**
@@ -110,7 +141,7 @@ class AudioEngineClass {
     this.previewTimer = setTimeout(() => {
       this.previewTimer = null;
       this.stop();
-    }, customId ? Math.max(ms, 6000) : ms);
+    }, customId ? Math.max(ms, 10000) : ms);
   }
 
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
@@ -120,6 +151,10 @@ class AudioEngineClass {
     if (this.previewTimer !== null) {
       clearTimeout(this.previewTimer);
       this.previewTimer = null;
+    }
+    if (this.autoStopTimer !== null) {
+      clearTimeout(this.autoStopTimer);
+      this.autoStopTimer = null;
     }
     if (this.loopTimer !== null) {
       clearTimeout(this.loopTimer);

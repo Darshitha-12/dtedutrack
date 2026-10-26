@@ -153,10 +153,10 @@ export function SoundPicker<T extends string = string>({
     AudioEngine.preview(sound as AlarmSound);
     setPreviewing(sound);
     // The engine stops itself; this only clears the button state to match.
-    const builtIn = !sound.startsWith(CUSTOM_SOUND_PREFIX);
+    const isCustom = sound.startsWith(CUSTOM_SOUND_PREFIX);
     setTimeout(() => {
       setPreviewing((cur) => (cur === sound ? null : cur));
-    }, builtIn ? 2500 : 6000);
+    }, isCustom ? 10000 : 2500);
   }, [stopPreview]);
 
   const preview = useCallback(
