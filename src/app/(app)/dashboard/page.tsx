@@ -455,10 +455,10 @@ export default function DashboardPage() {
 
   /* ---- Countdown segment boxes — always visible, fixed height/width. ---- */
   const cdSegments = [
-    { label: "Days", value: examCountdown.days },
-    { label: "Hours", value: examCountdown.hours },
-    { label: "Minutes", value: examCountdown.minutes },
-    { label: "Seconds", value: examCountdown.seconds },
+    { label: "Days", value: Number.isFinite(examCountdown.days) ? examCountdown.days : 0 },
+    { label: "Hours", value: Number.isFinite(examCountdown.hours) ? examCountdown.hours : 0 },
+    { label: "Minutes", value: Number.isFinite(examCountdown.minutes) ? examCountdown.minutes : 0 },
+    { label: "Seconds", value: Number.isFinite(examCountdown.seconds) ? examCountdown.seconds : 0 },
   ];
 
   const topSubjectTotal = marks.length
