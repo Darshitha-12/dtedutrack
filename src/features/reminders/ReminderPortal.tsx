@@ -155,7 +155,7 @@ export function ReminderPortal() {
       }
     };
     const onTest = (e: Event) => {
-      const detail = (e as CustomEvent<{ sound?: ReminderSound; tts?: boolean }>).detail;
+      const detail = (e as CustomEvent<{ sound?: ReminderSound; tts?: boolean; videoUrl?: string; videoTitle?: string }>).detail;
       const requested = normalizeReminderSound(detail?.sound);
       fire({
         id: "test",
@@ -170,6 +170,8 @@ export function ReminderPortal() {
         enabled: true,
         lastFiredKey: "",
         createdAt: Date.now(),
+        videoUrl: detail?.videoUrl?.trim() || undefined,
+        videoTitle: detail?.videoTitle?.trim() || undefined,
       } as Reminder);
     };
     const onChanged = () => {

@@ -28,12 +28,14 @@ import {
   Award,
   StickyNote,
   MessageCircle,
+  BrainCircuit,
   Send,
   Wallet,
   Youtube,
   Timer,
   CalendarDays,
   Workflow,
+  Sparkles,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useT, useLanguage } from "@/lib/language-context"
@@ -80,6 +82,7 @@ const RAW_NAV_SECTIONS: NavSection[] = [
       { label: "Download Manager", labelKey: "sidebar.download", href: "/downloads", icon: Download, tab: "Downloads" },
       { label: "Work Log", labelKey: "sidebar.workLog", href: "/work-log", icon: Clock, tab: "Work Log" },
       { label: "Mistake Book", labelKey: "sidebar.mistakeBook", href: "/mistakes", icon: AlertTriangle, tab: "Mistakes" },
+      { label: "Smart Revision", labelKey: "sidebar.smartRevision", href: "/revision", icon: Sparkles, tab: "Revision" },
       { label: "Analytics", labelKey: "sidebar.analytics", href: "/analytics", icon: BarChart3, tab: "Analytics" },
       { label: "Search", labelKey: "sidebar.search", href: "/search", icon: Search, tab: "Search" },
     ],

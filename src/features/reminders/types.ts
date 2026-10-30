@@ -19,6 +19,10 @@ export interface Reminder {
   enabled: boolean;
   lastFiredKey: string;
   createdAt: number;
+  /** Optional link to a YouTube/video to open from the reminder popup. */
+  videoUrl?: string;
+  /** Optional video title cached for display. */
+  videoTitle?: string;
 }
 
 export interface CreateReminderInput {
@@ -30,6 +34,8 @@ export interface CreateReminderInput {
   time: string;
   sound?: ReminderSound;
   tts?: boolean;
+  videoUrl?: string;
+  videoTitle?: string;
 }
 
 export const REMINDER_DAYS = [
@@ -79,6 +85,8 @@ export function createReminder(input: CreateReminderInput): Reminder {
     enabled: true,
     lastFiredKey: "",
     createdAt: Date.now(),
+    videoUrl: input.videoUrl?.trim() || undefined,
+    videoTitle: input.videoTitle?.trim() || undefined,
   };
 }
 
@@ -137,6 +145,8 @@ export function loadReminders(): Reminder[] {
         sound: normalizeReminderSound(r.sound),
         // Reminders saved before the voice toggle existed default to speaking.
         tts: r.tts !== false,
+        videoUrl: typeof (r as any).videoUrl === "string" && (r as any).videoUrl.trim() ? (r as any).videoUrl.trim() : undefined,
+        videoTitle: typeof (r as any).videoTitle === "string" && (r as any).videoTitle.trim() ? (r as any).videoTitle.trim() : undefined,
       }));
   } catch {
     return [];

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Bell, Tag, X } from "lucide-react";
+import { Bell, ExternalLink, PlayCircle, Tag, X } from "lucide-react";
 import type { Reminder } from "@/features/reminders/types";
 
 interface ReminderPopupProps {
@@ -12,6 +12,34 @@ interface ReminderPopupProps {
 }
 
 const WEEK_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function extractYoutubeId(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes("youtu.be")) {
+      const id = u.pathname.replace("/", "").split("/")[0];
+      return id || null;
+    }
+    if (u.hostname.includes("youtube.com")) {
+      if (u.pathname.includes("/watch")) return u.searchParams.get("v");
+      if (u.pathname.includes("/shorts/")) return u.pathname.split("/shorts/")[1]?.split("/")[0] || null;
+      if (u.pathname.includes("/embed/")) return u.pathname.split("/embed/")[1]?.split("/")[0] || null;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function openVideo(url: string) {
+  try {
+    if (typeof window === "undefined") return;
+    // Try to open in app if YouTube/intent available, else new tab
+    window.open(url, "_blank", "noopener,noreferrer");
+  } catch {
+    // ignore
+  }
+}
 
 export function ReminderPopup({ reminder, onDismiss, onSnooze }: ReminderPopupProps) {
   const [tick, setTick] = useState(() => new Date());
@@ -33,6 +61,9 @@ export function ReminderPopup({ reminder, onDismiss, onSnooze }: ReminderPopupPr
           ? reminder.days.map((d) => WEEK_SHORT[d]).join(" · ")
           : "Weekly";
 
+  const videoUrl = reminder.videoUrl?.trim();
+  const ytId = videoUrl ? extractYoutubeId(videoUrl) : null;
+
   return (
     <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/80 backdrop-blur-sm">
       <div className="mx-4 w-full max-w-md rounded-2xl border border-primary/30 bg-card p-8 text-center shadow-2xl animate-in fade-in zoom-in-95 duration-300">
@@ -48,6 +79,21 @@ export function ReminderPopup({ reminder, onDismiss, onSnooze }: ReminderPopupPr
           <h2 className="text-2xl font-bold">{reminder.title}</h2>
           {reminder.note && (
             <p className="mt-2 text-sm text-muted-foreground">{reminder.note}</p>
+          )}
+          {videoUrl && (
+            <div className="mt-4">
+              <Button
+                onClick={() => openVideo(videoUrl)}
+                className="w-full gap-2 bg-red-600 hover:bg-red-700 text-white"
+                size="lg"
+              >
+                {ytId ? <PlayCircle className="h-5 w-5" /> : <ExternalLink className="h-5 w-5" />}
+                Watch video
+              </Button>
+              {reminder.videoTitle && (
+                <p className="mt-1 text-xs text-muted-foreground truncate">{reminder.videoTitle}</p>
+              )}
+            </div>
           )}
         </div>
 

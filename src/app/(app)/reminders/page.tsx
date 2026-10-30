@@ -9,8 +9,10 @@ import { useToast } from "@/components/ui/toast";
 import {
   Bell,
   BellOff,
+  ExternalLink,
   Plus,
   Trash2,
+  Youtube,
 } from "lucide-react";
 import type { Reminder, ReminderMode, ReminderSound } from "@/features/reminders/types";
 import {
@@ -68,6 +70,8 @@ export default function RemindersPage() {
   const [days, setDays] = useState<number[]>([1, 3]);
   const [sound, setSound] = useState<ReminderSound>("chime");
   const [voice, setVoice] = useState(true);
+  const [videoUrl, setVideoUrl] = useState("");
+  const [videoTitle, setVideoTitle] = useState("");
   const [library, setLibrary] = useState<CustomSoundMeta[]>([]);
 
   useEffect(() => {
@@ -114,12 +118,16 @@ export default function RemindersPage() {
         time,
         sound,
         tts: voice,
+        videoUrl,
+        videoTitle,
       }),
       ...reminders,
     ];
     persist(next);
     setTitle("");
     setNote("");
+    setVideoUrl("");
+    setVideoTitle("");
     showToast(`Reminder saved · ${time} · ${repeatLabel(next[0])}`, "success");
   };
 
@@ -188,6 +196,27 @@ export default function RemindersPage() {
               value={note}
               onChange={(e) => setNote(e.target.value)}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="reminder-video">YouTube / Video link (optional)</Label>
+            <Input
+              id="reminder-video"
+              placeholder="https://youtu.be/... or https://youtube.com/watch?v=..."
+              value={videoUrl}
+              onChange={(e) => setVideoUrl(e.target.value)}
+            />
+            {videoUrl.trim() && (
+              <Input
+                placeholder="Video title (shown on popup)"
+                value={videoTitle}
+                onChange={(e) => setVideoTitle(e.target.value)}
+              />
+            )}
+            <p className="text-xs text-muted-foreground flex items-center gap-1">
+              <Youtube className="h-3 w-3" />
+              Adds a &quot;Watch video&quot; button to the reminder popup.
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -322,6 +351,17 @@ export default function RemindersPage() {
                   </p>
                   {r.note && (
                     <p className="mt-0.5 truncate text-xs text-muted-foreground/80">{r.note}</p>
+                  )}
+                  {r.videoUrl && (
+                    <a
+                      href={r.videoUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-0.5 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      {r.videoTitle || "Watch video"}
+                    </a>
                   )}
                 </div>
 

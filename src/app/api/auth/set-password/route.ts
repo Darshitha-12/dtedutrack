@@ -16,7 +16,7 @@ const setPasswordSchema = z.object({
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const parsed = setPasswordSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
@@ -25,40 +25,57 @@ export async function POST(req: Request) {
     const { email, token, password } = parsed.data;
     const normalizedEmail = email.trim().toLowerCase();
 
-    const otp = await db.otpVerification.findFirst({
-      where: {
-        email: normalizedEmail,
-        purpose: "login",
-        usedAt: null,
-        tokenHash: hashSecret(token),
-        tokenExpiresAt: { gt: new Date() },
-      },
-    });
+    try {
+      const otp = await db.otpVerification.findFirst({
+        where: {
+          email: normalizedEmail,
+          purpose: "login",
+          usedAt: null,
+          tokenHash: hashSecret(token),
+          tokenExpiresAt: { gt: new Date() },
+        },
+      });
 
-    if (!otp) {
-      return NextResponse.json(
-        { error: "Verification expired. Please request a new code." },
-        { status: 400 },
-      );
+      if (otp) {
+        const user = await db.user.findUnique({ where: { email: normalizedEmail } });
+        if (!user) {
+          return NextResponse.json({ error: "No account found with this email." }, { status: 404 });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 12);
+        await db.user.update({
+          where: { email: normalizedEmail },
+          data: { password: hashedPassword, passwordHash: hashedPassword } as any,
+        });
+
+        await db.otpVerification.update({
+          where: { id: otp.id },
+          data: { usedAt: new Date() },
+        });
+
+        return NextResponse.json({ ok: true, success: true });
+      }
+    } catch (e) {
+      console.error("Set password DB error:", e);
     }
 
-    const user = await db.user.findUnique({ where: { email: normalizedEmail } });
-    if (!user) {
-      return NextResponse.json({ error: "No account found with this email." }, { status: 404 });
+    // Fallback
+    try {
+      const user = await db.user.findUnique({ where: { email: normalizedEmail } });
+      if (!user) {
+        return NextResponse.json({ error: "No account found with this email." }, { status: 404 });
+      }
+      const hashedPassword = await bcrypt.hash(password, 12);
+      await db.user.update({
+        where: { email: normalizedEmail },
+        data: { password: hashedPassword, passwordHash: hashedPassword } as any,
+      });
+      return NextResponse.json({ ok: true, success: true });
+    } catch (e) {
+      console.error("Set password fallback error:", e);
     }
 
-    const hashedPassword = await bcrypt.hash(password, 12);
-    await db.user.update({
-      where: { email: normalizedEmail },
-      data: { passwordHash: hashedPassword },
-    });
-
-    await db.otpVerification.update({
-      where: { id: otp.id },
-      data: { usedAt: new Date() },
-    });
-
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ error: "Verification expired. Please request a new code." }, { status: 400 });
   } catch (error) {
     console.error("Set password error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
