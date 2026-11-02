@@ -6,17 +6,17 @@ import { hashSecret } from "@/lib/otp";
 
 // Provide a fallback secret to avoid "Configuration" errors in environments where env vars aren't set
 const AUTH_SECRET_FALLBACK = "biopulse-dev-fallback-secret-please-change-on-production-1234567890abcdef";
+const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || AUTH_SECRET_FALLBACK;
 
 // Ensure secret is always set
-if (!process.env.AUTH_SECRET && !process.env.NEXTAUTH_SECRET) {
-  process.env.AUTH_SECRET = AUTH_SECRET_FALLBACK;
-}
+process.env.AUTH_SECRET = secret;
+process.env.NEXTAUTH_SECRET = secret;
 if (!process.env.NEXTAUTH_URL) {
   process.env.NEXTAUTH_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://biopulse-study.netlify.app";
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? AUTH_SECRET_FALLBACK,
+  secret,
   trustHost: true,
   providers: [
     CredentialsProvider({
