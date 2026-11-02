@@ -11,6 +11,9 @@ const AUTH_SECRET_FALLBACK = "biopulse-dev-fallback-secret-please-change-on-prod
 if (!process.env.AUTH_SECRET && !process.env.NEXTAUTH_SECRET) {
   process.env.AUTH_SECRET = AUTH_SECRET_FALLBACK;
 }
+if (!process.env.NEXTAUTH_URL) {
+  process.env.NEXTAUTH_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://biopulse-study.netlify.app";
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? AUTH_SECRET_FALLBACK,
