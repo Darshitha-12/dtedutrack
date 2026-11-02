@@ -20,6 +20,11 @@ const CHAT_CORS = [
 
 const nextConfig = {
   reactStrictMode: true,
+  env: {
+    AUTH_SECRET: process.env.AUTH_SECRET || "biopulse-dev-fallback-secret-please-change-on-production-1234567890abcdef",
+    NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "biopulse-dev-fallback-secret-please-change-on-production-1234567890abcdef",
+    NEXTAUTH_URL: process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://biopulse-study.netlify.app",
+  },
   ...(offline
     ? {
         output: "export",
