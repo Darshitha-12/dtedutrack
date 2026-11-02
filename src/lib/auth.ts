@@ -7,6 +7,11 @@ import { hashSecret } from "@/lib/otp";
 // Provide a fallback secret to avoid "Configuration" errors in environments where env vars aren't set
 const AUTH_SECRET_FALLBACK = "biopulse-dev-fallback-secret-please-change-on-production-1234567890abcdef";
 
+// Ensure secret is always set
+if (!process.env.AUTH_SECRET && !process.env.NEXTAUTH_SECRET) {
+  process.env.AUTH_SECRET = AUTH_SECRET_FALLBACK;
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? AUTH_SECRET_FALLBACK,
   trustHost: true,
