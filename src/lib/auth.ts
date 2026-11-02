@@ -15,9 +15,10 @@ if (!process.env.NEXTAUTH_URL) {
   process.env.NEXTAUTH_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://biopulse-study.netlify.app";
 }
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+const nextAuthConfig = NextAuth({
   secret,
   trustHost: true,
+  debug: false,
   providers: [
     CredentialsProvider({
       name: "credentials",
@@ -137,3 +138,5 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
 });
+
+export const { handlers, auth, signIn, signOut } = nextAuthConfig;
