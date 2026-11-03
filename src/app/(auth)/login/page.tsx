@@ -53,15 +53,19 @@ function LoginForm() {
         }
       }
 
-      const r = await credentialsSignIn(email.trim(), password, callbackUrl);
-      if (!r.ok) {
-        const msg = r.error || "Sign-in failed. Please try again.";
-        // If it's a config error, try to give a more helpful message
-        if (msg.toLowerCase().includes("configuration")) {
-          setError("Sign-in failed: Configuration. Please refresh the page or try again.");
-        } else {
-          setError(msg);
+      try {
+        const r = await credentialsSignIn(email.trim(), password, callbackUrl);
+        if (!r.ok) {
+          const msg = r.error || "Sign-in failed. Please try again.";
+          if (msg.toLowerCase().includes("configuration")) {
+            setError("Sign-in failed: Configuration. Please refresh and try again.");
+          } else {
+            setError(msg);
+          }
+          return;
         }
+      } catch (err) {
+        setError("Sign-in failed. Please try again.");
         return;
       }
       // Refresh the cached session so the sidebar/topbar show the identity
