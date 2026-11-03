@@ -50,11 +50,37 @@ export async function credentialsSignIn(
     }
 
     if (!res.ok) {
-      return { ok: false, error: data.error || `Sign-in failed (HTTP ${res.status}). Please try again.` };
+      const errMsg = data.error || `Sign-in failed (HTTP ${res.status}). Please try again.`;
+      if (errMsg.toLowerCase().includes("configuration")) {
+        // Try direct login as fallback
+        try {
+          const direct = await fetch("/api/auth/direct-login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password: secret }),
+          });
+          if (direct.ok) {
+            return { ok: true, url: callbackUrl };
+          }
+        } catch {}
+      }
+      return { ok: false, error: errMsg };
     }
     if (data.url) {
       const errorParam = new URL(data.url, window.location.origin).searchParams.get("error");
       if (errorParam) {
+        if (errorParam.toLowerCase().includes("configuration")) {
+          try {
+            const direct = await fetch("/api/auth/direct-login", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email, password: secret }),
+            });
+            if (direct.ok) {
+              return { ok: true, url: callbackUrl };
+            }
+          } catch {}
+        }
         return { ok: false, error: `Sign-in failed: ${errorParam}. Please try again.` };
       }
       return { ok: true, url: data.url };
