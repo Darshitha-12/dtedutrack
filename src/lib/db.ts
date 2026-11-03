@@ -36,7 +36,7 @@ function createClient() {
     connectionTimeoutMillis: 20_000,
     idleTimeoutMillis: 30_000,
     ssl:
-      base && /sslmode|neon\.tech|pooler/.test(base)
+      base && /sslmode|neon\.tech|pooler|supabase\.(co|com)/.test(base)
         ? { rejectUnauthorized: false }
         : undefined,
   });
