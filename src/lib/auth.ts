@@ -152,6 +152,20 @@ function createAuth() {
   }
 }
 
-const nextAuthConfig = createAuth();
+let nextAuthConfig: any;
+try {
+  nextAuthConfig = createAuth();
+} catch (e) {
+  console.error("Auth module init error:", e);
+  const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "biopulse-dev-fallback-secret-please-change-on-production-1234567890abcdef";
+  process.env.AUTH_SECRET = secret;
+  process.env.NEXTAUTH_SECRET = secret;
+  nextAuthConfig = NextAuth({
+    secret,
+    trustHost: true,
+    providers: [],
+    pages: { signIn: "/login" },
+  });
+}
 
 export const { handlers, auth, signIn, signOut } = nextAuthConfig;
