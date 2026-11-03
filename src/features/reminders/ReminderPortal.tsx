@@ -9,6 +9,7 @@ import {
 import { notificationService } from "@/services/notification";
 import { ReminderPopup } from "@/features/reminders/components/ReminderPopup";
 import {
+  advanceRevision,
   loadReminders,
   normalizeReminderSound,
   reminderMatches,
@@ -135,6 +136,22 @@ export function ReminderPortal() {
     [active, dismiss, fire],
   );
 
+  /**
+   * Revision reminder answered with "I revised this": move the plan to its next
+   * interval (fresh storage read, because `active` is a snapshot from firing time).
+   */
+  const markRevised = useCallback(() => {
+    const current = active;
+    if (!current) return;
+    const next = loadReminders().map((r) =>
+      r.id === current.id ? advanceRevision(r) : r,
+    );
+    remindersRef.current = next;
+    saveReminders(next);
+    syncNative(next);
+    dismiss();
+  }, [active, dismiss]);
+
   useEffect(() => {
     refresh();
     syncNative(remindersRef.current);
@@ -206,5 +223,12 @@ export function ReminderPortal() {
   }, [refresh, fire, checkDue, stopVibration, stopSpeech]);
 
   if (!active) return null;
-  return <ReminderPopup reminder={active} onDismiss={dismiss} onSnooze={snooze} />;
+  return (
+    <ReminderPopup
+      reminder={active}
+      onDismiss={dismiss}
+      onSnooze={snooze}
+      onRevised={active.kind === "revision" ? markRevised : undefined}
+    />
+  );
 }

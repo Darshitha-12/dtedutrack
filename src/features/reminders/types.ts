@@ -5,6 +5,35 @@ export type ReminderMode = "once" | "daily" | "weekly";
 /** A built-in tone, or `custom:<soundId>` from the user's own audio library. */
 export type ReminderSound = "chime" | "digital" | "bio" | `custom:${string}`;
 
+export type ReminderKind = "standard" | "revision";
+
+/** Spaced-repetition state: which revision of the plan this reminder waits for. */
+export interface RevisionPlan {
+  /** Day offsets from the study day, e.g. [1, 3, 7, 21]. */
+  gaps: number[];
+  /** Index in `gaps` of the revision this reminder is currently waiting for. */
+  stage: number;
+  /** The day the topic was studied (YYYY-MM-DD). */
+  startedOn: string;
+}
+
+export interface RevisionPreset {
+  id: string;
+  label: string;
+  hint: string;
+  gaps: number[];
+}
+
+/**
+ * Revision rhythm right before the memory fades (the "අමතක නොවෙන්න" method):
+ * 1 → 3 → 7 → 21 days keeps a term's work alive without cramming.
+ */
+export const REVISION_PRESETS: RevisionPreset[] = [
+  { id: "classic", label: "1 · 3 · 7 · 21", hint: "Classic forgetting curve", gaps: [1, 3, 7, 21] },
+  { id: "exam", label: "1 · 2 · 4 · 8 · 16", hint: "Exam sprint (doubles each time)", gaps: [1, 2, 4, 8, 16] },
+  { id: "light", label: "1 · 7 · 30", hint: "Light maintenance", gaps: [1, 7, 30] },
+];
+
 export interface Reminder {
   id: string;
   title: string;
@@ -23,6 +52,9 @@ export interface Reminder {
   videoUrl?: string;
   /** Optional video title cached for display. */
   videoTitle?: string;
+  /** "revision" reminders walk a spaced-repetition plan and reschedule themselves. */
+  kind?: ReminderKind;
+  revision?: RevisionPlan;
 }
 
 export interface CreateReminderInput {
@@ -36,6 +68,8 @@ export interface CreateReminderInput {
   tts?: boolean;
   videoUrl?: string;
   videoTitle?: string;
+  kind?: ReminderKind;
+  revision?: RevisionPlan;
 }
 
 export const REMINDER_DAYS = [
@@ -87,6 +121,8 @@ export function createReminder(input: CreateReminderInput): Reminder {
     createdAt: Date.now(),
     videoUrl: input.videoUrl?.trim() || undefined,
     videoTitle: input.videoTitle?.trim() || undefined,
+    kind: input.kind,
+    revision: input.revision,
   };
 }
 
@@ -162,4 +198,90 @@ export function saveReminders(reminders: Reminder[]): void {
   } catch {
     /* storage full or blocked */
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Spaced-repetition revision plans
+ * ------------------------------------------------------------------ */
+
+/** "2026-11-10" + 3 → "2026-11-13", using local calendar days. */
+export function addDaysToKey(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const now = new Date();
+  const dt = new Date(y || now.getFullYear(), (m || 1) - 1, d || 1);
+  dt.setDate(dt.getDate() + days);
+  return toDateKey(dt);
+}
+
+/** "2026-11-10" → "Mon, 10 Nov" for plan previews. */
+export function prettyDateKey(dateKey: string): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  if (!y || !m || !d) return dateKey;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+}
+
+/**
+ * One reminder that walks the whole revision curve instead of four separate rows:
+ * it fires on the next revision day, and "I revised this" moves it to the next gap.
+ */
+export function createRevisionReminder(input: {
+  title: string;
+  note?: string;
+  gaps: number[];
+  time: string;
+  startDate?: string;
+  sound?: ReminderSound;
+  tts?: boolean;
+  videoUrl?: string;
+  videoTitle?: string;
+}): Reminder {
+  const gaps = input.gaps.length ? input.gaps : [1, 3, 7, 21];
+  const startedOn = input.startDate || toDateKey(new Date());
+  const base = createReminder({
+    title: input.title,
+    note: input.note,
+    mode: "once",
+    date: addDaysToKey(startedOn, gaps[0]),
+    time: input.time,
+    sound: input.sound,
+    tts: input.tts,
+    videoUrl: input.videoUrl,
+    videoTitle: input.videoTitle,
+  });
+  return { ...base, kind: "revision", revision: { gaps, stage: 0, startedOn } };
+}
+
+/** Move the plan one step forward after the user confirms they revised the topic. */
+export function advanceRevision(reminder: Reminder, now: Date = new Date()): Reminder {
+  const plan = reminder.revision;
+  if (!plan) return { ...reminder, lastFiredKey: "" };
+
+  const nextStage = plan.stage + 1;
+  if (nextStage >= plan.gaps.length) {
+    return { ...reminder, revision: { ...plan, stage: nextStage }, enabled: false, lastFiredKey: "" };
+  }
+
+  // Spacing counts from the day the revision actually happened, so a late revision
+  // still gets its full next interval instead of firing again straight away.
+  const delta = Math.max(1, plan.gaps[nextStage] - plan.gaps[plan.stage]);
+  return {
+    ...reminder,
+    date: addDaysToKey(toDateKey(now), delta),
+    revision: { ...plan, stage: nextStage },
+    enabled: true,
+    lastFiredKey: "",
+  };
+}
+
+/** "Revision 2 of 4 · 3-day" — the chip shown on the popup and the list. */
+export function revisionSummary(reminder: Reminder): string {
+  const plan = reminder.revision;
+  if (!plan) return "";
+  const total = plan.gaps.length;
+  if (plan.stage >= total) return `All ${total} revisions done`;
+  return `Revision ${plan.stage + 1} of ${total} · ${plan.gaps[plan.stage]}-day`;
 }
