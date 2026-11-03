@@ -8,6 +8,19 @@ export type CredentialsInput =
   | { otpToken: string }
   | { password: string };
 
+// NextAuth's error codes are internal names (CredentialsSignin, Configuration, …).
+// Showing them verbatim is what made a wrong password read as
+// "Sign-in failed: CredentialsSignin. Please try again."
+function friendlyAuthError(code: string): string {
+  const c = code.toLowerCase();
+  if (c.includes("configuration")) {
+    return "Sign-in failed: the server's database is unreachable. Please try again shortly.";
+  }
+  if (c.includes("credentials")) return "Incorrect email or password.";
+  if (c.includes("csrf")) return "Your sign-in session expired. Please refresh the page and try again.";
+  return `Sign-in failed: ${code}. Please try again.`;
+}
+
 export async function credentialsSignIn(
   email: string,
   secret: string,
@@ -81,7 +94,7 @@ export async function credentialsSignIn(
             }
           } catch {}
         }
-        return { ok: false, error: `Sign-in failed: ${errorParam}. Please try again.` };
+        return { ok: false, error: friendlyAuthError(errorParam) };
       }
       return { ok: true, url: data.url };
     }

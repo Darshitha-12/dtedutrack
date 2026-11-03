@@ -53,12 +53,15 @@ function LoginForm() {
         }
       }
 
+      let r: Awaited<ReturnType<typeof credentialsSignIn>>;
       try {
-        const r = await credentialsSignIn(email.trim(), password, callbackUrl);
+        r = await credentialsSignIn(email.trim(), password, callbackUrl);
         if (!r.ok) {
           const msg = r.error || "Sign-in failed. Please try again.";
           if (msg.toLowerCase().includes("configuration")) {
-            setError("Sign-in failed: Configuration. Please refresh and try again.");
+            setError(
+              "Sign-in failed: the server's sign-in is misconfigured (its database is unreachable). Please try again shortly.",
+            );
           } else {
             setError(msg);
           }

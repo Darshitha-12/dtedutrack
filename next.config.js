@@ -20,11 +20,10 @@ const CHAT_CORS = [
 
 const nextConfig = {
   reactStrictMode: true,
-  env: {
-    AUTH_SECRET: process.env.AUTH_SECRET || "biopulse-dev-fallback-secret-please-change-on-production-1234567890abcdef",
-    NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "biopulse-dev-fallback-secret-please-change-on-production-1234567890abcdef",
-    NEXTAUTH_URL: process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://biopulse-study.netlify.app",
-  },
+  // Server-only secrets (AUTH_SECRET, NEXTAUTH_SECRET, NEXTAUTH_URL) must NOT live in
+  // `env:`: Next inlines those into both bundles, which both leaks the auth secret to the
+  // browser and rewrites runtime writes such as `process.env.AUTH_SECRET = …` into illegal
+  // assignments (`"…".AUTH_SECRET = …` → SyntaxError, which killed the whole auth module).
   ...(offline
     ? {
         output: "export",

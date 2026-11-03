@@ -6,15 +6,10 @@ import { hashSecret } from "@/lib/otp";
 
 // Provide a fallback secret to avoid "Configuration" errors in environments where env vars aren't set
 const AUTH_SECRET_FALLBACK = "biopulse-dev-fallback-secret-please-change-on-production-1234567890abcdef";
-const AUTH_SECRET_FALLBACK = "biopulse-dev-fallback-secret-please-change-on-production-1234567890abcdef";
 const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || AUTH_SECRET_FALLBACK;
 
-// Ensure secret is always set
-process.env.AUTH_SECRET = secret;
-process.env.NEXTAUTH_SECRET = secret;
-if (!process.env.NEXTAUTH_URL) {
-  process.env.NEXTAUTH_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://biopulse-study.netlify.app";
-}
+// The secret is passed to NextAuth below; never write it back into process.env here.
+// next.config's `env` inlining turns such a write into an illegal assignment to a string.
 
 function createAuth() {
   try {
@@ -90,7 +85,6 @@ function createAuth() {
         }),
       ],
       session: { strategy: "jwt", maxAge: 60 * 60 * 24 * 30 },
-      trustHost: true,
       pages: {
         signIn: "/login",
       },

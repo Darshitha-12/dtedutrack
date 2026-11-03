@@ -45,7 +45,10 @@ export async function POST(req: Request) {
         const hashedPassword = await bcrypt.hash(password, 12);
         await db.user.update({
           where: { email: normalizedEmail },
-          data: { password: hashedPassword, passwordHash: hashedPassword } as any,
+          // Only `passwordHash` exists on the model. Writing a `password` key made Prisma
+          // throw at runtime, which the catch below swallowed while still answering
+          // ok:true — so the reset looked successful and the old password kept working.
+          data: { passwordHash: hashedPassword },
         });
 
         await db.otpVerification.update({
@@ -70,7 +73,6 @@ export async function POST(req: Request) {
             email: normalizedEmail,
             name: normalizedEmail.split("@")[0],
             displayName: normalizedEmail.split("@")[0],
-            password: hashedPassword,
             passwordHash: hashedPassword,
             emailVerified: new Date(),
             studentProfile: {
@@ -95,14 +97,21 @@ export async function POST(req: Request) {
       const hashedPassword = await bcrypt.hash(password, 12);
       await db.user.update({
         where: { email: normalizedEmail },
-        data: { password: hashedPassword, passwordHash: hashedPassword } as any,
+        data: { passwordHash: hashedPassword },
       });
       return NextResponse.json({ ok: true, success: true });
     } catch (e) {
       console.error("Set password fallback error:", e);
+      return NextResponse.json(
+        { error: "Could not update the password. Please try again." },
+        { status: 500 },
+      );
     }
 
-    return NextResponse.json({ ok: true, success: true });
+    return NextResponse.json(
+      { error: "Could not update the password. Please try again." },
+      { status: 500 },
+    );
   } catch (error) {
     console.error("Set password error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
