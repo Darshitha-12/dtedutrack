@@ -18,6 +18,11 @@ export async function GET() {
       (error as { code?: string })?.code ||
       (error as { constructor?: { name?: string } })?.constructor?.name ||
       "unknown";
-    return NextResponse.json({ ok: false, code: String(code) }, { status: 503, headers });
+    // Prisma wraps driver failures in P2010 and keeps the socket error on
+    // `cause`; the code alone (ENOTFOUND, 28P01, 3D000 …) says whether it is
+    // DNS, credentials or a missing database, and carries no secrets.
+    const cause = error as { cause?: { code?: string; errno?: string } };
+    const causeCode = cause?.cause?.code || cause?.cause?.errno || null;
+    return NextResponse.json({ ok: false, code: String(code), causeCode }, { status: 503, headers });
   }
 }
