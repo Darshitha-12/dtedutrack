@@ -16,7 +16,7 @@ import {
   buildGeminiRequestBody,
   extractGeminiText,
   geminiEndpoint,
-  defaultCyberDTModel,
+  cyberDTModelChain,
 } from "@/features/ai/cyber-dt-shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -148,7 +148,7 @@ export function CyberDTChat() {
     //    language, with complete exam-style answers.
     let aiText: string | null = null;
     let emoji = "✨";
-    let serverHasNoKey = false;
+    let serverFailed = false;
     try {
       const res = await fetch("/api/cyber-dt", {
         method: "POST",
@@ -160,37 +160,48 @@ export function CyberDTChat() {
         if (data && data.ok && typeof data.text === "string" && data.text.trim()) {
           aiText = data.text.trim();
           emoji = "✨";
-        } else if (data && data.error === "no_api_key") {
-          serverHasNoKey = true;
+        } else if (data && data.fallback) {
+          // No server key, rate-limited key or Gemini outage.
+          serverFailed = true;
         }
+      } else {
+        serverFailed = true;
       }
     } catch {
-      /* offline or route error — try the local key, then the offline engine */
+      // Offline or route error — try the local key, then the offline engine.
+      serverFailed = true;
     }
 
-    // 2) If the server has no key, use the user's own pasted key directly
-    //    from the browser (personal free key from Google AI Studio).
+    // 2) If the server couldn't answer, use the user's own pasted key
+    //    directly from the browser (personal free key from Google AI Studio,
+    //    which has its own separate quota).
     const storedKey = getStoredGeminiKey();
-    if (!aiText && serverHasNoKey && storedKey) {
-      try {
-        const res = await fetch(geminiEndpoint(defaultCyberDTModel()), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": storedKey,
-          },
-          body: JSON.stringify(buildGeminiRequestBody(history, text)),
-        });
-        if (res.ok) {
-          const data = await res.json().catch(() => null);
-          const out = extractGeminiText(data);
-          if (out) {
-            aiText = out;
-            emoji = "✨";
+    if (!aiText && serverFailed && storedKey) {
+      for (const model of cyberDTModelChain()) {
+        try {
+          const res = await fetch(geminiEndpoint(model), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": storedKey,
+            },
+            body: JSON.stringify(buildGeminiRequestBody(history, text)),
+            signal: AbortSignal.timeout(20_000),
+          });
+          if (res.ok) {
+            const data = await res.json().catch(() => null);
+            const out = extractGeminiText(data);
+            if (out) {
+              aiText = out;
+              emoji = "✨";
+              break;
+            }
           }
+          // 429/503 → try the next model; other errors → stop the loop.
+          if (res.status !== 429 && res.status !== 503) break;
+        } catch {
+          /* try the next model, then the offline knowledge base */
         }
-      } catch {
-        /* fall through to the offline knowledge base */
       }
     }
 

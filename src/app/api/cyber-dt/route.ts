@@ -3,7 +3,7 @@ import {
   buildGeminiRequestBody,
   extractGeminiText,
   geminiEndpoint,
-  defaultCyberDTModel,
+  cyberDTModelChain,
 } from "@/features/ai/cyber-dt-shared";
 
 /**
@@ -47,45 +47,66 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "no_api_key", fallback: true });
     }
 
-    const model = process.env.GEMINI_MODEL || defaultCyberDTModel();
+    const requestBody = JSON.stringify(buildGeminiRequestBody(history, message));
 
-    // Gemini's free tier sometimes returns 503 during demand spikes; retry
-    // once after a short pause so students rarely see the offline fallback.
-    // Each attempt is capped at 25s so the retry can never push the total
-    // past Netlify's 60s function execution limit.
-    const callGemini = async () =>
-      fetch(geminiEndpoint(model), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify(buildGeminiRequestBody(history, message)),
-        signal: AbortSignal.timeout(25_000),
-      });
+    // Walk the model chain: free-tier rate limits are per model, so when the
+    // primary model is busy (503) or out of quota (429) the next one usually
+    // still answers. Attempts are capped so the total stays well under
+    // Netlify's 60-second function execution limit.
+    const models = cyberDTModelChain();
+    let lastStatus = 0;
+    let lastDetail = "";
 
-    let res = await callGemini();
-    if (res.status === 503 || res.status === 429) {
-      await new Promise((resolve) => setTimeout(resolve, 2500));
-      res = await callGemini();
+    for (let i = 0; i < models.length; i++) {
+      const model = models[i];
+      let res: Response;
+      try {
+        res = await fetch(geminiEndpoint(model), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: requestBody,
+          signal: AbortSignal.timeout(18_000),
+        });
+      } catch (e: unknown) {
+        // Network error / abort on this model — try the next one.
+        lastStatus = 0;
+        lastDetail = e instanceof Error ? e.message.slice(0, 200) : String(e);
+        continue;
+      }
+
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        const text = extractGeminiText(data);
+        if (text) {
+          return NextResponse.json({ ok: true, text });
+        }
+        // Empty answer from this model — try the next one.
+        lastStatus = 0;
+        lastDetail = "empty_response";
+        continue;
+      }
+
+      lastStatus = res.status;
+      lastDetail = (await res.text().catch(() => "")).slice(0, 300);
+
+      // Rate limit (429) or overload (503) → try the next model in the chain.
+      if (res.status === 429 || res.status === 503) {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        continue;
+      }
+
+      // Any other error (bad request, invalid key…) — no point retrying
+      // with other models; report it and let the chat page fall back.
+      break;
     }
 
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      return NextResponse.json(
-        { ok: false, error: "api_error", status: res.status, detail: detail.slice(0, 300), fallback: true },
-        { status: 200 },
-      );
-    }
-
-    const data = await res.json().catch(() => null);
-    const text = extractGeminiText(data);
-
-    if (!text) {
-      return NextResponse.json({ ok: false, error: "empty_response", fallback: true });
-    }
-
-    return NextResponse.json({ ok: true, text });
+    return NextResponse.json(
+      { ok: false, error: "api_error", status: lastStatus, detail: lastDetail, fallback: true },
+      { status: 200 },
+    );
   } catch (e: unknown) {
     const detail = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ ok: false, error: "exception", detail: detail.slice(0, 200), fallback: true });

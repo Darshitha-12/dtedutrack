@@ -37,6 +37,17 @@ export function defaultCyberDTModel(): string {
   return "gemini-2.5-flash";
 }
 
+/**
+ * The model chain used for answers: the primary first, then fallbacks.
+ * Free-tier rate limits are per model per project, so when the primary is
+ * busy (503) or out of quota (429) the next model usually still works.
+ */
+export function cyberDTModelChain(): string[] {
+  const primary = process.env.GEMINI_MODEL || defaultCyberDTModel();
+  const fallbacks = ["gemini-2.0-flash", "gemini-2.5-flash-lite"];
+  return [primary, ...fallbacks.filter((m) => m !== primary)];
+}
+
 /** Builds the Gemini generateContent request body from the chat history. */
 export function buildGeminiRequestBody(history: CyberDTChatTurn[], message: string) {
   const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
