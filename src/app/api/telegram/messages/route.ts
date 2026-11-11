@@ -27,14 +27,14 @@ export async function GET(req: Request) {
     });
 
     return NextResponse.json({
-      messages: messages.map((message: { id: string; userId: string; userName: string; userImage: string | null; room: string; text: string; createdAt: string }) => ({
+      messages: messages.map((message: { id: string; userId: string; user: { name: string | null; image: string | null }; room: string; text: string; createdAt: Date }) => ({
         id: message.id,
         userId: message.userId,
-        userName: message.userName,
-        userImage: message.userImage,
+        userName: message.user?.name || "User",
+        userImage: message.user?.image || null,
         room: message.room,
         text: message.text,
-        createdAt: message.createdAt,
+        createdAt: message.createdAt ? message.createdAt.toISOString() : new Date().toISOString(),
       })),
     });
   } catch (error) {
