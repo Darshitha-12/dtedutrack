@@ -486,6 +486,27 @@ export function CyberDTChat() {
   // --- Quick actions -------------------------------------------------------
 
   const replyLanguage = locale === "si" ? "Sinhala" : "English";
+  const generateNote = async (topic: string) => {
+    setNoteTopic(topic);
+    setNoteLanguage(replyLanguage);
+    setNoteGenerated(null);
+    setShowNotePanel(true);
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic, language: replyLanguage }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to generate note");
+      }
+      const note = await res.json();
+      setNoteGenerated(note);
+    } catch (err) {
+      console.error("Note generation error:", err);
+    }
+  };
 
   const openPlanPanel = () => {
     setShowKeyPanel(false);
@@ -574,6 +595,18 @@ export function CyberDTChat() {
   };
 
   const lastAiId = [...messages].reverse().find((m) => m.role === "ai")?.id;
+  // Note generation state
+  const [showNotePanel, setShowNotePanel] = useState(false);
+  const [noteTopic, setNoteTopic] = useState("");
+  const [noteLanguage, setNoteLanguage] = useState<"English" | "Sinhala">("English");
+  const [noteGenerated, setNoteGenerated] = useState<Note | null>(null);
+
+  interface Note {
+    id: string;
+    title: string;
+    content: string;
+    createdAt: string;
+  }
 
   return (
     <div className="mx-auto flex h-[calc(100dvh-8rem)] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-cyan-500/30 bg-[#0b1220]/90 shadow-[0_0_40px_rgba(34,211,238,0.15)] backdrop-blur-xl">
@@ -759,6 +792,31 @@ export function CyberDTChat() {
         </div>
       )}
 
+
+      {/* Note generation panel */}
+      {showNotePanel && (
+        <div className="space-y-4 border-b border-cyan-500/20 bg-violet-500/5 px-4 py-3">
+          <p className="text-2xs font-semibold text-violet-200">{t("cyberdt.noteTitle")}</p>
+          <p className="text-2xs text-cyan-300/80">{t("cyberdt.noteSubtitle")}</p>
+          <div className="space-y-2 max-w-full">
+            <p className="text-[0.85rem] text-cyan-400/60">{noteTopic || t("cyberdt.generateNotePrompt")}</p>
+            {noteGenerated && (
+              <pre className="rounded-xl border border-violet-400/30 bg-violet-500/10 p-3 text-sm text-violet-400 overflow-auto">{noteGenerated.content}</pre>
+            )}
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setShowNotePanel(false)}
+              className="rounded-xl border border-cyan-400/30 bg-transparent text-cyan-300 hover:bg-cyan-500/10"
+            >
+              {t("cyberdt.close")}
+            </Button>
+          </div>
+        </div>
+      )}
       {/* Messages */}
       <div ref={listRef} className="scrollbar-slim flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {messages.map((m) =>
@@ -866,6 +924,14 @@ export function CyberDTChat() {
           className="flex shrink-0 items-center gap-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 px-3 py-1 text-2xs font-semibold text-fuchsia-200 transition hover:border-fuchsia-300 hover:bg-fuchsia-500/20 disabled:opacity-50"
         >
           <Lightbulb className="h-3 w-3" /> {t("cyberdt.actionTips")}
+        </button>
+        <button
+          type="button"
+          onClick={() => generateNote(t("cyberdt.quickAsk"))}
+          disabled={isTyping}
+          className="flex shrink-0 items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 px-3 py-1 text-2xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50"
+        >
+          <Lightbulb className="h-3 w-3" /> {t("cyberdt.actionNote")}
         </button>
         <span className="mx-1 my-auto h-4 w-px shrink-0 bg-cyan-500/20" />
         {quickQuestions.map((q) => (
