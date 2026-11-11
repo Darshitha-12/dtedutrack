@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   buildGeminiRequestBody,
   extractGeminiText,
+  extractGeminiStreamDelta,
   geminiEndpoint,
+  geminiStreamEndpoint,
   cyberDTModelChain,
+  parseSSEBuffer,
 } from "@/features/ai/cyber-dt-shared";
 
 /**
@@ -14,6 +17,11 @@ import {
  * the route responds with { ok: false, fallback: true } and the chat page
  * falls back to its own options (a user-pasted key, or the built-in
  * offline knowledge base), so the feature always works.
+ *
+ * POST { message, history, stream }:
+ *   - stream: true → the answer is streamed back as server-sent events
+ *     (data: {"t":"...text delta..."}), so words appear while Gemini writes.
+ *     If streaming can't start, the JSON fallback shape is returned instead.
  *
  * Note: Netlify only passes env vars set in the dashboard (not netlify.toml
  * [build.environment]) to serverless functions at runtime.
@@ -31,11 +39,53 @@ export async function GET() {
   return NextResponse.json({ ok: true, serverKey: Boolean(apiKey) });
 }
 
+/**
+ * Streams a Gemini SSE response to the client as simple SSE events with
+ * just the text delta, so no Gemini-specific data leaks to the browser.
+ */
+function pipeGeminiSSE(geminiBody: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = geminiBody.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const { events, rest } = parseSSEBuffer(buffer);
+          buffer = rest;
+          for (const event of events) {
+            const delta = extractGeminiStreamDelta(event);
+            if (delta) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ t: delta })}\n\n`));
+            }
+          }
+        }
+        controller.close();
+      } catch (e) {
+        // Network drop mid-stream: deliver what we have and end cleanly.
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
+      }
+    },
+    cancel() {
+      geminiBody.cancel().catch(() => {});
+    },
+  });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const message = typeof body.message === "string" ? body.message.trim() : "";
     const history: ChatTurn[] = Array.isArray(body.history) ? body.history : [];
+    const wantStream = body.stream === true;
 
     if (!message) {
       return NextResponse.json({ ok: false, error: "empty_message", fallback: true }, { status: 400 });
@@ -59,16 +109,17 @@ export async function POST(req: NextRequest) {
 
     for (let i = 0; i < models.length; i++) {
       const model = models[i];
+      const endpoint = wantStream ? geminiStreamEndpoint(model) : geminiEndpoint(model);
       let res: Response;
       try {
-        res = await fetch(geminiEndpoint(model), {
+        res = await fetch(endpoint, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "x-goog-api-key": apiKey,
           },
           body: requestBody,
-          signal: AbortSignal.timeout(18_000),
+          signal: AbortSignal.timeout(wantStream ? 50_000 : 18_000),
         });
       } catch (e: unknown) {
         // Network error / abort on this model — try the next one.
@@ -78,6 +129,17 @@ export async function POST(req: NextRequest) {
       }
 
       if (res.ok) {
+        if (wantStream && res.body) {
+          // Stream the answer as SSE while Gemini writes it.
+          return new Response(pipeGeminiSSE(res.body), {
+            headers: {
+              "Content-Type": "text/event-stream; charset=utf-8",
+              "Cache-Control": "no-store, max-age=0",
+              "X-Accel-Buffering": "no",
+            },
+          });
+        }
+
         const data = await res.json().catch(() => null);
         const text = extractGeminiText(data);
         if (text) {
