@@ -87,7 +87,7 @@ const GEMINI_KEY_STORAGE = "cyberdt_gemini_key";
  * assets, so a relative fetch would hit the local origin and fail — the
  * offline build bakes NEXT_PUBLIC_SYNC_BASE (the deployed site) into the
  * bundle, and we then call the same route there cross-origin (it sends CORS
- * headers), so the APK also gets real streamed Gemini answers when online.
+ * headers), so the APK also gets real Gemini answers when online.
  */
 const CYBER_DT_API = (() => {
   const base = (process.env.NEXT_PUBLIC_SYNC_BASE || "").replace(/\/+$/, "");
@@ -104,6 +104,33 @@ function getStoredGeminiKey(): string {
 
 /** Maps one SSE event to its text delta. */
 type SSEEventMapper = (event: unknown) => string;
+
+/**
+ * Reveals a complete answer progressively, so it still feels like the AI is
+ * typing it live. The server route returns whole answers at once (Netlify
+ * cut long SSE streams mid-answer), and the browser-direct Gemini path
+ * still streams for real — this typewriter covers the JSON shape.
+ * Pressing Stop skips the animation and shows the full answer.
+ */
+async function typeOutAnswer(
+  full: string,
+  onDelta: (fullSoFar: string) => void,
+  signal?: AbortSignal | null,
+): Promise<void> {
+  if (full.length <= 480) {
+    onDelta(full);
+    return;
+  }
+  const CHUNK = 30; // characters per tick
+  const TICK = 12; // ms per tick — ~2,500 chars/s
+  let shown = 0;
+  while (shown < full.length && !signal?.aborted) {
+    shown = Math.min(shown + CHUNK, full.length);
+    onDelta(full.slice(0, shown));
+    if (shown < full.length) await new Promise((resolve) => setTimeout(resolve, TICK));
+  }
+  if (signal?.aborted) onDelta(full); // Stop pressed — reveal the rest at once.
+}
 
 /**
  * Reads a streaming (SSE) or JSON fetch response and returns the full text.
@@ -139,11 +166,13 @@ async function readAnswerStream(
     return acc.trim() ? acc : null;
   }
 
-  // Plain JSON response (non-streaming answer or fallback shape).
+  // Plain JSON response: the complete answer (typed out progressively so it
+  // still looks like the AI is writing it), or a fallback shape.
   const data = await res.json().catch(() => null);
   if (data && data.ok && typeof data.text === "string" && data.text.trim()) {
-    onDelta(data.text.trim());
-    return data.text.trim();
+    const full = data.text.trim();
+    await typeOutAnswer(full, onDelta, init.signal);
+    return full;
   }
   return null;
 }
@@ -309,8 +338,10 @@ export function CyberDTChat() {
       );
     };
 
-    // 1) The real AI — Gemini streamed through our own /api/cyber-dt route,
-    //    so the API key stays on the server. Words appear as they are written.
+    // 1) The real AI — Gemini through our own /api/cyber-dt route, so the
+    //    API key stays on the server. The route returns the complete answer
+    //    (Netlify cut long SSE streams mid-answer) and typeOutAnswer reveals
+    //    it progressively, so it still looks like live typing.
     let answer: string | null = null;
     let serverFailed = false;
     try {
@@ -319,7 +350,7 @@ export function CyberDTChat() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text, history, stream: true }),
+          body: JSON.stringify({ message: text, history }),
           signal: controller.signal,
         },
         (event) => {

@@ -2,11 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   buildGeminiRequestBody,
   extractGeminiText,
-  extractGeminiStreamDelta,
   geminiEndpoint,
-  geminiStreamEndpoint,
   cyberDTModelChain,
-  parseSSEBuffer,
 } from "@/features/ai/cyber-dt-shared";
 
 /**
@@ -18,10 +15,15 @@ import {
  * falls back to its own options (a user-pasted key, or the built-in
  * offline knowledge base), so the feature always works.
  *
- * POST { message, history, stream }:
- *   - stream: true → the answer is streamed back as server-sent events
- *     (data: {"t":"...text delta..."}), so words appear while Gemini writes.
- *     If streaming can't start, the JSON fallback shape is returned instead.
+ * POST { message, history } → { ok: true, text } with the COMPLETE answer.
+ *
+ * Why not server-sent events? Netlify's function runtime reliably cut our
+ * streamed responses a few seconds in — long answers arrived truncated
+ * mid-sentence on the live site even though the same request completed
+ * fine when called directly. Fully buffered JSON responses run for the
+ * 20–30 s a long study plan needs, so the route returns the whole answer
+ * at once and the chat page reveals it progressively with a typewriter
+ * effect, which looks the same as streaming to the student.
  *
  * Note: Netlify only passes env vars set in the dashboard (not netlify.toml
  * [build.environment]) to serverless functions at runtime.
@@ -53,53 +55,11 @@ export async function GET() {
   return NextResponse.json({ ok: true, serverKey: Boolean(apiKey) }, { headers: CORS });
 }
 
-/**
- * Streams a Gemini SSE response to the client as simple SSE events with
- * just the text delta, so no Gemini-specific data leaks to the browser.
- */
-function pipeGeminiSSE(geminiBody: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const reader = geminiBody.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const { events, rest } = parseSSEBuffer(buffer);
-          buffer = rest;
-          for (const event of events) {
-            const delta = extractGeminiStreamDelta(event);
-            if (delta) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ t: delta })}\n\n`));
-            }
-          }
-        }
-        controller.close();
-      } catch (e) {
-        // Network drop mid-stream: deliver what we have and end cleanly.
-        try {
-          controller.close();
-        } catch {
-          /* already closed */
-        }
-      }
-    },
-    cancel() {
-      geminiBody.cancel().catch(() => {});
-    },
-  });
-}
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const message = typeof body.message === "string" ? body.message.trim() : "";
     const history: ChatTurn[] = Array.isArray(body.history) ? body.history : [];
-    const wantStream = body.stream === true;
 
     if (!message) {
       return NextResponse.json(
@@ -117,26 +77,27 @@ export async function POST(req: NextRequest) {
     const requestBody = JSON.stringify(buildGeminiRequestBody(history, message));
 
     // Walk the model chain: free-tier rate limits are per model, so when the
-    // primary model is busy (503) or out of quota (429) the next one usually
-    // still answers. Attempts are capped so the total stays well under
-    // Netlify's 60-second function execution limit.
+    // primary model is busy (503), out of quota (429) or retired (404) the
+    // next one usually still answers. Attempts are capped so the total stays
+    // well under Netlify's 60-second function execution limit.
     const models = cyberDTModelChain();
     let lastStatus = 0;
     let lastDetail = "";
 
     for (let i = 0; i < models.length; i++) {
       const model = models[i];
-      const endpoint = wantStream ? geminiStreamEndpoint(model) : geminiEndpoint(model);
       let res: Response;
       try {
-        res = await fetch(endpoint, {
+        res = await fetch(geminiEndpoint(model), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "x-goog-api-key": apiKey,
           },
           body: requestBody,
-          signal: AbortSignal.timeout(wantStream ? 50_000 : 18_000),
+          // A complete study-plan answer can take ~30 s to generate; the cap
+          // keeps one hung attempt from eating the whole function budget.
+          signal: AbortSignal.timeout(40_000),
         });
       } catch (e: unknown) {
         // Network error / abort on this model — try the next one.
@@ -146,18 +107,6 @@ export async function POST(req: NextRequest) {
       }
 
       if (res.ok) {
-        if (wantStream && res.body) {
-          // Stream the answer as SSE while Gemini writes it.
-          return new Response(pipeGeminiSSE(res.body), {
-            headers: {
-              ...CORS,
-              "Content-Type": "text/event-stream; charset=utf-8",
-              "Cache-Control": "no-store, max-age=0",
-              "X-Accel-Buffering": "no",
-            },
-          });
-        }
-
         const data = await res.json().catch(() => null);
         const text = extractGeminiText(data);
         if (text) {
