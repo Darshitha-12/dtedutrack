@@ -49,15 +49,26 @@ export async function POST(req: NextRequest) {
 
     const model = process.env.GEMINI_MODEL || defaultCyberDTModel();
 
-    const res = await fetch(geminiEndpoint(model), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify(buildGeminiRequestBody(history, message)),
-      signal: AbortSignal.timeout(60_000),
-    });
+    // Gemini's free tier sometimes returns 503 during demand spikes; retry
+    // once after a short pause so students rarely see the offline fallback.
+    // Each attempt is capped at 25s so the retry can never push the total
+    // past Netlify's 60s function execution limit.
+    const callGemini = async () =>
+      fetch(geminiEndpoint(model), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify(buildGeminiRequestBody(history, message)),
+        signal: AbortSignal.timeout(25_000),
+      });
+
+    let res = await callGemini();
+    if (res.status === 503 || res.status === 429) {
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      res = await callGemini();
+    }
 
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
