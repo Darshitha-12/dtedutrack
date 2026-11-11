@@ -202,6 +202,7 @@ export const si = {
     planTitle: "පුද්ගලික අධ්‍යයන සැලසුම",
     planExamDate: "විභාග දිනය",
     planHours: "දිනකට පැය",
+    planSubjects: "මගේ විෂයයන් (තුනම)",
     planWeak: "අමාරු විෂයයන් (අමතර)",
     planWeakPlaceholder: "උදා: ජාන විද්‍යාව, ශ්වසනය",
     planDesc: "විස්තරය / අමතර උපදෙස් (ඕනෑ නම්)",

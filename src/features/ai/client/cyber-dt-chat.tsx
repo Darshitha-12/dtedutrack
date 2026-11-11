@@ -151,14 +151,17 @@ export function CyberDTChat() {
   const [localHasKey, setLocalHasKey] = useState(false);
   const [showKeyPanel, setShowKeyPanel] = useState(false);
   const [keyInput, setKeyInput] = useState("");
-  // Study plan mini-form.
+  // Study plan mini-form. The date starts at the dashboard's default exam
+  // target (2027-08-03) and is replaced by the student's saved exam date.
   const [showPlanPanel, setShowPlanPanel] = useState(false);
-  const [planDate, setPlanDate] = useState("");
+  const [planDate, setPlanDate] = useState("2027-08-03");
   const [planHours, setPlanHours] = useState("4");
   const [planWeak, setPlanWeak] = useState("");
   const [planDesc, setPlanDesc] = useState("");
-  // True while the exam date shown is the one auto-filled from the profile.
-  const [planDateAuto, setPlanDateAuto] = useState(false);
+  // The student's A/L subjects — plans cover ALL of them, not just Biology.
+  const [planSubjects, setPlanSubjects] = useState("Biology, Chemistry, Physics");
+  // True while the exam date shown is one auto-filled from the profile.
+  const [planDateAuto, setPlanDateAuto] = useState(true);
   // Remembers whether the user typed their own values, so a late profile
   // fetch never overwrites what they entered.
   const planDateTouched = useRef(false);
@@ -178,6 +181,8 @@ export function CyberDTChat() {
   // Pre-fill the study-plan form from the profile the student keeps on the
   // dashboard: their saved exam date and daily study target. Works offline
   // too — the offline fetch shim answers /api/profile from local storage.
+  // When no exam date was saved (or the fetch fails), the dashboard countdown
+  // still shows its default target (2027-08-03) — so the plan form keeps it.
   useEffect(() => {
     let cancelled = false;
     fetch("/api/profile")
@@ -449,6 +454,7 @@ export function CyberDTChat() {
     const examDate = planDate || defaultExam.toISOString().slice(0, 10);
     const weak = planWeak.trim() || "(not given — pick the units A/L students usually find hardest)";
     const desc = planDesc.trim();
+    const subjects = planSubjects.trim() || "Biology";
     // Reply in the language the student wrote their notes in (Sinhala script,
     // Singlish or English); app language is only the fallback.
     const planLang = detectCyberDTLocale(
@@ -457,15 +463,17 @@ export function CyberDTChat() {
     );
     const planReplyLanguage = planLang === "si" ? "Sinhala" : "English";
     const prompt = [
-      "Create a personalized A/L Biology revision study plan for me.",
+      `Create a personalized A/L revision study plan for me covering ALL of my subjects (${subjects}) — not only Biology.`,
       `- Today's date: ${today.toISOString().slice(0, 10)}`,
       `- My exam date: ${examDate}`,
+      `- My subjects (give EVERY subject time): ${subjects}`,
       `- Hours I can study per day: ${planHours || "4"}`,
       `- Topics/units I find difficult: ${weak}`,
       desc
         ? `- My extra instructions (VERY IMPORTANT — the whole plan must follow these; where they conflict with the defaults above, these win): ${desc}`
         : "",
-      "Make it a realistic day-wise plan as a markdown table (date, topic/unit, activity type — learning / revising / past papers — and time blocks), with weekly goals, rest days, and 2-3 full past-paper days near the exam.",
+      "Make it a realistic plan as a markdown table (date, subject + topic/unit, activity type — learning / revising / past papers — and time blocks). Split my daily hours across the subjects and rotate them so every subject appears several times a week. Include weekly goals, rest days, and 2-3 full past-paper days near the exam.",
+      "If there is more than 2 months until my exam, first give a short phase-by-phase overview (what each month/week focuses on) and then the detailed day-wise table for the FINAL 4 weeks before the exam — do NOT try to list every single day of a very long period.",
       `Reply fully in ${planReplyLanguage}.`,
     ]
       .filter(Boolean)
@@ -654,6 +662,15 @@ export function CyberDTChat() {
               />
             </label>
           </div>
+          <label className="block space-y-1">
+            <span className="text-2xs text-cyan-300/80">{t("cyberdt.planSubjects")}</span>
+            <Input
+              value={planSubjects}
+              onChange={(e) => setPlanSubjects(e.target.value)}
+              placeholder="Biology, Chemistry, Physics"
+              className="rounded-xl border-cyan-500/30 bg-transparent text-sm text-cyan-50 placeholder:text-cyan-400/40 focus-visible:ring-cyan-400/60"
+            />
+          </label>
           <label className="block space-y-1">
             <span className="text-2xs text-cyan-300/80">{t("cyberdt.planWeak")}</span>
             <Input

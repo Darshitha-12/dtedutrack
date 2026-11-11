@@ -202,6 +202,7 @@ export const en = {
     planTitle: "Personalized study plan",
     planExamDate: "Exam date",
     planHours: "Study hours per day",
+    planSubjects: "My subjects (all 3)",
     planWeak: "Difficult topics (optional)",
     planWeakPlaceholder: "e.g. Genetics, Respiration",
     planDesc: "Description / extra instructions (optional)",
