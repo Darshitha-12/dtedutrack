@@ -3,12 +3,47 @@
 export type CyberDTLocale = "en" | "si";
 
 /**
- * Detects the language of a user message by looking for Sinhala Unicode
- * characters (U+0D80–U+0DFF). Cyber DT AI replies in the same language
- * as the question.
+ * Common Singlish words (Sinhala written with English letters, e.g.
+ * "sailaya ganna kiyanna"). Used to detect that the student is writing
+ * Sinhala in Latin script, so Cyber DT replies in Sinhala script.
+ * Matched as whole words so English text like "detail" never triggers it.
+ */
+const SINGLISH_WORDS = [
+  // question / helper words
+  "kiyanna", "kiyannek", "kiyannko", "kohomda", "kohoma", "kohomd",
+  "mokakda", "mokak", "kumakda", "kumak", "krnne", "karanne", "kriya",
+  "widiyt", "widiya", "vidiyt", "vidiya", "vidi",
+  "ganna", "gena", "dennako", "hdnnko", "hadanna",
+  "thawa", "poddak", "hariyat", "hriyat", "samahara", "eka", "oya",
+  // biology topics in Singlish
+  "sailaya", "saila", "nukliya",
+  "prabhasansleshanaya", "prabhasansleshan", "prabhasha", "prabasha",
+  "mayaosis", "mayosis", "mayosi",
+  "mayitosis", "samawibhajana", "wibhajana",
+  "pravenika", "pravenik", "jayana",
+  "ensaim", "enzaim",
+  "swasana", "shwasana", "nirwaya", "nirvaya",
+  "parinamaya", "parinama", "waranaya",
+  "parisara", "aharadama", "karbonchakraya",
+  "snayu", "pratichara", "molaya",
+  "homona", "masika",
+  "pratishakti", "pratide", "ennath",
+  "wrukka", "vrukka", "muthra",
+  "wishaga", "wisaga", "punasiri", "adhyayana",
+];
+
+const SINGLISH_RE = new RegExp(`\\b(?:${SINGLISH_WORDS.join("|")})\\b`, "i");
+
+/**
+ * Detects the language of a user message:
+ *  - Sinhala script (U+0D80–U+0DFF) → Sinhala
+ *  - Singlish (Sinhala words in English letters) → Sinhala
+ *  - otherwise the app language fallback
+ * Cyber DT AI replies in the same language as the question.
  */
 export function detectCyberDTLocale(message: string, fallback: CyberDTLocale = "en"): CyberDTLocale {
   if (/[\u0D80-\u0DFF]/.test(message)) return "si";
+  if (SINGLISH_RE.test(message)) return "si";
   return fallback;
 }
 
@@ -17,6 +52,8 @@ interface TopicEntry {
   keywords: string[];
   /** Sinhala keywords matched against the raw message. */
   keywordsSi: string[];
+  /** Singlish keywords (Sinhala in English letters) matched as whole words. */
+  keywordsSinglish: string[];
   textEn: string;
   textSi: string;
   emoji: string;
@@ -43,6 +80,7 @@ const topicKnowledge: TopicEntry[] = [
       "down syndrome",
     ],
     keywordsSi: ["මයෝසිස්", "අඩු විභාජනය", "ගේමීට", "හරස් හුවමාර"],
+    keywordsSinglish: ["mayaosis", "mayosis", "mayosi", "adawibhajana", "horas", "huwamara"],
     textEn: `🧬 MEIOSIS — complete answer
 
 Definition: Meiosis (reduction division) is two successive divisions of one diploid cell (2n) that produce four genetically different haploid gametes (n). Purpose: making gametes for sexual reproduction and keeping the chromosome number constant from generation to generation.
@@ -91,6 +129,7 @@ Exam tip: for "how does meiosis produce genetic variation", mention BOTH crossin
       "spindle fiber",
     ],
     keywordsSi: ["මයිටෝසිස්", "සම විභාජනය", "විභාජනය", "ප්‍රෝපේස්", "මෙටාපේස්", "ඇනාපේස්", "ටෙලෝපේස්"],
+    keywordsSinglish: ["mayitosis", "samawibhajana", "wibhajana"],
     textEn: `🧫 MITOSIS — complete answer
 
 Definition: Mitosis (equational division) is nuclear division producing two genetically identical daughter cells with the same chromosome number as the parent (2n → 2n). Purpose: growth, repair, cell replacement and asexual reproduction.
@@ -145,6 +184,7 @@ Exam tip: DNA replication happens in S phase of INTERPHASE, before mitosis start
       "photosystem",
     ],
     keywordsSi: ["ප්‍රභාසංස්ලේෂණය", "ප්‍රභා", "ක්ලෝරො", "කැල්වින්", "ආලෝක ප්‍රතික්‍රියා"],
+    keywordsSinglish: ["prabhasansleshanaya", "prabhasansleshan", "prabhasha", "prabasha", "klorofil"],
     textEn: `🌿 PHOTOSYNTHESIS — complete answer
 
 Definition: Photosynthesis is the process by which green plants convert light energy into chemical energy, using CO₂ and H₂O to make glucose, releasing O₂ as a by-product.
@@ -208,6 +248,7 @@ Exam tip: link structure to function — broad flat leaves (large surface area f
       "9:3:3:1",
     ],
     keywordsSi: ["ප්‍රවේණික", "මෙන්ඩල්", "ජිනෝටයිප්", "ෆීනෝටයිප්", "ඇලීල", "උරුම"],
+    keywordsSinglish: ["pravenika", "pravenik", "jayana", "jeenawada"],
     textEn: `📊 MENDELIAN GENETICS — complete answer
 
 Key terms: gene (DNA section coding a protein), allele (different forms of a gene), genotype (alleles present), phenotype (visible trait), dominant (expressed if present — capital letter), recessive (expressed only if homozygous — small letter), homozygous (AA / aa), heterozygous (Aa).
@@ -274,6 +315,7 @@ F₂: ජිනෝටයිප් අනුපාතය 1 TT : 2 Tt : 1 tt — �
       "histone",
     ],
     keywordsSi: ["dna", "ඩීඑන්ඒ", "ද්විත්ව හෙලික්ස්", "නියුක්ලියොටයිඩ්", "ප්‍රතිසංස්ලේෂණය"],
+    keywordsSinglish: ["deewithwa", "nukliyotaid"],
     textEn: `🧬 DNA — complete answer
 
 Definition: DNA (deoxyribonucleic acid) carries the genetic instructions for the growth, development, functioning and reproduction of all living organisms.
@@ -339,6 +381,7 @@ Exam tip: be ready to explain WHY this structure allows accurate replication —
       "er ",
     ],
     keywordsSi: ["සෛල", "න්‍යෂ්ටි", "ඔර්ගනෙල", "රයිබොසෝම", "ලයිසොසෝම", "ගෝල්ගි", "මයිටගකොන්ඩ්"],
+    keywordsSinglish: ["sailaya", "saila", "sail", "nukliya"],
     textEn: `🔬 THE CELL — complete answer
 
 Definition: the cell is the basic structural and functional unit of all living organisms. Cell theory: all living things are made of cells, and all cells come from pre-existing cells.
@@ -404,6 +447,7 @@ Exam tip: for each organelle learn one function AND one structural adaptation �
       "induced fit",
     ],
     keywordsSi: ["එන්සයිම", "උත්ප්‍රේරක", "සන්ඪාතක", "විකෘත"],
+    keywordsSinglish: ["ensaim", "enzaim", "uthprea"],
     textEn: `⚗️ ENZYMES — complete answer
 
 Definition: enzymes are globular proteins that act as biological catalysts — they speed up reactions by lowering the activation energy, and are not used up.
@@ -457,6 +501,7 @@ Exam tip: in rate graphs, mark the optimum and use the exact word "denatured" to
       "oxygen debt",
     ],
     keywordsSi: ["ශ්වසනය", "ග්ලයිකොලයිසිස්", "ක්‍රෙබ්ස්", "නිර්වායු"],
+    keywordsSinglish: ["swasana", "shwasana", "nirwaya", "nirvaya"],
     textEn: `⚡ RESPIRATION — complete answer
 
 Definition: respiration is the controlled release of energy from glucose to make ATP. It happens in all living cells, all the time.
@@ -505,6 +550,7 @@ Exam tip: "why do cells die without oxygen?" — without O₂ the electron trans
       "directional selection",
     ],
     keywordsSi: ["පරිණාමය", "ස්වාභාවික වරණය", "ඩාවින්", "පොදු පූර්වජයක්"],
+    keywordsSinglish: ["parinamaya", "parinama", "waranaya", "swabawika"],
     textEn: `🌍 EVOLUTION — complete answer
 
 Definition: evolution is the gradual change in the inherited characteristics of a population over many generations. Darwin explained it by natural selection.
@@ -569,6 +615,7 @@ Exam tip: always write "individuals with advantageous ALLELES survive and REPROD
       "population growth",
     ],
     keywordsSi: ["පරිසර පද්ධති", "ආහාර දාම", "කාබන් චක්‍රය", "නයිට්‍රජන් චක්‍රය", "ජෛව විවිධත්වය", "දූෂණය"],
+    keywordsSinglish: ["parisara", "parisa", "aharadama", "karbonchakraya"],
     textEn: `🌳 ECOLOGY — complete answer
 
 Levels: individual → population → community → ecosystem.
@@ -631,6 +678,7 @@ Exam tip: energy-flow answers need the exact ideas "lost as heat in respiration"
       "acetylcholine",
     ],
     keywordsSi: ["ස්නායු", "ප්‍රතිචාර පථය", "ස්නායු පද්ධති", "සිනැප්ස්", "මොළය", "සුනිකා"],
+    keywordsSinglish: ["snayu", "pratichara", "molaya"],
     textEn: `🧠 NERVOUS SYSTEM — complete answer
 
 Structure: CNS (brain + spinal cord) and PNS (nerves). A neurone = cell body + dendrites + axon. The myelin sheath insulates the axon and speeds impulses up.
@@ -688,6 +736,7 @@ Exam tip: for reflex questions, name the five components in order and state "the
       "negative feedback",
     ],
     keywordsSi: ["හෝමෝන", "ඉන්සියුලින්", "අන්තරාසර්ථක", "රුධිරයේ සීනි", "මාසික"],
+    keywordsSinglish: ["homona", "masika"],
     textEn: `💉 HORMONES — complete answer
 
 Definition: hormones are chemical messengers released by endocrine (ductless) glands directly into the blood. They act only on target organs carrying specific receptors.
@@ -740,6 +789,7 @@ Exam tip: every hormonal answer must name the gland, the hormone, the target org
       "memory cell",
     ],
     keywordsSi: ["ප්‍රතිශක්ති", "ප්‍රතිදේහ", "එන්නත", "ලිම්ෆොසයිට්"],
+    keywordsSinglish: ["pratishakti", "pratide", "ennath"],
     textEn: `🛡️ IMMUNITY — complete answer
 
 Lines of defence:
@@ -804,6 +854,7 @@ HIV සහායක T සෛල විනාශ කරයි → ප්‍රත
       "osmoregulation",
     ],
     keywordsSi: ["වෘක්ක", "නෙෆ්‍රෝන", "මුත්‍රා", "නික්මීම", "යූරියා", "ජල සංතුලනය"],
+    keywordsSinglish: ["wrukka", "vrukka", "muthra"],
     textEn: `🚰 KIDNEY & EXCRETION — complete answer
 
 Excretion = removal of metabolic waste (CO₂, urea, excess water and salts). (Not the same as egestion — removal of undigested food.)
@@ -856,6 +907,7 @@ ADH සහ ජල සංතුලනය (සෘණ ප්‍රතිපෝෂ�
       "focus",
     ],
     keywordsSi: ["විභාග", "පුනරීක්ෂණ", "අධ්‍යයන", "කාල සටහන", "ඉගෙන", "උපදෙස"],
+    keywordsSinglish: ["wishaga", "wisaga", "punasiri", "adhyayana", "kalhadak"],
     textEn: `📝 EXAM PREPARATION — the complete plan
 
 1. Active recall — close the book and write out everything you remember, then check. Rereading feels productive but teaches you little; testing yourself is what works.
@@ -960,6 +1012,11 @@ function matchesTopic(message: string, topic: TopicEntry): boolean {
   }
   for (const kw of topic.keywordsSi) {
     if (message.includes(kw)) return true;
+  }
+  // Singlish keywords are matched as whole words so "saila" doesn't match
+  // "sailing" and short tokens like "eka" stay safe.
+  for (const kw of topic.keywordsSinglish) {
+    if (new RegExp(`\\b${kw}\\b`, "i").test(message)) return true;
   }
   return false;
 }

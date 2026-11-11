@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Send, Bot, Loader2, Sparkles, Globe } from "lucide-react";
+import { Send, Bot, Loader2, Sparkles, Globe, KeyRound } from "lucide-react";
 import { useT, useLanguage } from "@/lib/language-context";
 import {
   generateCyberDTResponse,
@@ -12,6 +12,12 @@ import {
   type CyberDTResponse,
   type CyberDTLocale,
 } from "@/features/ai/client/cyber-dt-ai";
+import {
+  buildGeminiRequestBody,
+  extractGeminiText,
+  geminiEndpoint,
+  defaultCyberDTModel,
+} from "@/features/ai/cyber-dt-shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -48,6 +54,17 @@ function nextId() {
   return `cdt-${Date.now()}-${msgCounter}`;
 }
 
+/** localStorage key for the user's own Gemini API key (browser-direct fallback). */
+const GEMINI_KEY_STORAGE = "cyberdt_gemini_key";
+
+function getStoredGeminiKey(): string {
+  try {
+    return window.localStorage.getItem(GEMINI_KEY_STORAGE) || "";
+  } catch {
+    return "";
+  }
+}
+
 export function CyberDTChat() {
   const t = useT();
   const { locale } = useLanguage();
@@ -56,6 +73,24 @@ export function CyberDTChat() {
   const [isTyping, setIsTyping] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const timers = useRef<NodeJS.Timeout[]>([]);
+  // Gemini API key state: server-configured key or a key pasted by the user.
+  const [serverHasKey, setServerHasKey] = useState(false);
+  const [localHasKey, setLocalHasKey] = useState(false);
+  const [showKeyPanel, setShowKeyPanel] = useState(false);
+  const [keyInput, setKeyInput] = useState("");
+
+  // Ask the server once whether a Gemini key is configured there.
+  useEffect(() => {
+    fetch("/api/cyber-dt")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d && typeof d.serverKey === "boolean") setServerHasKey(d.serverKey);
+      })
+      .catch(() => {});
+    setLocalHasKey(Boolean(getStoredGeminiKey()));
+  }, []);
+
+  const aiMode = serverHasKey || localHasKey;
 
   const greeting = useCallback((): ChatMessage => {
     const g = getCyberDTGreeting(locale as CyberDTLocale);
@@ -87,34 +122,118 @@ export function CyberDTChat() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, isTyping]);
 
-  const send = (raw: string) => {
+  const send = async (raw: string) => {
     const text = raw.trim();
     if (!text || isTyping) return;
 
     const userMessage: ChatMessage = { id: nextId(), role: "user", text };
+    const history = messages.slice(-10).map((m) => ({ role: m.role, text: m.text }));
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setIsTyping(true);
 
-    // Reply in the SAME language as the user's question: if the message
-    // contains Sinhala characters, answer in Sinhala; otherwise use the
-    // app language as the fallback.
+    // Reply in the SAME language as the question: Sinhala script, Singlish
+    // (Sinhala in English letters) or English — never the app language.
     const replyLocale = detectCyberDTLocale(text, locale as CyberDTLocale);
-    const aiResponse = generateCyberDTResponse(text, replyLocale);
-    const timer = setTimeout(() => {
-      const aiMessage: ChatMessage = {
-        id: nextId(),
-        role: "ai",
-        text: renderCyberDTResponse(aiResponse, replyLocale),
-        emoji: aiResponse.emoji,
-      };
-      setMessages((prev) => [...prev, aiMessage]);
-      setIsTyping(false);
-    }, 600);
-    timers.current.push(timer);
+
+    // Minimum typing time so instant offline answers don't feel jarring.
+    const minDelay = new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, 600);
+      timers.current.push(t);
+    });
+
+    // 1) Try the real AI — Gemini through our own /api/cyber-dt route, so the
+    //    API key stays on the server. It answers ANY question, in the right
+    //    language, with complete exam-style answers.
+    let aiText: string | null = null;
+    let emoji = "✨";
+    let serverHasNoKey = false;
+    try {
+      const res = await fetch("/api/cyber-dt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text, history }),
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data && data.ok && typeof data.text === "string" && data.text.trim()) {
+          aiText = data.text.trim();
+          emoji = "✨";
+        } else if (data && data.error === "no_api_key") {
+          serverHasNoKey = true;
+        }
+      }
+    } catch {
+      /* offline or route error — try the local key, then the offline engine */
+    }
+
+    // 2) If the server has no key, use the user's own pasted key directly
+    //    from the browser (personal free key from Google AI Studio).
+    const storedKey = getStoredGeminiKey();
+    if (!aiText && serverHasNoKey && storedKey) {
+      try {
+        const res = await fetch(geminiEndpoint(defaultCyberDTModel()), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": storedKey,
+          },
+          body: JSON.stringify(buildGeminiRequestBody(history, text)),
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          const out = extractGeminiText(data);
+          if (out) {
+            aiText = out;
+            emoji = "✨";
+          }
+        }
+      } catch {
+        /* fall through to the offline knowledge base */
+      }
+    }
+
+    // 3) Offline fallback: the built-in knowledge base, replying in the
+    //    detected language (works with zero internet or no API key).
+    if (!aiText) {
+      const aiResponse = generateCyberDTResponse(text, replyLocale);
+      aiText = renderCyberDTResponse(aiResponse, replyLocale);
+      emoji = aiResponse.emoji;
+    }
+
+    await minDelay;
+    setMessages((prev) => [...prev, { id: nextId(), role: "ai", text: aiText ?? "", emoji }]);
+    setIsTyping(false);
   };
 
   const quickQuestions = QUICK_QUESTIONS[locale as CyberDTLocale] ?? QUICK_QUESTIONS.en;
+
+  const saveKey = () => {
+    const key = keyInput.trim();
+    try {
+      if (key) {
+        window.localStorage.setItem(GEMINI_KEY_STORAGE, key);
+        setLocalHasKey(true);
+      } else {
+        window.localStorage.removeItem(GEMINI_KEY_STORAGE);
+        setLocalHasKey(false);
+      }
+    } catch {
+      /* storage blocked — the offline engine still works */
+    }
+    setKeyInput("");
+    setShowKeyPanel(false);
+  };
+
+  const removeKey = () => {
+    try {
+      window.localStorage.removeItem(GEMINI_KEY_STORAGE);
+    } catch {
+      /* ignore */
+    }
+    setLocalHasKey(false);
+    setKeyInput("");
+  };
 
   return (
     <div className="mx-auto flex h-[calc(100dvh-8rem)] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-cyan-500/30 bg-[#0b1220]/90 shadow-[0_0_40px_rgba(34,211,238,0.15)] backdrop-blur-xl">
@@ -135,8 +254,68 @@ export function CyberDTChat() {
             {t("cyberdt.responsesUnlimited")}
           </p>
         </div>
-        <Sparkles className="h-4 w-4 text-fuchsia-300/70" />
+        <div className="flex items-center gap-2">
+          <span
+            className={cn(
+              "hidden rounded-full px-2 py-0.5 text-2xs font-semibold sm:inline-block",
+              aiMode
+                ? "border border-fuchsia-400/50 bg-fuchsia-500/15 text-fuchsia-200"
+                : "border border-cyan-400/40 bg-cyan-500/10 text-cyan-300",
+            )}
+          >
+            {aiMode ? "✨ " + t("cyberdt.aiMode") : t("cyberdt.offlineMode")}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowKeyPanel((v) => !v)}
+            title={t("cyberdt.apiKey")}
+            className={cn(
+              "grid h-8 w-8 place-items-center rounded-xl border transition",
+              localHasKey || serverHasKey
+                ? "border-fuchsia-400/60 bg-fuchsia-500/15 text-fuchsia-300"
+                : "border-cyan-400/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20",
+            )}
+          >
+            <KeyRound className="h-4 w-4" />
+          </button>
+          <Sparkles className="h-4 w-4 text-fuchsia-300/70" />
+        </div>
       </div>
+
+      {/* Gemini API key panel (optional, personal free key) */}
+      {showKeyPanel && (
+        <div className="space-y-2 border-b border-cyan-500/20 bg-cyan-500/5 px-4 py-3">
+          <p className="text-2xs leading-relaxed text-cyan-200/80">{t("cyberdt.apiKeyHint")}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+              placeholder="AIza..."
+              type="password"
+              className="min-w-0 flex-1 rounded-xl border-cyan-500/30 bg-transparent text-sm text-cyan-50 placeholder:text-cyan-400/40 focus-visible:ring-cyan-400/60"
+            />
+            <Button
+              type="button"
+              size="sm"
+              onClick={saveKey}
+              className="rounded-xl border border-cyan-400/50 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30"
+            >
+              {t("cyberdt.apiKeySave")}
+            </Button>
+            {localHasKey && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={removeKey}
+                className="rounded-xl border border-rose-400/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20"
+              >
+                {t("cyberdt.apiKeyRemove")}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <div ref={listRef} className="scrollbar-slim flex-1 space-y-3 overflow-y-auto px-4 py-4">
