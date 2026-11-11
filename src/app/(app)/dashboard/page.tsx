@@ -1,0 +1,971 @@
+"use client";
+
+import { useState, useEffect, useMemo } from "react";
+import { useSession } from "next-auth/react";
+import Link from "next/link";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  Bell,
+  Clock,
+  Flame,
+  BookOpen,
+  Play,
+  AlarmClock,
+  Timer,
+  Award,
+  TrendingUp,
+  Users,
+  Plus,
+  Trophy,
+  Crown,
+  Youtube,
+  Pencil,
+} from "lucide-react";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from "recharts";
+import { SUBJECT_LIST } from "@/types/subject";
+import { testExamAlertNow } from "@/features/alarms/lib/native-alarm-scheduler";
+
+interface ProfileData {
+  name: string;
+  email: string;
+  onboarded: boolean;
+  dailyTargetHours: number;
+  weeklyTargetHours: number;
+  examYear: string;
+  examDate: string;
+  currentLevel: string;
+}
+
+interface DashboardStats {
+  activeAlarms: number;
+  weeklyHours: number;
+  dayStreak: number;
+  topicsCovered: number;
+  studyMinutes: number;
+  weeklyMinutes: number;
+  communityMinutes: number;
+  communityActiveUsers: number;
+}
+
+interface Mark {
+  id: string;
+  subjectId: string;
+  total: number;
+  examDate: string;
+  name: string;
+}
+
+interface LeaderboardEntry {
+  id: string;
+  name: string;
+  todayMinutes: number;
+}
+
+const DASH_CACHE = "bp_dashboard_cache_v1";
+
+const EMPTY_STATS: DashboardStats = {
+  activeAlarms: 0,
+  weeklyHours: 0,
+  dayStreak: 0,
+  topicsCovered: 0,
+  studyMinutes: 0,
+  weeklyMinutes: 0,
+  communityMinutes: 0,
+  communityActiveUsers: 0,
+};
+
+/* Skeleton placeholder — mirrors real value dimensions to prevent shifts. */
+function SkeletonText({ className }: { className?: string }) {
+  return (
+    <div
+      className={`animate-pulse rounded-md bg-muted/60 ${className ?? "h-4 w-20"}`}
+    />
+  );
+}
+
+function SkeletonBox({ className }: { className?: string }) {
+  return (
+    <div
+      className={`animate-pulse rounded-lg bg-muted/60 ${className ?? "h-10 w-10"}`}
+    />
+  );
+}
+
+export default function DashboardPage() {
+  const { data: session, status } = useSession();
+  const [hydrated, setHydrated] = useState(status === "authenticated");
+  const [profile, setProfile] = useState<ProfileData | null>(() => {
+    try {
+      const raw = localStorage.getItem(DASH_CACHE);
+      if (raw) {
+        const c = JSON.parse(raw);
+        if (c.profile) return c.profile;
+      }
+    } catch {}
+    return null;
+  });
+  const [examEditOpen, setExamEditOpen] = useState(false);
+  const [examDraft, setExamDraft] = useState("");
+  const [examSaving, setExamSaving] = useState(false);
+  const [stats, setStats] = useState<DashboardStats>(() => {
+    try {
+      const raw = localStorage.getItem(DASH_CACHE);
+      if (raw) {
+        const c = JSON.parse(raw);
+        if (c.stats) {
+          return { ...EMPTY_STATS, ...c.stats };
+        }
+      }
+    } catch {}
+    return { ...EMPTY_STATS };
+  });
+  const [marks, setMarks] = useState<Mark[]>(() => {
+    try {
+      const raw = localStorage.getItem(DASH_CACHE);
+      if (raw) {
+        const c = JSON.parse(raw);
+        if (c.marks) return c.marks;
+      }
+    } catch {}
+    return [];
+  });
+  const [studyWeek, setStudyWeek] = useState<{ date: string; minutes: number }[]>(() => {
+    try {
+      const raw = localStorage.getItem(DASH_CACHE);
+      if (raw) {
+        const c = JSON.parse(raw);
+        if (c.studyWeek) return c.studyWeek;
+      }
+    } catch {}
+    return [];
+  });
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(() => {
+    try {
+      const raw = localStorage.getItem(DASH_CACHE);
+      if (raw) {
+        const c = JSON.parse(raw);
+        if (c.leaderboard) return c.leaderboard;
+      }
+    } catch {}
+    return [];
+  });
+  const [ready, setReady] = useState(false);
+  const [now, setNow] = useState(() => new Date());
+
+  const dataLoaded =
+    (profile && profile.name) ||
+    stats.weeklyMinutes > 0 ||
+    stats.dayStreak > 0 ||
+    marks.length > 0 ||
+    studyWeek.length > 0;
+
+  function persistCache(patch?: {
+    profile?: ProfileData | null;
+    stats?: Partial<DashboardStats>;
+    marks?: Mark[];
+    studyWeek?: { date: string; minutes: number }[];
+    leaderboard?: LeaderboardEntry[];
+  }) {
+    try {
+      localStorage.setItem(DASH_CACHE, JSON.stringify({
+        profile: patch?.profile !== undefined ? patch.profile : profile,
+        stats: { ...stats, ...(patch?.stats ?? {}) },
+        marks: patch?.marks !== undefined ? patch.marks : marks,
+        studyWeek: patch?.studyWeek !== undefined ? patch.studyWeek : studyWeek,
+        leaderboard: patch?.leaderboard !== undefined ? patch.leaderboard : leaderboard,
+      }));
+    } catch {}
+  }
+
+  function fmtWork(mins: number) {
+    const h = Math.floor(mins / 60);
+    const m = Math.round(mins % 60);
+    if (h > 0) {
+      const mm = m > 0 ? ` ${m}m` : "";
+      return `${h}h${mm}`;
+    }
+    return `${m}m`;
+  }
+
+  useEffect(() => {
+    if (status === "authenticated") {
+      setHydrated(true);
+      fetchProfile();
+      fetchStudyStats();
+      fetchAlarms();
+      fetchExamMarks();
+      fetchAnalytics();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+
+  useEffect(() => {
+    // First paint completes → mark ready so inner values replace skeletons in
+    // place. The card structure is identical in both states, so nothing shifts.
+    const raf = requestAnimationFrame(() => {
+      if (hydrated || dataLoaded) setReady(true);
+    });
+    const timer = setTimeout(() => {
+      if (hydrated || dataLoaded) setReady(true);
+      if (status === "authenticated") {
+        fetchProfile();
+        fetchStudyStats();
+        fetchAlarms();
+        fetchExamMarks();
+        fetchAnalytics();
+      }
+    }, 6000);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, dataLoaded, status]);
+
+  useEffect(() => {
+    function onFocus() {
+      fetchProfile();
+      fetchStudyStats();
+      fetchAlarms();
+      fetchExamMarks();
+      fetchAnalytics();
+    }
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") onFocus();
+    });
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", () => {});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function fetchProfile() {
+    try {
+      const res = await fetch("/api/profile");
+      if (res.ok) {
+        const data = await res.json();
+        const nextProfile: ProfileData = {
+          name: data.name || "",
+          email: data.email || "",
+          onboarded: data.onboarded || false,
+          dailyTargetHours: data.dailyTargetHours || 4,
+          weeklyTargetHours: data.weeklyTargetHours || 28,
+          examYear: data.examYear || "",
+          examDate: data.examDate || "",
+          currentLevel: data.currentLevel || "",
+        };
+        setProfile(nextProfile);
+        persistCache({ profile: nextProfile });
+      }
+    } catch (error) {
+      console.error("Failed to fetch profile:", error);
+    }
+  }
+
+  /** Save a new countdown target from the dashboard card (exam date). */
+  async function saveExamDate() {
+    const value = examDraft.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return;
+    setExamSaving(true);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ examDate: value }),
+      });
+      if (res.ok && profile) {
+        const nextProfile: ProfileData = { ...profile, examDate: value };
+        setProfile(nextProfile);
+        persistCache({ profile: nextProfile });
+        setExamEditOpen(false);
+      } else {
+        alert("Exam date save failed — try again.");
+      }
+    } catch {
+      alert("Exam date save failed — check your connection.");
+    } finally {
+      setExamSaving(false);
+    }
+  }
+
+  async function fetchStudyStats() {
+    try {
+      const res = await fetch("/api/content/progress");
+      if (res.ok) {
+        const data = await res.json();
+        const records: Array<{ status: string; completionPercent: number }> =
+          data.progress || [];
+        const covered = records.filter(
+          (r) => r.status !== "NOT_STARTED" || r.completionPercent > 0,
+        ).length;
+        setStats((prev) => ({ ...prev, topicsCovered: covered }));
+      }
+    } catch (error) {
+      console.error("Failed to fetch study stats:", error);
+    }
+  }
+
+  async function fetchAlarms() {
+    try {
+      const raw = localStorage.getItem("biopulse_alarms_v1");
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const list: Array<{ enabled?: boolean }> = parsed.alarms || [];
+      setStats((prev) => ({
+        ...prev,
+        activeAlarms: list.filter((a) => a.enabled !== false).length,
+      }));
+    } catch (error) {
+      console.error("Failed to read alarms:", error);
+    }
+  }
+
+  async function fetchExamMarks() {
+    try {
+      const res = await fetch("/api/exam-marks");
+      if (res.ok) {
+        const body = await res.json();
+        setMarks(body.marks || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch exam marks:", error);
+    }
+  }
+
+  async function fetchAnalytics() {
+    try {
+      const res = await fetch("/api/analytics");
+      if (res.ok) {
+        const body = await res.json();
+        const study = body.studyByDay || [];
+        const last7 = study.slice(-7);
+        const weekly = last7.reduce((s: number, d: { minutes: number }) => s + d.minutes, 0);
+        const activeDays = study.filter((d: { minutes: number }) => d.minutes > 0).length;
+        const totalMinutes = body.stats?.totalStudyMinutes || 0;
+        const nextStats: Partial<DashboardStats> = {
+          weeklyHours: Math.round((weekly / 60) * 10) / 10,
+          dayStreak: activeDays,
+          studyMinutes: totalMinutes,
+          weeklyMinutes: weekly,
+        };
+        setStats((prev) => ({ ...prev, ...nextStats }));
+        setStudyWeek(last7);
+        const community = body.community;
+        const nextLeaderboard = community?.leaderboard;
+        if (community) {
+          setStats((prev) => ({
+            ...prev,
+            communityMinutes: community.totalMinutes || 0,
+            communityActiveUsers: community.activeUsers || 0,
+          }));
+          if (Array.isArray(community.leaderboard)) {
+            setLeaderboard(community.leaderboard);
+          }
+        }
+        persistCache({
+          stats: community
+            ? {
+                ...nextStats,
+                communityMinutes: community.totalMinutes || 0,
+                communityActiveUsers: community.activeUsers || 0,
+              }
+            : nextStats,
+          studyWeek: last7,
+          leaderboard: Array.isArray(nextLeaderboard) ? nextLeaderboard : undefined,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to fetch analytics:", error);
+    }
+  }
+
+  function getDisplayName(): string {
+    if (profile?.name) return profile.name.split(" ")[0];
+    if (session?.user?.name) return session.user.name.split(" ")[0];
+    if (session?.user?.email) return session.user.email.split("@")[0];
+    return "Student";
+  }
+
+  const examCountdown = useMemo(() => {
+    const dateStr =
+      profile?.examDate && profile.examDate.trim() !== "" ? profile.examDate : "2027-08-03";
+
+    // Parse the date-only string as a LOCAL midnight (Sri Lanka, UTC+5:30).
+    // new Date("YYYY-MM-DD") would silently parse as UTC midnight, making the
+    // countdown expire ~5.5h early and the day count off by one.
+    const parts = dateStr.split("-").map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) {
+      return { days: 0, hours: 0, minutes: 0, seconds: 0, expired: true, target: null };
+    }
+    const [y, m, d] = parts;
+    const target = new Date(y, m - 1, d, 0, 0, 0, 0); // local midnight of exam day
+
+    const diff = target.getTime() - now.getTime();
+    if (diff <= 0) {
+      return { days: 0, hours: 0, minutes: 0, seconds: 0, expired: true, target };
+    }
+
+    // One consistent decomposition of the remaining time:
+    // days = whole remaining days, hours/min/sec = within-day remainder.
+    // This always adds up exactly to the real remaining time (no month-day drift).
+    const totalSeconds = Math.floor(diff / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return { days, hours, minutes, seconds, expired: false, target };
+  }, [profile?.examDate, now]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  function getProfileCompleteness(): number {
+    if (!profile) return 0;
+    let completeness = 0;
+    const fields = [
+      profile.name,
+      profile.email,
+      profile.examYear,
+      profile.currentLevel,
+      profile.dailyTargetHours > 0,
+    ];
+    fields.forEach((field) => {
+      if (field) completeness += 20;
+    });
+    return completeness;
+  }
+
+  /* ---- Countdown segment boxes — always visible, fixed height/width. ---- */
+  const cdSegments = [
+    { label: "Days", value: Number.isFinite(examCountdown.days) ? examCountdown.days : 0 },
+    { label: "Hours", value: Number.isFinite(examCountdown.hours) ? examCountdown.hours : 0 },
+    { label: "Minutes", value: Number.isFinite(examCountdown.minutes) ? examCountdown.minutes : 0 },
+    { label: "Seconds", value: Number.isFinite(examCountdown.seconds) ? examCountdown.seconds : 0 },
+  ];
+
+  const topSubjectTotal = marks.length
+    ? SUBJECT_LIST.reduce((best, s) => {
+        const t = marks
+          .filter((m) => m.subjectId === s.id)
+          .reduce((sum, m) => sum + m.total, 0);
+        return t > best ? t : best;
+      }, -1)
+    : 0;
+
+  const statCards = [
+    {
+      icon: <Bell className="h-5 w-5 text-cyan" />,
+      iconBg: "bg-cyan/15",
+      label: "Active Alarms",
+      value: String(stats.activeAlarms),
+    },
+    {
+      icon: <Clock className="h-5 w-5 text-violet-300" />,
+      iconBg: "bg-violet-500/15",
+      label: "Study This Week",
+      value: fmtWork(stats.weeklyMinutes),
+    },
+    {
+      icon: <Flame className="h-5 w-5 text-fuchsia-400" />,
+      iconBg: "bg-fuchsia-500/15",
+      label: "Day Streak",
+      value: String(stats.dayStreak),
+    },
+    {
+      icon: <BookOpen className="h-5 w-5 text-violet-300" />,
+      iconBg: "bg-violet-500/15",
+      label: "Topics Covered",
+      value: String(stats.topicsCovered),
+    },
+  ];
+
+  return (
+    <div className="container mx-auto px-4 py-8 space-y-6">
+      {/* 1. Aurora Bento Hero */}
+      <div className="gradient-border relative overflow-hidden rounded-[2rem] bg-gradient-aurora-soft p-7 shadow-2xl">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-fuchsia/25 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-20 -left-10 h-56 w-56 rounded-full bg-cyan/25 blur-3xl" />
+        <div className="relative flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="mb-2 text-2xs font-extrabold uppercase tracking-[0.24em] text-violet/90">
+              BioPulse Command Center
+            </p>
+            <h1 className="font-display text-[28px] font-extrabold leading-[1.08] tracking-[-0.04em] sm:text-[36px]">
+              {ready ? (
+                `Welcome back, ${getDisplayName()}! 👋`
+              ) : (
+                <SkeletonText className="h-8 w-72" />
+              )}
+            </h1>
+            <p className="mt-2 text-sm font-medium text-muted-foreground">
+              {ready ? (
+                profile?.examYear
+                  ? `${profile.currentLevel} • Exam ${profile.examYear}`
+                  : "Ready to study?"
+              ) : (
+                <SkeletonText className="h-4 w-40" />
+              )}
+            </p>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="text-right">
+              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Profile Complete
+              </p>
+              {ready ? (
+                <p className="text-gradient text-3xl font-extrabold tabular-nums">
+                  {getProfileCompleteness()}%
+                </p>
+              ) : (
+                <SkeletonText className="h-8 w-16 ml-auto mt-1" />
+              )}
+            </div>
+            {ready ? (
+              <div className="relative h-16 w-16">
+                <svg className="h-16 w-16 -rotate-90" viewBox="0 0 64 64">
+                  <circle
+                    cx="32"
+                    cy="32"
+                    r="28"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    fill="none"
+                    className="text-white/15"
+                  />
+                  <circle
+                    cx="32"
+                    cy="32"
+                    r="28"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeDasharray={`${(getProfileCompleteness() / 100) * 176} 176`}
+                    className="text-violet-300"
+                  />
+                </svg>
+              </div>
+            ) : (
+              <SkeletonBox className="h-16 w-16 rounded-full" />
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Live Exam Countdown Card — fixed-height segments, always visible */}
+      <Card
+        className={`p-5 border ${
+          examCountdown.expired
+            ? "border-green-500/30 bg-gradient-to-r from-green-500/10 to-green-500/5"
+            : examCountdown.days <= 30
+              ? "border-red-500/30 bg-gradient-to-r from-red-500/10 to-red-500/5"
+              : "border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-amber-500/5"
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div
+              className={`h-12 w-12 rounded-xl flex items-center justify-center shrink-0 ${
+                examCountdown.expired
+                  ? "bg-green-500/15"
+                  : examCountdown.days <= 30
+                    ? "bg-red-500/15"
+                    : "bg-amber-500/15"
+              }`}
+            >
+              <Timer
+                className={`h-6 w-6 ${
+                  examCountdown.expired
+                    ? "text-green-500"
+                    : examCountdown.days <= 30
+                      ? "text-red-500"
+                      : "text-amber-500"
+                }`}
+              />
+            </div>
+            <div className="min-w-0">
+              <p className="text-lg font-semibold">
+                {ready ? (
+                  examCountdown.expired ? "Exam Complete! 🎉" : "Live Exam Countdown"
+                ) : (
+                  <SkeletonText className="h-6 w-44" />
+                )}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {ready ? (
+                  profile?.examYear
+                    ? `${profile.currentLevel || "A/L"} Exam ${profile.examYear}`
+                    : `Target: ${
+                        profile?.examDate && profile.examDate.trim() !== ""
+                          ? profile.examDate
+                          : "August 3, 2027"
+                      }`
+                ) : (
+                  <SkeletonText className="h-4 w-36 mt-1" />
+                )}
+              </p>
+            </div>
+          </div>
+          <div className="w-full sm:w-auto grid grid-cols-4 gap-1.5 sm:gap-2">
+            {cdSegments.map((s) => (
+              <div
+                key={s.label}
+                className="min-w-0 rounded-2xl border border-white/[0.08] bg-white/[0.05] px-0.5 sm:px-2 py-2.5 text-center backdrop-blur-sm"
+              >
+                {ready ? (
+                  <p className="text-lg sm:text-2xl font-extrabold tabular-nums truncate text-gradient-brand">
+                    {s.value}
+                  </p>
+                ) : (
+                  <SkeletonText className="h-6 w-8 mx-auto" />
+                )}
+                <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider leading-tight text-muted-foreground/80 truncate">
+                  {s.label}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            disabled={!profile}
+            onClick={() => {
+              setExamDraft(
+                profile?.examDate && profile.examDate.trim() !== ""
+                  ? profile.examDate
+                  : "2027-08-03",
+              );
+              setExamEditOpen((o) => !o);
+            }}
+          >
+            <Pencil className="h-4 w-4" /> {examEditOpen ? "Close" : "Change date"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={() => {
+              if (!testExamAlertNow()) {
+                alert("මේ test එක app එකේ (installed) විතරයි වැඩ කරන්නේ.");
+              }
+            }}
+          >
+            <AlarmClock className="h-4 w-4" /> Test 12 AM alert
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Tonight&apos;s exam reminder, fired now
+          </span>
+        </div>
+        {examEditOpen && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] p-3">
+            <span className="text-xs font-medium text-muted-foreground">
+              Countdown target date
+            </span>
+            <input
+              type="date"
+              value={examDraft}
+              onChange={(e) => setExamDraft(e.target.value)}
+              className="h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+            />
+            <Button size="sm" onClick={() => void saveExamDate()} disabled={examSaving}>
+              {examSaving ? "Saving…" : "Save"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setExamEditOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        )}
+      </Card>
+
+      {/* 3. YT Player Card */}
+      <Card className="p-6 border-red-500/30 bg-gradient-to-r from-red-500/10 to-red-500/5">
+        <div className="flex flex-col sm:flex-row h-full gap-3 items-start sm:items-center justify-between">
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center min-w-0">
+            <div className="h-12 w-12 rounded-xl bg-red-500/15 flex items-center justify-center shrink-0">
+              <Youtube className="h-6 w-6 text-red-500" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-lg font-semibold">YT Player</p>
+              <p className="text-sm text-muted-foreground">
+                Ad-free YouTube playback with background play and lock screen controls.
+              </p>
+            </div>
+          </div>
+          <Link href="/yt" className="shrink-0">
+            <Button variant="outline" className="gap-2 border-red-500/30 text-red-600 hover:bg-red-500/10">
+              <Youtube className="h-4 w-4" /> Open YT
+            </Button>
+          </Link>
+        </div>
+      </Card>
+
+      {/* 4–7. Stat cards — fixed grid, fixed order, always rendered */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {statCards.map((sc) => (
+          <Card
+            key={sc.label}
+            interactive
+            className="group min-h-[5.5rem] p-5"
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-white/[0.08] ${sc.iconBg} transition-transform duration-300 ease-spring group-hover:scale-110`}
+              >
+                {sc.icon}
+              </div>
+              <div className="min-w-0">
+                {ready ? (
+                  <p className="text-gradient-brand text-[28px] font-extrabold leading-none tabular-nums truncate">
+                    {sc.value}
+                  </p>
+                ) : (
+                  <SkeletonText className="h-7 w-16" />
+                )}
+                <p className="mt-1 text-xs font-semibold text-muted-foreground">{sc.label}</p>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* 8. Community Total Work Card */}
+      <Card className="p-4 border-primary/30 bg-gradient-to-r from-primary/10 to-primary/5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+              <Users className="h-5 w-5 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Community Total Work</p>
+              {ready ? (
+                <p className="text-2xl font-bold tabular-nums">
+                  {fmtWork(stats.communityMinutes)}{" "}
+                  <span className="text-sm font-normal text-muted-foreground">
+                    across {stats.communityActiveUsers} student
+                    {stats.communityActiveUsers === 1 ? "" : "s"}
+                  </span>
+                </p>
+              ) : (
+                <SkeletonText className="h-7 w-44 mt-1" />
+              )}
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Log your daily work below to contribute to the community total.
+          </p>
+        </div>
+      </Card>
+
+      {/* Community Leaderboard */}
+      <Card className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Trophy className="h-4 w-4 text-amber-500" />
+          <h2 className="text-base font-semibold">Daily Work Leaderboard</h2>
+        </div>
+        {leaderboard.length > 0 ? (
+          <div className="space-y-1.5">
+            {leaderboard.map((entry, i) => {
+              const isMe = session?.user?.id === entry.id;
+              return (
+                <div
+                  key={entry.id}
+                  className={`flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm ${
+                    i === 0 ? "bg-amber-500/10" : "bg-muted/40"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-5 shrink-0 text-center font-semibold text-muted-foreground">
+                      {i === 0 ? <Crown className="h-4 w-4 inline text-amber-500" /> : i + 1}
+                    </span>
+                    <span className="truncate font-medium">{entry.name}</span>
+                    {isMe && (
+                      <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                        You
+                      </span>
+                    )}
+                  </div>
+                  <span className="shrink-0 font-medium tabular-nums">
+                    {fmtWork(entry.todayMinutes)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No community work logged yet. Be the first!
+          </p>
+        )}
+      </Card>
+
+      {/* 9. Exam Marks Section Card — fixed stat boxes even when empty */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Award className="h-4 w-4 text-amber-500" />
+              <CardTitle className="text-base">Exam Marks</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 gap-3 text-center min-h-[5.5rem]">
+              <div className="rounded-md bg-muted/50 p-3">
+                {ready ? (
+                  <p className="text-xl font-bold tabular-nums">{marks.length}</p>
+                ) : (
+                  <SkeletonText className="h-6 w-10 mx-auto" />
+                )}
+                <p className="text-xs text-muted-foreground">Exams</p>
+              </div>
+              <div className="rounded-md bg-muted/50 p-3">
+                {ready ? (
+                  <p className="text-xl font-bold tabular-nums">
+                    {marks.reduce((s, m) => s + m.total, 0)}
+                  </p>
+                ) : (
+                  <SkeletonText className="h-6 w-10 mx-auto" />
+                )}
+                <p className="text-xs text-muted-foreground">Full Marks</p>
+              </div>
+              <div className="rounded-md bg-muted/50 p-3">
+                {ready ? (
+                  <p className="text-xl font-bold tabular-nums">
+                    {topSubjectTotal}
+                  </p>
+                ) : (
+                  <SkeletonText className="h-6 w-10 mx-auto" />
+                )}
+                <p className="text-xs text-muted-foreground">Top Subject</p>
+              </div>
+            </div>
+            {ready && marks.length === 0 && (
+              <p className="py-2 text-center text-sm text-muted-foreground">
+                No exam marks yet.{" "}
+                <Link href="/exam-marks" className="text-primary underline">
+                  Add your first mark
+                </Link>
+                .
+              </p>
+            )}
+            <Link href="/exam-marks">
+              <Button variant="outline" size="sm" className="w-full gap-2">
+                <TrendingUp className="h-4 w-4" /> View Exam Analytics
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Study Activity (7 Days)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {studyWeek.length === 0 || studyWeek.every((d) => d.minutes === 0) ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                No study time logged this week.{" "}
+                <Link href="/focus" className="text-primary underline">
+                  Start a focus session
+                </Link>{" "}
+                to track it.
+              </p>
+            ) : (
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={studyWeek} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                  <XAxis dataKey="date" fontSize={10} tickFormatter={(d: string) => d.slice(5)} />
+                  <YAxis
+                    fontSize={10}
+                    tickFormatter={(v: number) => {
+                      const h = Math.floor(v / 60);
+                      const m = v % 60;
+                      if (h > 0 && m === 0) return `${h}h`;
+                      if (h > 0) return `${h}h${m}m`;
+                      return `${m}m`;
+                    }}
+                  />
+                  <Tooltip
+                    formatter={(v: number) => {
+                      const h = Math.floor(v / 60);
+                      const m = Math.round(v % 60);
+                      if (h > 0 && m === 0) return [`${h}h`, "Study Time"];
+                      if (h > 0) return [`${h}h ${m}m`, "Study Time"];
+                      return [`${m}m`, "Study Time"];
+                    }}
+                    labelFormatter={(d) => d}
+                  />
+                  <Bar dataKey="minutes" fill="#10B981" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Daily Work Log */}
+      <Card className="p-6">
+        <h2 className="text-lg font-semibold mb-1">Log Today&apos;s Work</h2>
+        <p className="text-sm text-muted-foreground mb-4">
+          Track the time you worked today (study + extra). Shows on the community total.
+        </p>
+        <Link href="/work-log">
+          <Button className="gap-2">
+            <Plus className="h-4 w-4" />
+            Go to Work Log
+          </Button>
+        </Link>
+      </Card>
+
+      {/* Quick Actions */}
+      <Card className="p-6">
+        <h2 className="text-lg font-semibold mb-4">Quick Actions</h2>
+        <div className="flex flex-wrap gap-3">
+          <Link href="/syllabus">
+            <Button className="gap-2">
+              <BookOpen className="h-4 w-4" />
+              Study Biology
+            </Button>
+          </Link>
+          <Link href={process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1" ? "/practice" : "/ai-tutor"}>
+            <Button variant="outline" className="gap-2">
+              <Play className="h-4 w-4" />
+              {process.env.NEXT_PUBLIC_OFFLINE_BUILD === "1" ? "Practice" : "AI Tutor"}
+            </Button>
+          </Link>
+          <Link href="/focus">
+            <Button variant="outline" className="gap-2">
+              <Timer className="h-4 w-4" />
+              Start Focus
+            </Button>
+          </Link>
+          <Link href="/alarms">
+            <Button variant="outline" className="gap-2">
+              <AlarmClock className="h-4 w-4" />
+              View Alarms
+            </Button>
+          </Link>
+        </div>
+      </Card>
+    </div>
+  );
+}

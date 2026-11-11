@@ -1,0 +1,224 @@
+"use client";
+
+import { useState, useCallback, useRef, useEffect } from "react";
+import { AudioEngine } from "../lib/audio-engine";
+import {
+  hasNativeRingBridge,
+  holdBackgroundPlayback,
+} from "../lib/background-playback";
+import type { Alarm } from "../lib/scheduler";
+import { speechService } from "@/services/speech";
+
+export function useAlarmRinger() {
+  const [currentAlarm, setCurrentAlarm] = useState<Alarm | null>(null);
+  const [isRinging, setIsRinging] = useState(false);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const vibrationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const snoozeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const speechTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /** Silence the spoken announcement (dismiss, snooze, unmount). */
+  const stopSpeech = useCallback(() => {
+    if (speechTimerRef.current !== null) {
+      clearInterval(speechTimerRef.current);
+      speechTimerRef.current = null;
+    }
+    speechService.stop();
+  }, []);
+
+  const requestWakeLock = useCallback(async () => {
+    try {
+      if ("wakeLock" in navigator) {
+        wakeLockRef.current = await navigator.wakeLock.request("screen");
+      }
+    } catch {
+      // wake lock denied or unavailable
+    }
+  }, []);
+
+  const releaseWakeLock = useCallback(() => {
+    if (wakeLockRef.current) {
+      wakeLockRef.current.release().catch(() => {});
+      wakeLockRef.current = null;
+    }
+  }, []);
+
+  const startVibration = useCallback(() => {
+    if ("vibrate" in navigator) {
+      const pattern = [300, 100, 300, 100, 500, 200, 300, 100, 300];
+      navigator.vibrate(pattern);
+      vibrationTimerRef.current = setInterval(() => {
+        navigator.vibrate(pattern);
+      }, 2500);
+    }
+  }, []);
+
+  const stopVibration = useCallback(() => {
+    if (vibrationTimerRef.current !== null) {
+      clearInterval(vibrationTimerRef.current);
+      vibrationTimerRef.current = null;
+    }
+    if ("vibrate" in navigator) {
+      navigator.vibrate(0);
+    }
+  }, []);
+
+  const getBridge = useCallback((): any => {
+    try {
+      return (window as any).BioPulseBridge;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const triggerAlarm = useCallback(
+    async (alarm: Alarm) => {
+      setCurrentAlarm(alarm);
+      setIsRinging(true);
+      let native = false;
+      try {
+        const bridge = getBridge();
+        native = !!bridge && typeof bridge.triggerNativeAlarm === "function";
+        if (native) {
+          // Tell the native scheduled alarm to stay silent for this alarm —
+          // the web is the in-app ringer and plays the exact same tone the
+          // user picked in the Test Sound button. Only the (silent) native
+          // full-screen + vibration remain, so no double/overlapping audio.
+          // Note: this flag only survives ~60s and only while the app is open;
+          // when the app is closed the native alarm rings with its bundled tone.
+          if (typeof bridge.suppressAlarmSound === "function") {
+            bridge.suppressAlarmSound(alarm.id);
+          }
+        }
+      } catch {
+        native = false;
+      }
+      // Custom uploaded MP3s should play properly (not cut off early). Built-in
+      // system tones should play briefly then auto-dismiss unless user dismisses/snoozes.
+      // Also support a longer 10-minute ring for gym/exercise style alarms.
+      const isCustom = alarm.sound?.startsWith("custom:");
+      const labelLc = (alarm.label || "").toLowerCase();
+      const isGym = labelLc.includes("gym") || labelLc.includes("workout") || labelLc.includes("exercise");
+      let autoStopMs: number | null = null;
+      if (isGym) {
+        autoStopMs = 10 * 60 * 1000;
+      } else if (!isCustom) {
+        autoStopMs = 60 * 1000; // ~1 minute for built-in tones
+      }
+      AudioEngine.onAutoStop = autoStopMs
+        ? () => {
+            try {
+              stopSpeech();
+              stopVibration();
+              releaseWakeLock();
+              holdBackgroundPlayback(false);
+              setCurrentAlarm(null);
+              setIsRinging(false);
+            } catch {}
+          }
+        : null;
+      AudioEngine.play(alarm.sound, { autoStopMs });
+      // The page is making sound itself now, so stand the native fallback tone down — otherwise it
+      // rings underneath the chosen sound for as long as the alarm lasts. The engine calls this once
+      // a custom file has actually decoded, so a failed decode leaves the fallback playing.
+      AudioEngine.onSoundStarted = () => {
+        AudioEngine.onSoundStarted = null;
+        getBridge()?.stopNativeTone?.();
+      };
+      // Keeps the Android foreground media service (and wakelock) alive so a custom
+      // MP3 keeps playing when the app is backgrounded or the screen is locked.
+      //
+      // Voice announce ("pronounce"): the ring should SAY what it is for. On the APK the
+      // native TTS speaks this text over the tone ("" = stay silent, honouring the TTS
+      // toggle); in the browser there is no native layer, so the page speaks it itself
+      // and keeps repeating it until the alarm is dismissed.
+      const nativeSpeaks = hasNativeRingBridge();
+      holdBackgroundPlayback(
+        true,
+        alarm.label,
+        alarm.sound,
+        alarm.tts ? alarm.label : "",
+      );
+      stopSpeech();
+      if (alarm.tts && !nativeSpeaks && speechService.isSupported()) {
+        const say = () => speechService.speak(alarm.label || "Alarm");
+        say();
+        speechTimerRef.current = setInterval(say, 20000);
+      }
+      // The native full-screen skips launching when the web is the active
+      // ringer, so the web is responsible for vibration in-app.
+      startVibration();
+      requestWakeLock();
+    },
+    [getBridge, startVibration, requestWakeLock, stopSpeech, stopVibration, releaseWakeLock],
+  );
+
+  const dismiss = useCallback(() => {
+    AudioEngine.onAutoStop = null;
+    AudioEngine.stop();
+    stopSpeech();
+    stopVibration();
+    releaseWakeLock();
+    holdBackgroundPlayback(false);
+    setCurrentAlarm(null);
+    setIsRinging(false);
+  }, [stopVibration, releaseWakeLock, stopSpeech]);
+
+  const snooze = useCallback(
+    (minutes: number) => {
+      const alarmToSnooze = currentAlarm;
+      dismiss();
+      if (alarmToSnooze) {
+        snoozeTimerRef.current = setTimeout(() => {
+          triggerAlarm(alarmToSnooze);
+        }, minutes * 60 * 1000);
+      }
+    },
+    [currentAlarm, dismiss, triggerAlarm],
+  );
+
+  const stopAll = useCallback(() => {
+    if (snoozeTimerRef.current !== null) {
+      clearTimeout(snoozeTimerRef.current);
+      snoozeTimerRef.current = null;
+    }
+    dismiss();
+  }, [dismiss]);
+
+  // Dismiss requested from the lock-screen notification. This has to run through the same path as
+  // the in-app Dismiss button, otherwise the ring UI would stay on screen behind the notification.
+  useEffect(() => {
+    const onDismiss = () => dismiss();
+    window.addEventListener("biopulse:alarm-dismiss", onDismiss);
+    return () => window.removeEventListener("biopulse:alarm-dismiss", onDismiss);
+  }, [dismiss]);
+
+  // Teardown belongs to unmount only. Depending on the callbacks here meant the cleanup also ran
+  // whenever one of them changed identity, which called `AudioEngine.stop()` in the middle of a
+  // starting alarm — cancelling the media element's pending play and leaving the alarm silent.
+  const teardownRef = useRef<() => void>(() => {});
+  teardownRef.current = () => {
+    AudioEngine.onAutoStop = null;
+    AudioEngine.stop();
+    stopSpeech();
+    stopVibration();
+    releaseWakeLock();
+    holdBackgroundPlayback(false);
+    if (snoozeTimerRef.current !== null) {
+      clearTimeout(snoozeTimerRef.current);
+    }
+  };
+
+  useEffect(() => {
+    return () => teardownRef.current();
+  }, []);
+
+  return {
+    currentAlarm,
+    isRinging,
+    triggerAlarm,
+    dismiss,
+    snooze,
+    stopAll,
+  };
+}

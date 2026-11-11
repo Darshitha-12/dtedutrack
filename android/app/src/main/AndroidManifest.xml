@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="true"
+        android:hardwareAccelerated="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:largeHeap="true"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"></meta-data>
+        </provider>
+
+    <!-- The alarm is woken by the OS, not by a timer inside the app, so it still rings when the
+         app has been killed or the device restarted. -->
+    <receiver
+        android:name=".AlarmScheduler$AlarmReceiver"
+        android:exported="false" />
+
+    <receiver
+        android:name=".AlarmScheduler$BootReceiver"
+        android:exported="true">
+        <intent-filter>
+            <action android:name="android.intent.action.BOOT_COMPLETED" />
+            <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        </intent-filter>
+    </receiver>
+
+    <!-- Reminders are OS alarms as well, so they ring with the app closed and survive a reboot. -->
+    <receiver
+        android:name=".ReminderScheduler$ReminderReceiver"
+        android:exported="false" />
+
+    <receiver
+        android:name=".ReminderScheduler$BootReceiver"
+        android:exported="true">
+        <intent-filter>
+            <action android:name="android.intent.action.BOOT_COMPLETED" />
+            <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        </intent-filter>
+    </receiver>
+
+    <!-- Inline "Reply" action on BioPulse direct-message notifications (chat quick reply). -->
+    <receiver
+        android:name=".ChatReplyReceiver"
+        android:exported="false" />
+
+    <!-- Keeps WebView media (YouTube) playing in the background / with the screen locked,
+         and shows lock-screen play-pause controls. -->
+    <service
+        android:name=".MediaPlaybackService"
+        android:exported="false"
+        android:foregroundServiceType="mediaPlayback" />
+
+    <!-- Native Telegram client (TDLib) -->
+    <activity
+        android:name=".telegram.TelegramAuthActivity"
+        android:exported="false"
+        android:label="Telegram"
+        android:theme="@style/AppTheme.Tg" />
+
+    <activity
+        android:name=".telegram.TelegramChatsActivity"
+        android:exported="false"
+        android:label="Telegram"
+        android:theme="@style/AppTheme.Tg" />
+
+    <activity
+        android:name=".telegram.TelegramChatActivity"
+        android:exported="false"
+        android:label="Telegram"
+        android:theme="@style/AppTheme.Tg"
+        android:windowSoftInputMode="adjustResize" />
+
+    <activity
+        android:name=".telegram.TelegramPhotoActivity"
+        android:exported="false"
+        android:theme="@style/AppTheme.Tg.Immersive" />
+
+    <activity
+        android:name=".telegram.TelegramVideoActivity"
+        android:exported="false"
+        android:configChanges="orientation|screenSize|keyboardHidden"
+        android:theme="@style/AppTheme.Tg.Immersive" />
+
+    <activity
+        android:name=".telegram.TelegramWebActivity"
+        android:exported="false"
+        android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
+        android:hardwareAccelerated="true"
+        android:launchMode="singleTop"
+        android:theme="@style/AppTheme.Tg" />
+
+    <service
+        android:name=".telegram.TelegramService"
+        android:exported="false"
+        android:foregroundServiceType="dataSync" />
+
+    <receiver
+        android:name=".telegram.TelegramBootReceiver"
+        android:enabled="true"
+        android:exported="true">
+        <intent-filter>
+            <action android:name="android.intent.action.BOOT_COMPLETED" />
+            <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        </intent-filter>
+    </receiver>
+
+    <!-- Receives the inline reply text typed directly on a message notification. -->
+    <receiver
+        android:name=".telegram.TelegramReplyReceiver"
+        android:exported="false" />
+
+    <!-- Periodic self-check that restarts TelegramService if the OEM killed it, so messages keep
+         arriving promptly with the app closed. -->
+    <receiver
+        android:name=".telegram.TelegramWatchdog"
+        android:exported="false" />
+
+    </application>
+
+    <!-- Permissions -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Offline data safety net: the device backup is written to the public Downloads folder so
+         it survives an app-data wipe. Android 10+ writes it through MediaStore (no permission),
+         so this is only needed on older devices. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+
+    <!-- Video calling: camera capture + microphone capture -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Background media playback -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Without this every vibration request is silently ignored: the alarm notification's
+         pattern, the in-app ring vibration and the reminder pulses all go dead. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Lets the app ask to be exempt from battery optimisation so the Telegram notification
+         foreground service is not frozen/killed by the OEM power manager. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Lets the alarm be an exact OS alarm rather than an approximate one on Android 12+.
+         Declared as not required because the scheduler falls back to an inexact alarm when the
+         user has not granted it. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!-- Lets a ringing alarm take over the lock screen instead of only showing a silent
+         notification. From Android 14 this permission is granted automatically to apps that
+         post CATEGORY_ALARM notifications, which is what the alarm notification uses. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+    <!-- Declared non-required so the app still installs on camera-less devices -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+</manifest>

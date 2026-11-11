@@ -1,0 +1,13 @@
+node_modules/
+.next/
+.next-offline/
+out/
+.offline-stash/
+android/
+vercel_deploy.log
+build_out.log
+*.apk
+# ...except the installer we intentionally publish for phones to download.
+!public/BioPulse.apk
+*.tsbuildinfo
+__tests__/
