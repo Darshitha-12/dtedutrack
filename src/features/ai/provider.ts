@@ -104,10 +104,11 @@ class GeminiProvider implements AIProvider {
 
   private modelCandidates(overrides?: Partial<AIProviderConfig>): string[] {
     const base = overrides?.model || aiConfig.gemini.model;
+    // Retired as of Nov 2026 (404): gemini-2.0-flash, gemini-2.5-flash(+lite).
     const fallbacks = [
+      "gemini-3.8-flash",
       "gemini-3.6-flash",
-      "gemini-2.5-flash",
-      "gemini-2.0-flash",
+      "gemini-3.5-flash-lite",
     ];
     const list: string[] = [];
     for (const m of [base, ...fallbacks]) {

@@ -5,10 +5,11 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 // Models are tried in order. The env-configured model comes first, then we fall
 // back through the other stable models when the primary one is overloaded
 // (HTTP 503 / "high demand"), unavailable to the account, or not found.
+// Retired as of Nov 2026 (404): gemini-2.0-flash, gemini-2.5-flash(+lite).
 const FALLBACK_MODELS = [
+  "gemini-3.8-flash",
   "gemini-3.6-flash",
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
+  "gemini-3.5-flash-lite",
 ];
 
 function candidateModels(): string[] {

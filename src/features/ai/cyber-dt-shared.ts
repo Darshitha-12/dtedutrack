@@ -50,19 +50,20 @@ SCOPE:
 
 /** The free-tier Gemini model used for answers. */
 export function defaultCyberDTModel(): string {
-  return "gemini-2.5-flash";
+  return "gemini-3.8-flash";
 }
 
 /**
  * The model chain used for answers: the primary first, then fallbacks.
  * Free-tier rate limits are per model per project, so when the primary is
- * busy (503) or out of quota (429) the next model usually still works.
- * Retired models (404): gemini-2.0-flash, gemini-2.5-flash-lite — the
- * successors are gemini-3.8-flash and gemini-3.5-flash-lite.
+ * busy (503), out of quota (429) or retired (404) the next model usually
+ * still works. Retired as of Nov 2026: gemini-2.0-flash, gemini-2.5-flash
+ * and gemini-2.5-flash-lite all return 404 — Google points to
+ * gemini-3.8-flash as the successor.
  */
 export function cyberDTModelChain(): string[] {
   const primary = process.env.GEMINI_MODEL || defaultCyberDTModel();
-  const fallbacks = ["gemini-3.8-flash", "gemini-3.5-flash-lite"];
+  const fallbacks = ["gemini-3.6-flash", "gemini-3.5-flash-lite"];
   return [primary, ...fallbacks.filter((m) => m !== primary)];
 }
 
@@ -82,7 +83,10 @@ export function buildGeminiRequestBody(history: CyberDTChatTurn[], message: stri
     generationConfig: {
       temperature: 0.6,
       topP: 0.95,
-      maxOutputTokens: 4096,
+      // Thinking tokens count toward this budget too — with 4096 the model's
+      // own thoughts ate most of it and long answers (study plans) were cut
+      // mid-sentence with finishReason MAX_TOKENS. Keep it generous.
+      maxOutputTokens: 16384,
     },
   };
 }

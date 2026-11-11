@@ -81,6 +81,19 @@ function nowTime(): string {
 /** localStorage key for the user's own Gemini API key (browser-direct fallback). */
 const GEMINI_KEY_STORAGE = "cyberdt_gemini_key";
 
+/**
+ * Where the chat page calls the AI route. On the hosted site this is the
+ * relative /api/cyber-dt. In the offline APK the app boots from bundled
+ * assets, so a relative fetch would hit the local origin and fail — the
+ * offline build bakes NEXT_PUBLIC_SYNC_BASE (the deployed site) into the
+ * bundle, and we then call the same route there cross-origin (it sends CORS
+ * headers), so the APK also gets real streamed Gemini answers when online.
+ */
+const CYBER_DT_API = (() => {
+  const base = (process.env.NEXT_PUBLIC_SYNC_BASE || "").replace(/\/+$/, "");
+  return base ? `${base}/api/cyber-dt` : "/api/cyber-dt";
+})();
+
 function getStoredGeminiKey(): string {
   try {
     return window.localStorage.getItem(GEMINI_KEY_STORAGE) || "";
@@ -169,7 +182,7 @@ export function CyberDTChat() {
 
   // Ask the server once whether a Gemini key is configured there.
   useEffect(() => {
-    fetch("/api/cyber-dt")
+    fetch(CYBER_DT_API)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d && typeof d.serverKey === "boolean") setServerHasKey(d.serverKey);
@@ -302,7 +315,7 @@ export function CyberDTChat() {
     let serverFailed = false;
     try {
       answer = await readAnswerStream(
-        "/api/cyber-dt",
+        CYBER_DT_API,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

@@ -32,11 +32,25 @@ interface ChatTurn {
   text?: string;
 }
 
+/**
+ * CORS: the offline APK boots from bundled assets, so the chat page fetches
+ * this route from the deployed site (cross-origin) to use its Gemini key.
+ */
+const CORS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS });
+}
+
 export async function GET() {
   // Cheap status check: lets the chat page know whether the server has a
   // Gemini key configured, without making a real API call.
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
-  return NextResponse.json({ ok: true, serverKey: Boolean(apiKey) });
+  return NextResponse.json({ ok: true, serverKey: Boolean(apiKey) }, { headers: CORS });
 }
 
 /**
@@ -88,13 +102,16 @@ export async function POST(req: NextRequest) {
     const wantStream = body.stream === true;
 
     if (!message) {
-      return NextResponse.json({ ok: false, error: "empty_message", fallback: true }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "empty_message", fallback: true },
+        { status: 400, headers: CORS },
+      );
     }
 
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
     if (!apiKey) {
       // No server key: the chat page tries its own fallbacks.
-      return NextResponse.json({ ok: false, error: "no_api_key", fallback: true });
+      return NextResponse.json({ ok: false, error: "no_api_key", fallback: true }, { headers: CORS });
     }
 
     const requestBody = JSON.stringify(buildGeminiRequestBody(history, message));
@@ -133,6 +150,7 @@ export async function POST(req: NextRequest) {
           // Stream the answer as SSE while Gemini writes it.
           return new Response(pipeGeminiSSE(res.body), {
             headers: {
+              ...CORS,
               "Content-Type": "text/event-stream; charset=utf-8",
               "Cache-Control": "no-store, max-age=0",
               "X-Accel-Buffering": "no",
@@ -143,7 +161,7 @@ export async function POST(req: NextRequest) {
         const data = await res.json().catch(() => null);
         const text = extractGeminiText(data);
         if (text) {
-          return NextResponse.json({ ok: true, text });
+          return NextResponse.json({ ok: true, text }, { headers: CORS });
         }
         // Empty answer from this model — try the next one.
         lastStatus = 0;
@@ -154,8 +172,10 @@ export async function POST(req: NextRequest) {
       lastStatus = res.status;
       lastDetail = (await res.text().catch(() => "")).slice(0, 300);
 
-      // Rate limit (429) or overload (503) → try the next model in the chain.
-      if (res.status === 429 || res.status === 503) {
+      // Rate limit (429), overload (503) or retired model (404) → try the
+      // next model in the chain. 404 means the model was turned down by
+      // Google (several are retired now), so the fallbacks must take over.
+      if (res.status === 429 || res.status === 503 || res.status === 404) {
         await new Promise((resolve) => setTimeout(resolve, 600));
         continue;
       }
@@ -167,10 +187,13 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(
       { ok: false, error: "api_error", status: lastStatus, detail: lastDetail, fallback: true },
-      { status: 200 },
+      { status: 200, headers: CORS },
     );
   } catch (e: unknown) {
     const detail = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ ok: false, error: "exception", detail: detail.slice(0, 200), fallback: true });
+    return NextResponse.json(
+      { ok: false, error: "exception", detail: detail.slice(0, 200), fallback: true },
+      { headers: CORS },
+    );
   }
 }
