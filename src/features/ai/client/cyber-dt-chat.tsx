@@ -609,8 +609,28 @@ export function CyberDTChat() {
   }
 
   return (
-    <div className="flex flex-col h-screen w-full overflow-hidden rounded-3xl border border-cyan-500/30 bg-[#0b1220]/90 shadow-[0_0_40px_rgba(34,211,238,0.15)] backdrop-blur-xl">
-      {/* Neon header */}
+    <div className="flex h-screen w-full overflow-hidden rounded-3xl border border-cyan-500/30 bg-[#0b1220]/90 shadow-[0_0_40px_rgba(34,211,238,0.15)] backdrop-blur-xl">
+      <aside className="w-64 flex-shrink-0 border-e border-cyan-500/30 bg-[#0b1220]/90 flex flex-col">
+        {/* Sidebar with quick actions */}
+        <div className="flex-1 px-4 py-2 space-y-2">
+          <button type="button" onClick={startQuiz} className="w-full flex items-center gap-2 rounded-md border border-cyan-400/30 bg-cyan-500/5 text-sm text-cyan-300 hover:bg-cyan-500/10 transition"><Target className="h-4 w-4" /> {t("cyberdt.actionQuiz")}</button>
+          <button type="button" onClick={askPastPaper} className="w-full flex items-center gap-2 rounded-md border border-fuchsia-400/40 bg-fuchsia-500/10 text-sm text-fuchsia-200 hover:border-fuchsia-300 hover:bg-fuchsia-500/20 transition"><FileText className="h-4 w-4" /> {t("cyberdt.actionPaper")}</button>
+          <button type="button" onClick={askTips} className="w-full flex items-center gap-2 rounded-md border border-fuchsia-400/40 bg-fuchsia-500/10 text-sm text-fuchsia-200 hover:border-fuchsia-300 hover:bg-fuchsia-500/20 transition"><Lightbulb className="h-4 w-4" /> {t("cyberdt.actionTips")}</button>
+          <button type="button" onClick={() => generateNote(t("cyberdt.quickAsk"))} className="w-full flex items-center gap-2 rounded-md border border-violet-400/50 bg-violet-500/15 text-sm text-violet-200 hover:border-violet-300 hover:bg-violet-500/20 transition"><Lightbulb className="h-4 w-4" /> {t("cyberdt.actionNote")}</button>
+        </div>
+        {/* Header inside sidebar */}
+        <div className="flex items-center gap-3 border-b border-cyan-500/30 bg-gradient-to-r from-cyan-500/15 via-violet-500/10 to-fuchsia-500/15 px-4 py-3">
+          <span className="relative grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-cyan-400/50 bg-cyan-500/10 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.4)]"><Bot className="h-5 w-5" /></span>
+          <div><p className="text-sm font-extrabold tracking-wide text-cyan-200">Cyber DT AI</p><p className="text-2xs text-cyan-400/80">{t("cyberdt.responsesUnlimited")}</p></div>
+        </div>
+        {/* Quick action buttons */}
+        <div className="flex-1 px-4 py-2 space-y-1">
+          <button type="button" onClick={openPlanPanel} className="w-full flex items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 text-2xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50"><ClipboardList className="h-3.5 w-3.5" /> {t("cyberdt.actionPlan")}</button>
+          <button type="button" onClick={startQuiz} className="w-full flex items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 text-2xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50"><Target className="h-3 w-3" /> {t("cyberdt.actionQuiz")}</button>
+          <button type="button" onClick={askPastPaper} className="w-full flex items-center gap-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 text-2xs font-semibold text-fuchsia-200 transition hover:border-fuchsia-300 hover:bg-fuchsia-500/20 disabled:opacity-50"><FileText className="h-3 w-3" /> {t("cyberdt.actionPaper")}</button>
+          <button type="button" onClick={askTips} className="w-full flex items-center gap-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 text-2xs font-semibold text-fuchsia-200 transition hover:border-fuchsia-300 hover:bg-fuchsia-500/20 disabled:opacity-50"><Lightbulb className="h-3 w-3" /> {t("cyberdt.actionTips")}</button>
+        </div>
+      </aside>
       <div className="flex items-center gap-3 border-b border-cyan-500/30 bg-gradient-to-r from-cyan-500/15 via-violet-500/10 to-fuchsia-500/15 px-5 py-4">
         <span className="relative grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-cyan-400/50 bg-cyan-500/10 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.4)]">
           <Bot className="h-6 w-6" />
