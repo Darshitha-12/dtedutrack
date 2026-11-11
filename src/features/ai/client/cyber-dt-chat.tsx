@@ -609,7 +609,7 @@ export function CyberDTChat() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-8rem)] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-cyan-500/30 bg-[#0b1220]/90 shadow-[0_0_40px_rgba(34,211,238,0.15)] backdrop-blur-xl">
+    <div className="flex h-screen w-full overflow-hidden rounded-3xl border border-cyan-500/30 bg-[#0b1220]/90 shadow-[0_0_40px_rgba(34,211,238,0.15)] backdrop-blur-xl">
       {/* Neon header */}
       <div className="flex items-center gap-3 border-b border-cyan-500/30 bg-gradient-to-r from-cyan-500/15 via-violet-500/10 to-fuchsia-500/15 px-5 py-4">
         <span className="relative grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-cyan-400/50 bg-cyan-500/10 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.4)]">
@@ -818,11 +818,11 @@ export function CyberDTChat() {
         </div>
       )}
       {/* Messages */}
-      <div ref={listRef} className="scrollbar-slim flex-1 space-y-3 overflow-y-auto px-4 py-4">
+      <div ref={listRef} className="scrollbar-slim w-full space-y-3 overflow-y-auto px-4 py-4">
         {messages.map((m) =>
           m.role === "user" ? (
             <div key={m.id} className="flex flex-col items-end">
-              <div className="max-w-[85%] whitespace-pre-line rounded-2xl rounded-br-sm border border-cyan-400/40 bg-cyan-500/15 px-4 py-2.5 text-sm text-cyan-50">
+              <div className="whitespace-pre-line rounded-2xl rounded-br-sm border border-cyan-400/40 bg-cyan-500/15 px-4 py-2.5 text-sm text-cyan-50">
                 {m.text}
               </div>
               {m.time && <span className="mt-0.5 pr-1 text-[0.6rem] text-cyan-500/60">{m.time}</span>}
@@ -833,7 +833,7 @@ export function CyberDTChat() {
                 <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-violet-400/40 bg-violet-500/15 text-sm">
                   {m.emoji ?? "🤖"}
                 </span>
-                <div className="max-w-[85%] whitespace-pre-line rounded-2xl rounded-bl-sm border border-violet-400/30 bg-violet-500/10 px-4 py-2.5 text-sm text-violet-50 [&_h4]:text-sm [&_h5]:text-sm [&_h6]:text-[0.92rem] [&_p]:text-sm">
+                <div className="whitespace-pre-line rounded-2xl rounded-bl-sm border border-violet-400/30 bg-violet-500/10 px-4 py-2.5 text-sm text-violet-50 [&_h4]:text-sm [&_h5]:text-sm [&_h6]:text-[0.92rem] [&_p]:text-sm">
                   {m.text ? (
                     <>
                       <CyberDTMessageBody text={m.text} />
@@ -892,7 +892,7 @@ export function CyberDTChat() {
       </div>
 
       {/* Quick actions + quick questions */}
-      <div className="scrollbar-slim flex gap-2 overflow-x-auto border-t border-cyan-500/20 px-4 py-2.5">
+      <div className="scrollbar-slim w-full flex gap-2 overflow-x-auto border-t border-cyan-500/20 px-4 py-2.5">
         <button
           type="button"
           onClick={openPlanPanel}
