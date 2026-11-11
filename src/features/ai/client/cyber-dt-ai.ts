@@ -1008,7 +1008,16 @@ Ask any of these and you'll get a full, exam-ready answer with definitions, stag
 function matchesTopic(message: string, topic: TopicEntry): boolean {
   const lower = message.toLowerCase();
   for (const kw of topic.keywords) {
-    if (lower.includes(kw.toLowerCase())) return true;
+    const k = kw.toLowerCase();
+    // A trailing space marks a "whole word" intent (e.g. "er " means the
+    // organelle ER, not the letters inside "harder"). Match it as a word
+    // boundary instead of a substring, otherwise every word ending in "er "
+    // falsely triggers the cell topic.
+    if (k.endsWith(" ")) {
+      if (new RegExp(`\\b${k.trim()}\\b`, "i").test(message)) return true;
+    } else if (lower.includes(k)) {
+      return true;
+    }
   }
   for (const kw of topic.keywordsSi) {
     if (message.includes(kw)) return true;
@@ -1036,6 +1045,45 @@ function stableFallbackIndex(message: string, length: number): number {
  * renderCyberDTResponse() using the detected locale.
  */
 export function generateCyberDTResponse(message: string, _locale: CyberDTLocale = "en"): CyberDTResponse {
+  // Study-plan / timetable requests need the real AI (they depend on the
+  // student's dates, hours and subjects). When the AI is unavailable and we
+  // fall back to this knowledge base, don't pretend to answer a single topic
+  // — give an honest "AI is busy" message plus a reusable framework.
+  if (/\b(plan|timetable|schedule)\b/i.test(message)) {
+    return {
+      textEn: `📅 I can't build a custom day-by-day plan right now — the AI service is temporarily busy (Google's free tier is overloaded).
+
+What you can do:
+• Try again in a few minutes — the AI usually recovers quickly
+• Paste your own free Google AI Studio key (🔑 button) — it has its own separate quota and usually works even when the shared key is busy
+• Or ask me one biology topic at a time and I'll give you a full exam-style answer right away
+
+In the meantime, here's a reusable A/L revision framework you can adapt to your own dates:
+1. Active recall — close the book and write out everything you remember, then check
+2. Spaced repetition — review each topic on Day 1, 3, 7, 14 and 30
+3. Past papers — do them TIMED, from the newest 5 years
+4. Marking schemes — mark your own answers with the official scheme
+5. Weak topics first — rate every topic 1–5, attack the 1s and 2s first
+6. Answer structure — definition → explanation → example → labelled diagram
+7. Sleep 7–8 hours — memory consolidates during sleep`,
+      textSi: `📅 මට දැන් ඔයාට විශේෂිත දවස්-වාර සැලසුමක් හදන්න බැහැ — AI සේවාව දැන් තාවකාලිකව busy (Google එකේ free tier එක overloaded).
+
+ඔයාට කරන්න පුළුවන් දේවල්:
+• මිනිත්තු කීපයකින් නැවත try කරන්න — AI එක ඉක්මනින් recover වෙනවා
+• ඔයාගේ own free Google AI Studio key එක paste කරන්න (🔑 button) — ඒකට separate quota එකක් තියෙනවා, shared key එක busy වුණත් ඔයාගේ key එකෙන් answer එනවා
+• නැත්නම් එක biology topic එකක් ගැන අහන්න — මම සම්පූර්ණ exam-style answer එකක් දෙනවා
+
+ඒ අතරේ, ඔයාට adapt කරගන්න පුළුවන් පොදු A/L අධ්‍යයන රාමුවක්:
+1. Active recall — පොත වහලා මතක හැම දෙයක්ම ලියන්න, ඊට පස්සේ check කරන්න
+2. Spaced repetition — එක topic එක Day 1, 3, 7, 14, 30 වලදී review කරන්න
+3. Past papers — TIMED විදිහට, අලුත්ම අවුරුදු 5
+4. Marking schemes — official scheme එකෙන් ඔයාගේම answers mark කරන්න
+5. Weak topics first — ෑක් topic එකක් 1–5 rate කරන්න, 1 සහ 2 එවා මුලින්ම attack කරන්න
+6. Answer structure — definition → explanation → example → labelled diagram
+7. පැය 7–8 නින්ද — නින්දේදී memory consolidate වෙනවා`,
+      emoji: "📅",
+    };
+  }
   for (const topic of topicKnowledge) {
     if (matchesTopic(message, topic)) {
       return { textEn: topic.textEn, textSi: topic.textSi, emoji: topic.emoji };

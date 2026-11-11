@@ -1,8 +1,8 @@
 {
-  "version": "v20261111163850",
-  "size": 1643740,
-  "sha256": "562bee9fc35d6559c4d61430099b33938d7ba8ddd6200274c264e4c984e2e5db",
+  "version": "v20261111173856",
+  "size": 1644196,
+  "sha256": "03f844cc883d47e863bd8b518dd6dfca585d91ae518de681ee3d4968c9e50161",
   "files": 192,
-  "builtAt": "2026-11-11T16:38:51.527Z",
+  "builtAt": "2026-11-11T17:38:56.972Z",
   "zipUrl": "offline-build.zip"
 }
