@@ -131,6 +131,8 @@ export const en = {
     analytics: "Analytics",
     search: "Search",
     workLog: "Work Log",
+    smartRevision: "Smart Revision",
+    cyberdt: "Cyber DT AI",
     pomodoro: "Pomodoro",
     timer: "Timer",
     alarms: "Alarms",

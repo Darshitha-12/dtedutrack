@@ -12,10 +12,10 @@
   publish = ".next"
 
 [build.environment]
-  NODE_VERSION = "20"
+  NODE_VERSION = "22"
   NEXT_TELEMETRY_DISABLED = "1"
-  AUTH_SECRET = "biopulse-dev-fallback-secret-please-change-on-production-1234567890abcdef"
-  NEXTAUTH_SECRET = "biopulse-dev-fallback-secret-please-change-on-production-1234567890abcdef"
+  # AUTH_SECRET and NEXTAUTH_SECRET should be set as Netlify environment variables
+  # (do not store plain text secrets in this file for production use)
   NEXTAUTH_URL = "https://biopulse-study.netlify.app"
 
 [[plugins]]

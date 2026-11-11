@@ -136,6 +136,8 @@ export const si = {
     reminders: "මතක් කිරීම්",
     marks: "ලකුණු",
     workLog: "දෛනික වැඩ",
+    smartRevision: "පුරුදු පුනරීක්ෂණය",
+    cyberdt: "Cyber DT AI",
     settings: "සැකසුම්",
     profile: "පැතිකඩ",
     logout: "නික්මීම",
