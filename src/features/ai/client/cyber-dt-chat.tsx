@@ -631,6 +631,7 @@ export function CyberDTChat() {
           <button type="button" onClick={askTips} className="w-full flex items-center gap-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 text-2xs font-semibold text-fuchsia-200 transition hover:border-fuchsia-300 hover:bg-fuchsia-500/20 disabled:opacity-50"><Lightbulb className="h-3 w-3" /> {t("cyberdt.actionTips")}</button>
         </div>
       </aside>
+      <div className="flex flex-1 flex-col overflow-hidden">
       <div className="flex items-center gap-3 border-b border-cyan-500/30 bg-gradient-to-r from-cyan-500/15 via-violet-500/10 to-fuchsia-500/15 px-5 py-4">
         <span className="relative grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-cyan-400/50 bg-cyan-500/10 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.4)]">
           <Bot className="h-6 w-6" />
@@ -1001,6 +1002,7 @@ export function CyberDTChat() {
           </Button>
         )}
       </form>
+      </div>
     </div>
   );
 }
