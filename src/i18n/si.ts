@@ -204,6 +204,10 @@ export const si = {
     planHours: "දිනකට පැය",
     planWeak: "අමාරු විෂයයන් (අමතර)",
     planWeakPlaceholder: "උදා: ජාන විද්‍යාව, ශ්වසනය",
+    planDesc: "විස්තරය / අමතර උපදෙස් (ඕනෑ නම්)",
+    planDescPlaceholder:
+      "උදා: අන්තිම සතියේ ජාන විද්‍යාවට වැඩි කාලයක්, ඉරිදා විවේකය, පාසල් නිසා පස්සේ විතරක් වැඩ කරන්න පුළුවන්",
+    planAutoDate: "dashboard එකෙන්",
     planGenerate: "සැලසුම හදන්න",
     planCancel: "අවලංගු",
     apiKey: "Gemini API key",

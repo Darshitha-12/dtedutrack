@@ -204,6 +204,10 @@ export const en = {
     planHours: "Study hours per day",
     planWeak: "Difficult topics (optional)",
     planWeakPlaceholder: "e.g. Genetics, Respiration",
+    planDesc: "Description / extra instructions (optional)",
+    planDescPlaceholder:
+      "e.g. more time for Genetics in the last week, rest on Sundays, school until 1.30 pm so evenings only",
+    planAutoDate: "from your dashboard",
     planGenerate: "Generate plan",
     planCancel: "Cancel",
     apiKey: "Gemini API key",

@@ -156,6 +156,13 @@ export function CyberDTChat() {
   const [planDate, setPlanDate] = useState("");
   const [planHours, setPlanHours] = useState("4");
   const [planWeak, setPlanWeak] = useState("");
+  const [planDesc, setPlanDesc] = useState("");
+  // True while the exam date shown is the one auto-filled from the profile.
+  const [planDateAuto, setPlanDateAuto] = useState(false);
+  // Remembers whether the user typed their own values, so a late profile
+  // fetch never overwrites what they entered.
+  const planDateTouched = useRef(false);
+  const planHoursTouched = useRef(false);
 
   // Ask the server once whether a Gemini key is configured there.
   useEffect(() => {
@@ -166,6 +173,31 @@ export function CyberDTChat() {
       })
       .catch(() => {});
     setLocalHasKey(Boolean(getStoredGeminiKey()));
+  }, []);
+
+  // Pre-fill the study-plan form from the profile the student keeps on the
+  // dashboard: their saved exam date and daily study target. Works offline
+  // too — the offline fetch shim answers /api/profile from local storage.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/profile")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { examDate?: string; dailyTargetHours?: number } | null) => {
+        if (cancelled || !d) return;
+        const examDate = typeof d.examDate === "string" ? d.examDate.trim() : "";
+        if (/^\d{4}-\d{2}-\d{2}$/.test(examDate) && !planDateTouched.current) {
+          setPlanDate(examDate);
+          setPlanDateAuto(true);
+        }
+        const hrs = Number(d.dailyTargetHours);
+        if (Number.isFinite(hrs) && hrs >= 1 && hrs <= 12 && !planHoursTouched.current) {
+          setPlanHours(String(Math.round(hrs)));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const aiMode = serverHasKey || localHasKey;
@@ -416,15 +448,21 @@ export function CyberDTChat() {
     const defaultExam = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
     const examDate = planDate || defaultExam.toISOString().slice(0, 10);
     const weak = planWeak.trim() || "(not given — pick the units A/L students usually find hardest)";
+    const desc = planDesc.trim();
     const prompt = [
       "Create a personalized A/L Biology revision study plan for me.",
       `- Today's date: ${today.toISOString().slice(0, 10)}`,
       `- My exam date: ${examDate}`,
       `- Hours I can study per day: ${planHours || "4"}`,
       `- Topics/units I find difficult: ${weak}`,
+      desc
+        ? `- My extra instructions (VERY IMPORTANT — the whole plan must follow these; where they conflict with the defaults above, these win): ${desc}`
+        : "",
       "Make it a realistic day-wise plan as a markdown table (date, topic/unit, activity type — learning / revising / past papers — and time blocks), with weekly goals, rest days, and 2-3 full past-paper days near the exam.",
       `Reply fully in ${replyLanguage}.`,
-    ].join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
     setShowPlanPanel(false);
     send(prompt);
   };
@@ -577,11 +615,20 @@ export function CyberDTChat() {
           <p className="text-2xs font-semibold text-violet-200">{t("cyberdt.planTitle")}</p>
           <div className="grid grid-cols-2 gap-2">
             <label className="space-y-1">
-              <span className="text-2xs text-cyan-300/80">{t("cyberdt.planExamDate")}</span>
+              <span className="text-2xs text-cyan-300/80">
+                {t("cyberdt.planExamDate")}
+                {planDateAuto && planDate && !planDateTouched.current ? (
+                  <span className="ml-1 text-fuchsia-300/70">· {t("cyberdt.planAutoDate")}</span>
+                ) : null}
+              </span>
               <Input
                 type="date"
                 value={planDate}
-                onChange={(e) => setPlanDate(e.target.value)}
+                onChange={(e) => {
+                  planDateTouched.current = true;
+                  setPlanDateAuto(false);
+                  setPlanDate(e.target.value);
+                }}
                 className="rounded-xl border-cyan-500/30 bg-transparent text-sm text-cyan-50 [color-scheme:dark] focus-visible:ring-cyan-400/60"
               />
             </label>
@@ -592,7 +639,10 @@ export function CyberDTChat() {
                 min={1}
                 max={12}
                 value={planHours}
-                onChange={(e) => setPlanHours(e.target.value)}
+                onChange={(e) => {
+                  planHoursTouched.current = true;
+                  setPlanHours(e.target.value);
+                }}
                 className="rounded-xl border-cyan-500/30 bg-transparent text-sm text-cyan-50 [color-scheme:dark] focus-visible:ring-cyan-400/60"
               />
             </label>
@@ -604,6 +654,17 @@ export function CyberDTChat() {
               onChange={(e) => setPlanWeak(e.target.value)}
               placeholder={t("cyberdt.planWeakPlaceholder")}
               className="rounded-xl border-cyan-500/30 bg-transparent text-sm text-cyan-50 placeholder:text-cyan-400/40 focus-visible:ring-cyan-400/60"
+            />
+          </label>
+          <label className="block space-y-1">
+            <span className="text-2xs text-cyan-300/80">{t("cyberdt.planDesc")}</span>
+            <textarea
+              value={planDesc}
+              onChange={(e) => setPlanDesc(e.target.value)}
+              placeholder={t("cyberdt.planDescPlaceholder")}
+              rows={3}
+              maxLength={600}
+              className="w-full resize-y rounded-xl border border-cyan-500/30 bg-transparent px-3 py-2 text-sm text-cyan-50 outline-none placeholder:text-cyan-400/40 focus-visible:ring-2 focus-visible:ring-cyan-400/60"
             />
           </label>
           <div className="flex items-center justify-end gap-2 pt-1">
