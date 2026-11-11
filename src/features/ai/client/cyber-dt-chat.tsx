@@ -449,6 +449,13 @@ export function CyberDTChat() {
     const examDate = planDate || defaultExam.toISOString().slice(0, 10);
     const weak = planWeak.trim() || "(not given — pick the units A/L students usually find hardest)";
     const desc = planDesc.trim();
+    // Reply in the language the student wrote their notes in (Sinhala script,
+    // Singlish or English); app language is only the fallback.
+    const planLang = detectCyberDTLocale(
+      `${planWeak} ${desc}`,
+      locale === "si" ? "si" : "en",
+    );
+    const planReplyLanguage = planLang === "si" ? "Sinhala" : "English";
     const prompt = [
       "Create a personalized A/L Biology revision study plan for me.",
       `- Today's date: ${today.toISOString().slice(0, 10)}`,
@@ -459,7 +466,7 @@ export function CyberDTChat() {
         ? `- My extra instructions (VERY IMPORTANT — the whole plan must follow these; where they conflict with the defaults above, these win): ${desc}`
         : "",
       "Make it a realistic day-wise plan as a markdown table (date, topic/unit, activity type — learning / revising / past papers — and time blocks), with weekly goals, rest days, and 2-3 full past-paper days near the exam.",
-      `Reply fully in ${replyLanguage}.`,
+      `Reply fully in ${planReplyLanguage}.`,
     ]
       .filter(Boolean)
       .join("\n");
