@@ -201,6 +201,7 @@ export const en = {
     actionTips: "Exam tips",
     actionNote: "Generate Note",
     noteTitle: "Study Note",
+    noteTopicPlaceholder: "e.g. Photosynthesis, Newton's laws, Alkenes",
     noteSubtitle: "Generated AI study notes",
     generateNotePrompt: "Generating a detailed study note based on your topic and language preference...",
     noteClose: "Close",

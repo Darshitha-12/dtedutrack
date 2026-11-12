@@ -414,6 +414,7 @@ export async function POST(req: Request) {
 
         const system = [
           "You are the AI study-plan assistant inside BioPulse, a Sri Lankan A/L study planner.",
+          "The student studies G.C.E. A/L Science subjects (Biology, Physics, Chemistry) — plan for whichever subjects they list, following the official NIE Resource Book chapter structure of each subject when naming topics/units.",
           "The student explains their situation and goals in their own words. Using their available time, subjects, and exam info, create ONE personalized weekly study plan.",
           "Rules:",
           "- Stay strictly inside the student's stated weekly available time. Never invent extra hours.",

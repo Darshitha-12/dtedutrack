@@ -38,6 +38,7 @@ export interface ConversationSummary {
 export interface AIChatRequest {
   conversationId?: string;
   message: string;
+  image?: string; // base64 encoded image data URI
   topicId?: string;
   subtopicId?: string;
   mode?: AIMode;

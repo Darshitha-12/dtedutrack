@@ -26,8 +26,8 @@ export const AI_MODES: AIModeConfig[] = [
     id: "tutor",
     name: "A/L Tutor",
     nameSi: "A/L ගුරුවරයා",
-    description: "Standard A/L Biology tutor mode",
-    systemSuffix: "Provide clear, accurate A/L Biology explanations. Adapt to the student's level. Use proper scientific terminology.",
+    description: "Standard A/L Science tutor mode",
+    systemSuffix: "Provide clear, accurate A/L Biology, Physics or Chemistry explanations, strictly matching the relevant NIE Resource Book. Adapt to the student's level. Use proper scientific terminology.",
     icon: "🎓",
   },
   {

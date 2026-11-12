@@ -590,16 +590,22 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
   // --- Quick actions -------------------------------------------------------
 
   const replyLanguage = locale === "si" ? "Sinhala" : "English";
-  const generateNote = async (topic: string) => {
-    setNoteTopic(topic);
+  const generateNote = async (
+    topic: string,
+    subject: "Biology" | "Physics" | "Chemistry" = noteSubject,
+  ) => {
+    const clean = topic.trim();
+    setShowNotePanel(true);
+    if (!clean) return;
+    setNoteTopic(clean);
     setNoteLanguage(replyLanguage);
     setNoteGenerated(null);
-    setShowNotePanel(true);
+    setNoteLoading(true);
     try {
       const res = await fetch("/api/notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic, language: replyLanguage }),
+        body: JSON.stringify({ topic: clean, language: replyLanguage, subject }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -609,6 +615,8 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
       setNoteGenerated(note);
     } catch (err) {
       console.error("Note generation error:", err);
+    } finally {
+      setNoteLoading(false);
     }
   };
 
@@ -653,19 +661,19 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
 
   const startQuiz = () => {
     send(
-      `Start an interactive quiz for me. Ask ONE A/L Biology multiple-choice question at a time with 4 options (A-D) and WAIT for my answer. After I reply, tell me if it is correct with a 1-2 line explanation, then ask the next. Ask 10 questions total with increasing difficulty. Reply fully in ${replyLanguage}.`,
+      `Start an interactive quiz for me. If I have not said which subject, ask me first whether I want Biology, Physics or Chemistry. Then ask ONE A/L multiple-choice question at a time from the official Sri Lankan A/L Resource Book (NIE) for that subject, with 4 options (A-D), and WAIT for my answer. After I reply, tell me if it is correct with a 1-2 line explanation, then ask the next. Ask 10 questions total with increasing difficulty, targeting the subtle definitions, diagrams and summary-box points in the resource book. Reply fully in ${replyLanguage}.`,
     );
   };
 
   const askPastPaper = () => {
     send(
-      `Give me 3 G.C.E. A/L Biology past-paper-style structured essay questions, and for each one list the key marking points a full-mark answer must include. Reply fully in ${replyLanguage}.`,
+      `Give me 3 G.C.E. A/L past-paper-style structured essay questions from the official Sri Lankan A/L Resource Book (NIE), and for each one list the key marking points (ලකුණු දෙන ප්‍රධාන ලක්ෂණ) that a full-mark answer must include. If I have not said which subject, ask me first whether I want Biology, Physics or Chemistry. Reply fully in ${replyLanguage}.`,
     );
   };
 
   const askTips = () => {
     send(
-      `Give me your top 10 practical exam tips for the A/L Biology paper — time management, common mistakes to avoid, and how to write answers that score full marks. Reply fully in ${replyLanguage}.`,
+      `Give me your top 10 practical exam tips for the A/L Science papers (Biology, Physics, Chemistry) — time management, common mistakes to avoid, and how to write answers that score full marks under the Sri Lankan A/L marking scheme. Reply fully in ${replyLanguage}.`,
     );
   };
 
@@ -702,6 +710,9 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
   // Note generation state
   const [showNotePanel, setShowNotePanel] = useState(false);
   const [noteTopic, setNoteTopic] = useState("");
+  const [noteInput, setNoteInput] = useState("");
+  const [noteSubject, setNoteSubject] = useState<"Biology" | "Physics" | "Chemistry">("Biology");
+  const [noteLoading, setNoteLoading] = useState(false);
   const [noteLanguage, setNoteLanguage] = useState<"English" | "Sinhala">("English");
   const [noteGenerated, setNoteGenerated] = useState<Note | null>(null);
 
@@ -731,13 +742,13 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
       emoji: "🎯",
       title: t("cyberdt.actionQuiz") || "Create a quiz",
       desc: t("cyberdt.actionQuizDesc") || "Test yourself with MCQs",
-      prompt: `Start an interactive quiz for me. Ask ONE A/L Biology multiple-choice question at a time with 4 options (A-D) and WAIT for my answer. After I reply, tell me if it is correct with a 1-2 line explanation, then ask the next. Ask 10 questions total with increasing difficulty. Reply fully in ${replyLanguage}.`,
+      prompt: `Start an interactive quiz for me. If I have not said which subject, ask me first whether I want Biology, Physics or Chemistry. Then ask ONE A/L multiple-choice question at a time from the official Sri Lankan A/L Resource Book (NIE) for that subject, with 4 options (A-D), and WAIT for my answer. After I reply, tell me if it is correct with a 1-2 line explanation, then ask the next. Ask 10 questions total with increasing difficulty, targeting the subtle definitions, diagrams and summary-box points in the resource book. Reply fully in ${replyLanguage}.`,
     },
     {
       emoji: "📄",
       title: t("cyberdt.actionPaper") || "Past paper help",
       desc: t("cyberdt.actionPaperDesc") || "Marking points & model answers",
-      prompt: `Give me 3 G.C.E. A/L Biology past-paper-style structured essay questions, and for each one list the key marking points a full-mark answer must include. Reply fully in ${replyLanguage}.`,
+      prompt: `Give me 3 G.C.E. A/L past-paper-style structured essay questions from the official Sri Lankan A/L Resource Book (NIE), and for each one list the key marking points (ලකුණු දෙන ප්‍රධාන ලක්ෂණ) that a full-mark answer must include. If I have not said which subject, ask me first whether I want Biology, Physics or Chemistry. Reply fully in ${replyLanguage}.`,
     },
   ];
 
@@ -758,8 +769,14 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
   };
 
   return (
-    <div className="flex h-full w-full flex-col bg-[#080D18] text-[#F1F5F9]">
-      {/* ===== Top bar ===== */}
+    <div className="flex h-screen w-full flex-col bg-[#080D18] text-[#F1F5F9]">
+      <aside className="w-64 flex-shrink-0 border-r border-white/5 bg-[#080D18]/80 flex flex-col p-4 pb-6 pt-6 space-y-2">
+        <button type="button" onClick={() => startQuiz()} className="w-full flex items-center gap-2 rounded-md border border-cyan-400/30 bg-cyan-500/5 text-sm text-cyan-300 hover:bg-cyan-500/10 transition"><Target className="h-4 w-4" /> Quiz</button>
+        <button type="button" onClick={() => askPastPaper()} className="w-full flex items-center gap-2 rounded-md border border-fuchsia-400/40 bg-fuchsia-500/10 text-sm text-fuchsia-200 hover:border-fuchsia-300 hover:bg-fuchsia-500/20 transition"><FileText className="h-4 w-4" /> Past Paper</button>
+        <button type="button" onClick={() => askTips()} className="w-full flex items-center gap-2 rounded-md border border-fuchsia-400/40 bg-fuchsia-500/10 text-sm text-fuchsia-200 hover:border-fuchsia-300 hover:bg-fuchsia-500/20 transition"><Lightbulb className="h-4 w-4" /> Tips</button>
+        <button type="button" onClick={() => setShowNotePanel(true)} className="w-full flex items-center gap-2 rounded-md border border-violet-400/50 bg-violet-500/15 text-sm text-violet-200 hover:border-violet-300 hover:bg-violet-500/20 transition"><Lightbulb className="h-4 w-4" /> Generate Note</button>
+        <div className="flex-1 border-t border-white/5 pt-4 text-center text-xs text-cyan-400/60">Responses Unlimited</div>
+      </aside>      {/* ===== Top bar ===== */}
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/5 bg-[#080D18]/80 px-4 py-3 backdrop-blur">
         <div className="flex min-w-0 items-center gap-3">
           <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-cyan-400/40 bg-cyan-500/10 text-cyan-300 shadow-[0_0_16px_rgba(34,211,238,0.35)]">
@@ -950,7 +967,43 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
           <p className="text-sm font-semibold text-violet-200">{t("cyberdt.noteTitle") || "Study Note"}</p>
           <p className="text-xs text-cyan-300/80">{t("cyberdt.noteSubtitle") || "Generated AI study notes"}</p>
           <div className="mx-auto max-w-3xl space-y-2">
-            <p className="text-sm text-cyan-400/60">{noteTopic || t("cyberdt.generateNotePrompt")}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                value={noteInput}
+                onChange={(e) => setNoteInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !noteLoading && noteInput.trim()) {
+                    e.preventDefault();
+                    void generateNote(noteInput);
+                  }
+                }}
+                placeholder={t("cyberdt.noteTopicPlaceholder") || "e.g. Photosynthesis, Newton's laws, Alkenes"}
+                className="min-w-0 flex-1 rounded-xl border-violet-500/20 bg-[#111B2D] text-sm text-violet-50 placeholder:text-violet-400/40 focus-visible:ring-violet-400/60"
+              />
+              <select
+                value={noteSubject}
+                onChange={(e) => setNoteSubject(e.target.value as "Biology" | "Physics" | "Chemistry")}
+                className="rounded-xl border border-violet-500/20 bg-[#111B2D] px-2 py-2 text-sm text-violet-50 outline-none focus:ring-2 focus:ring-violet-400/60"
+              >
+                <option value="Biology">Biology</option>
+                <option value="Physics">Physics</option>
+                <option value="Chemistry">Chemistry</option>
+              </select>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void generateNote(noteInput)}
+                disabled={noteLoading || !noteInput.trim()}
+                className="rounded-xl border border-violet-400/50 bg-violet-500/20 text-violet-100 hover:bg-violet-500/40 disabled:opacity-50"
+              >
+                {noteLoading ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Lightbulb className="mr-1 h-3.5 w-3.5" />}
+                {t("cyberdt.actionNote") || "Generate"}
+              </Button>
+            </div>
+            {noteTopic && <p className="text-sm text-cyan-400/60">{noteTopic}</p>}
+            {!noteGenerated && !noteLoading && !noteTopic && (
+              <p className="text-sm text-cyan-400/60">{t("cyberdt.generateNotePrompt")}</p>
+            )}
             {noteGenerated && (
               <pre className="max-h-64 overflow-auto rounded-xl border border-violet-400/30 bg-violet-500/10 p-3 text-sm text-violet-100">{noteGenerated.content}</pre>
             )}
@@ -976,7 +1029,7 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
                 {t("cyberdt.welcomeTitle") || "How can I help you study today?"}
               </h2>
               <p className="mt-2 max-w-md text-sm text-cyan-300/70">
-                {t("cyberdt.welcomeSubtitle") || "Ask me about any A/L Biology topic, generate study notes, create quizzes, or build a personalized study plan."}
+                {t("cyberdt.welcomeSubtitle") || "Ask me about any A/L Biology, Physics or Chemistry topic, generate study notes, create quizzes, or build a personalized study plan."}
               </p>
               <div className="mt-8 grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
                 {suggestionCards.map((card) => (
