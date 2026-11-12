@@ -860,7 +860,24 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
         </div>
       </header>
 
-      {/* ===== Panels (key / plan / note) ===== */}
+      {/* ===== Quick actions bar (always visible) ===== */}
+      <div className="shrink-0 flex flex-wrap items-center gap-2 border-b border-white/5 bg-[#080D18]/60 px-4 py-2 backdrop-blur">
+        <button type="button" onClick={openPlanPanel} disabled={isTyping} className="flex items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50">
+          <ClipboardList className="h-3.5 w-3.5" /> {t("cyberdt.actionPlan") || "Plan"}
+        </button>
+        <button type="button" onClick={startQuiz} disabled={isTyping} className="flex items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50">
+          <Target className="h-3.5 w-3.5" /> {t("cyberdt.actionQuiz") || "Quiz"}
+        </button>
+        <button type="button" onClick={askPastPaper} disabled={isTyping} className="flex items-center gap-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 px-3 py-1 text-xs font-semibold text-fuchsia-200 transition hover:border-fuchsia-300 hover:bg-fuchsia-500/20 disabled:opacity-50">
+          <FileText className="h-3.5 w-3.5" /> {t("cyberdt.actionPaper") || "Past papers"}
+        </button>
+        <button type="button" onClick={askTips} disabled={isTyping} className="flex items-center gap-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 px-3 py-1 text-xs font-semibold text-fuchsia-200 transition hover:border-fuchsia-300 hover:bg-fuchsia-500/20 disabled:opacity-50">
+          <Lightbulb className="h-3.5 w-3.5" /> {t("cyberdt.actionTips") || "Tips"}
+        </button>
+        <button type="button" onClick={() => generateNote(t("cyberdt.quickAsk"))} disabled={isTyping} className="flex items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50">
+          <Lightbulb className="h-3.5 w-3.5" /> {t("cyberdt.actionNote") || "Generate Note"}
+        </button>
+      </div>
       {showKeyPanel && (
         <div className="shrink-0 space-y-2 border-b border-white/5 bg-cyan-500/5 px-4 py-3">
           <p className="text-xs leading-relaxed text-cyan-200/80">{t("cyberdt.apiKeyHint")}</p>
