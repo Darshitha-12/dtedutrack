@@ -770,13 +770,7 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
 
   return (
     <div className="flex h-screen w-full flex-col bg-[#080D18] text-[#F1F5F9]">
-      <aside className="w-64 flex-shrink-0 border-r border-white/5 bg-[#080D18]/80 flex flex-col p-4 pb-6 pt-6 space-y-2">
-        <button type="button" onClick={() => startQuiz()} className="w-full flex items-center gap-2 rounded-md border border-cyan-400/30 bg-cyan-500/5 text-sm text-cyan-300 hover:bg-cyan-500/10 transition"><Target className="h-4 w-4" /> Quiz</button>
-        <button type="button" onClick={() => askPastPaper()} className="w-full flex items-center gap-2 rounded-md border border-fuchsia-400/40 bg-fuchsia-500/10 text-sm text-fuchsia-200 hover:border-fuchsia-300 hover:bg-fuchsia-500/20 transition"><FileText className="h-4 w-4" /> Past Paper</button>
-        <button type="button" onClick={() => askTips()} className="w-full flex items-center gap-2 rounded-md border border-fuchsia-400/40 bg-fuchsia-500/10 text-sm text-fuchsia-200 hover:border-fuchsia-300 hover:bg-fuchsia-500/20 transition"><Lightbulb className="h-4 w-4" /> Tips</button>
-        <button type="button" onClick={() => setShowNotePanel(true)} className="w-full flex items-center gap-2 rounded-md border border-violet-400/50 bg-violet-500/15 text-sm text-violet-200 hover:border-violet-300 hover:bg-violet-500/20 transition"><Lightbulb className="h-4 w-4" /> Generate Note</button>
-        <div className="flex-1 border-t border-white/5 pt-4 text-center text-xs text-cyan-400/60">Responses Unlimited</div>
-      </aside>      {/* ===== Top bar ===== */}
+      {/* ===== Top bar ===== */}
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/5 bg-[#080D18]/80 px-4 py-3 backdrop-blur">
         <div className="flex min-w-0 items-center gap-3">
           <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-cyan-400/40 bg-cyan-500/10 text-cyan-300 shadow-[0_0_16px_rgba(34,211,238,0.35)]">
