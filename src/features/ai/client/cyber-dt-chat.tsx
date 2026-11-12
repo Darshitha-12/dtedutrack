@@ -240,6 +240,12 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [attachedImages, setAttachedImages] = useState<{ id: string; preview: string; mimeType: string; data: string }[]>([]);
+  // Image generation state
+  const [showImageGen, setShowImageGen] = useState(false);
+  const [imageGenPrompt, setImageGenPrompt] = useState("");
+  const [imageGenLoading, setImageGenLoading] = useState(false);
+  // Canvas / whiteboard state
+  const [showCanvas, setShowCanvas] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -247,6 +253,13 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
   const timers = useRef<NodeJS.Timeout[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Canvas/whiteboard refs
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [canvasColor, setCanvasColor] = useState("#22d3ee");
+  const [canvasSize, setCanvasSize] = useState(3);
+  const [canvasTool, setCanvasTool] = useState<"pen" | "eraser">("pen");
+  const isDrawing = useRef(false);
+  const lastPos = useRef<{ x: number; y: number } | null>(null);
   // Gemini API key state: server-configured key or a key pasted by the user.
   const [serverHasKey, setServerHasKey] = useState(false);
   const [localHasKey, setLocalHasKey] = useState(false);
@@ -647,6 +660,42 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
 
   const stopGenerating = () => abortRef.current?.abort();
 
+  const generateImage = async () => {
+    const prompt = imageGenPrompt.trim();
+    if (!prompt) return;
+    setImageGenLoading(true);
+    try {
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=512&height=512&nologo=true`;
+      // Preload the image to verify it loads
+      await new Promise<void>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Image generation failed"));
+        img.src = url;
+      });
+      // Add as an AI message with the image
+      const aiId = nextId();
+      setMessages((prev) => [
+        ...prev,
+        { id: aiId, role: "ai", text: `🖼️ Generated image for: "${prompt}"`, emoji: "🎨", time: nowTime() },
+      ]);
+      // Insert the image URL into the message text as markdown
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === aiId
+            ? { ...m, text: `🖼️ Generated image for: "${prompt}"\n\n![Generated image](${url})` }
+            : m,
+        ),
+      );
+      setShowImageGen(false);
+      setImageGenPrompt("");
+    } catch (e) {
+      console.error("Image gen failed:", e);
+    } finally {
+      setImageGenLoading(false);
+    }
+  };
+
   const handleImageFiles = async (files: FileList | File[] | null) => {
     if (!files) return;
     const arr = Array.from(files).filter((f) => f.type.startsWith("image/"));
@@ -657,6 +706,62 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
     } catch (e) {
       console.error("Image compress failed:", e);
     }
+  };
+
+  // Canvas drawing helpers
+  const getCanvasPos = (e: React.MouseEvent | React.TouchEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = "touches" in e ? e.touches[0]?.clientX ?? 0 : (e as React.MouseEvent).clientX;
+    const clientY = "touches" in e ? e.touches[0]?.clientY ?? 0 : (e as React.MouseEvent).clientY;
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  };
+
+  const startDraw = (e: React.MouseEvent | React.TouchEvent) => {
+    isDrawing.current = true;
+    lastPos.current = getCanvasPos(e);
+  };
+
+  const draw = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!isDrawing.current || !lastPos.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const pos = getCanvasPos(e);
+    if (!pos) return;
+    ctx.beginPath();
+    ctx.moveTo(lastPos.current.x, lastPos.current.y);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.strokeStyle = canvasTool === "eraser" ? "#080D18" : canvasColor;
+    ctx.lineWidth = canvasTool === "eraser" ? canvasSize * 4 : canvasSize;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.stroke();
+    lastPos.current = pos;
+  };
+
+  const endDraw = () => {
+    isDrawing.current = false;
+    lastPos.current = null;
+  };
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const downloadCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const link = document.createElement("a");
+    link.download = "canvas.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
   };
 
   // Paste images from clipboard.
@@ -898,6 +1003,22 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
           )}
           <button
             type="button"
+            onClick={() => setShowImageGen((v) => !v)}
+            title="Generate image"
+            className="grid h-8 w-8 place-items-center rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/5 text-fuchsia-300 transition hover:bg-fuchsia-500/15"
+          >
+            <span className="text-sm">🖼️</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCanvas(true)}
+            title="Whiteboard"
+            className="grid h-8 w-8 place-items-center rounded-xl border border-cyan-400/30 bg-cyan-500/5 text-cyan-300 transition hover:bg-cyan-500/15"
+          >
+            <span className="text-sm">🎨</span>
+          </button>
+          <button
+            type="button"
             onClick={() => {
               setShowPlanPanel(false);
               setShowKeyPanel((v) => !v);
@@ -1054,6 +1175,29 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
           <div className="mx-auto flex max-w-3xl items-center justify-end gap-2 pt-1">
             <Button type="button" size="sm" variant="outline" onClick={() => setShowNotePanel(false)} className="rounded-xl border-cyan-400/30 bg-transparent text-cyan-300 hover:bg-cyan-500/10">
               {t("cyberdt.close") || "Close"}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Image generation panel */}
+      {showImageGen && (
+        <div className="shrink-0 space-y-3 border-b border-white/5 bg-fuchsia-500/5 px-4 py-4">
+          <p className="text-sm font-semibold text-fuchsia-200">Generate Image</p>
+          <p className="text-xs text-cyan-300/80">Describe a diagram, force diagram, or biology illustration to generate.</p>
+          <div className="mx-auto flex max-w-3xl gap-2">
+            <Input
+              value={imageGenPrompt}
+              onChange={(e) => setImageGenPrompt(e.target.value)}
+              placeholder="e.g. human heart anatomy diagram, labeled, educational"
+              className="flex-1 rounded-xl border-cyan-500/20 bg-[#111B2D] text-sm text-cyan-50 placeholder:text-cyan-400/40 focus-visible:ring-cyan-400/60"
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void generateImage(); } }}
+            />
+            <Button type="button" size="sm" onClick={() => void generateImage()} disabled={imageGenLoading || !imageGenPrompt.trim()} className="rounded-xl border border-fuchsia-400/50 bg-fuchsia-500/20 text-fuchsia-100 hover:bg-fuchsia-500/40 disabled:opacity-50">
+              {imageGenLoading ? "Generating..." : "Generate"}
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => { setShowImageGen(false); setImageGenPrompt(""); }} className="rounded-xl border-cyan-400/30 bg-transparent text-cyan-300 hover:bg-cyan-500/10">
+              Close
             </Button>
           </div>
         </div>
@@ -1246,6 +1390,41 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
           {t("cyberdt.disclaimer") || "Cyber DT AI can make mistakes. Verify important information."}
         </p>
       </div>
+
+      {/* ===== Canvas / Whiteboard overlay ===== */}
+      {showCanvas && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-[#080D18]">
+          <div className="flex items-center justify-between border-b border-white/5 px-4 py-3">
+            <p className="text-sm font-bold text-cyan-200">🎨 Whiteboard</p>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setCanvasTool("pen")} className={`rounded-lg px-2 py-1 text-xs ${canvasTool === "pen" ? "bg-cyan-500/20 text-cyan-200" : "text-cyan-400/60 hover:bg-cyan-500/10"}`}>Pen</button>
+              <button type="button" onClick={() => setCanvasTool("eraser")} className={`rounded-lg px-2 py-1 text-xs ${canvasTool === "eraser" ? "bg-rose-500/20 text-rose-200" : "text-cyan-400/60 hover:bg-cyan-500/10"}`}>Eraser</button>
+              <input type="color" value={canvasColor} onChange={(e) => setCanvasColor(e.target.value)} className="h-7 w-7 cursor-pointer rounded border-0 bg-transparent" />
+              <input type="range" min={1} max={12} value={canvasSize} onChange={(e) => setCanvasSize(Number(e.target.value))} className="w-20" />
+              <button type="button" onClick={clearCanvas} className="rounded-lg px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10">Clear</button>
+              <button type="button" onClick={downloadCanvas} className="rounded-lg px-2 py-1 text-xs text-cyan-300 hover:bg-cyan-500/10">Save PNG</button>
+              <button type="button" onClick={() => setShowCanvas(false)} className="grid h-7 w-7 place-items-center rounded-lg text-cyan-400/70 hover:bg-cyan-500/10 hover:text-cyan-300">
+                <span className="text-lg leading-none">×</span>
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-hidden p-2">
+            <canvas
+              ref={canvasRef}
+              width={1200}
+              height={800}
+              className="h-full w-full cursor-crosshair rounded-xl border border-cyan-500/20 bg-[#0b1220]"
+              onMouseDown={startDraw}
+              onMouseMove={draw}
+              onMouseUp={endDraw}
+              onMouseLeave={endDraw}
+              onTouchStart={startDraw}
+              onTouchMove={draw}
+              onTouchEnd={endDraw}
+            />
+          </div>
+        </div>
+      )}
 
       {/* ===== Chat history modal ===== */}
       {showHistory && (
