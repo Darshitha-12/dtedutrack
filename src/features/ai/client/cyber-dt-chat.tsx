@@ -495,8 +495,12 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
       } else {
         finishStreaming();
       }
-      setIsTyping(false);
-      abortRef.current = null;
+      // Only clear the shared typing state if no newer send() has taken over,
+      // otherwise stopping A after B started would unblock the composer mid-B.
+      if (abortRef.current === controller) {
+        setIsTyping(false);
+        abortRef.current = null;
+      }
       return;
     }
 
@@ -519,7 +523,7 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
     }
 
     setIsTyping(false);
-    abortRef.current = null;
+    if (abortRef.current === controller) abortRef.current = null;
   };
 
   /** Re-asks the last question: drops the old answers and asks again. */
@@ -618,7 +622,12 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
     }
   };
 
-  const stopGenerating = () => abortRef.current?.abort();
+  const stopGenerating = () => {
+    abortRef.current?.abort();
+    // Unblock the composer immediately; the aborted send() finishes cleaning up
+    // its own bubble and must not clear a newer request's controller.
+    setIsTyping(false);
+  };
 
   const quickQuestions = QUICK_QUESTIONS[locale as CyberDTLocale] ?? QUICK_QUESTIONS.en;
 

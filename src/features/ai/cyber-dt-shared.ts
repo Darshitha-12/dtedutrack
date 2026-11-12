@@ -87,12 +87,24 @@ export function cyberDTModelChain(): string[] {
 /** Builds the Gemini generateContent request body from the chat history. */
 export function buildGeminiRequestBody(history: CyberDTChatTurn[], message: string) {
   const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+  // Gemini rejects two consecutive turns with the same role. A stopped answer
+  // leaves a user turn with no model reply, so the next message would arrive as
+  // user-after-user and every model in the chain returned 400 — the chat then
+  // fell back to the offline knowledge base, which only sees the newest text.
+  const push = (role: "user" | "model", text: string) => {
+    const last = contents[contents.length - 1];
+    if (last && last.role === role) {
+      last.parts[0].text += `\n\n${text}`;
+    } else {
+      contents.push({ role, parts: [{ text }] });
+    }
+  };
   for (const turn of history.slice(-10)) {
     const text = typeof turn?.text === "string" ? turn.text.trim() : "";
     if (!text) continue;
-    contents.push({ role: turn.role === "ai" ? "model" : "user", parts: [{ text }] });
+    push(turn.role === "ai" ? "model" : "user", text);
   }
-  contents.push({ role: "user", parts: [{ text: message }] });
+  push("user", message);
 
   return {
     system_instruction: { parts: [{ text: CYBER_DT_SYSTEM_PROMPT }] },
