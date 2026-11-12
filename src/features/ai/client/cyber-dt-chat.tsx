@@ -1011,6 +1011,14 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
           </button>
           <button
             type="button"
+            onClick={() => send("Draw a labeled diagram using SVG. Pick a clear A/L Biology or Physics example (heart, neuron, force diagram, circuit, etc.) and generate a clean, labeled SVG diagram with proper colors and labels.")}
+            title="Generate diagram"
+            className="grid h-8 w-8 place-items-center rounded-xl border border-cyan-400/30 bg-cyan-500/5 text-cyan-300 transition hover:bg-cyan-500/15"
+          >
+            <span className="text-sm">📐</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setShowCanvas(true)}
             title="Whiteboard"
             className="grid h-8 w-8 place-items-center rounded-xl border border-cyan-400/30 bg-cyan-500/5 text-cyan-300 transition hover:bg-cyan-500/15"
