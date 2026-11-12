@@ -9,6 +9,7 @@ import { useToast } from "@/components/ui/toast";
 import { OFFLINE_ROUTES } from "@/lib/offline-routes";
 import { nativeBridge } from "@/lib/native-shell";
 import { AccountSyncCard } from "@/components/account-sync-card";
+import { ConnectedDevicesCard } from "@/components/connected-devices-card";
 import { SyncDiagnostics } from "@/components/sync-diagnostics";
 import {
   applyBackup,
@@ -855,6 +856,9 @@ export default function SettingsPage() {
 
         {/* Account Sync Card */}
         <AccountSyncCard />
+
+        {/* Devices sharing this account */}
+        <ConnectedDevicesCard />
 
         {/* Sync diagnostics */}
         <SyncDiagnostics />

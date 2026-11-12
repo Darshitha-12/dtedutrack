@@ -48,12 +48,24 @@ const EXACT_KEYS = [
   "bp_timetable_v1",
   "bp_messages_v1",
   "bp_search_history_v1",
+  // Cyber DT AI conversations — keeps the same chat history on every device
+  // (web, second browser, Android APK) linked to the account.
+  "cyberdt_conversations",
+  // Study data that previously stayed on whichever device created it.
+  "biopulse_revision_v1",
+  "biopulse_fees_v1",
+  "biopulse_pomodoro_config_v1",
+  "bp_yt_saved_v1",
+  "bp_ai_timetable_active",
+  "biopulse-language",
 ];
 const PREFIX_KEYS = [
   "biopulse.studyflow.d.",
   "bp_ai_tutor_draft_",
   "bp_ai_tutor_chat_",
 ];
+
+const CONVERSATIONS_KEY = "cyberdt_conversations";
 
 export const SYNC_EVENT = "biopulse:sync";
 
@@ -383,6 +395,33 @@ function applyRemote(key: string, value: string | null): void {
 }
 
 /**
+ * First-sync merge for Cyber DT conversations. Both devices may already hold
+ * chats created before the account ever tracked this key; a plain last-write-wins
+ * would make whichever device syncs last erase the other's conversations. Merge
+ * by conversation id (newer `updatedAt` wins) for that first pass only — later
+ * passes keep the deletion-safe whole-array rule.
+ */
+function mergeConversations(localRaw: string, remoteRaw: string | null): string {
+  try {
+    const local = JSON.parse(localRaw) as Array<{ id?: string; updatedAt?: number }>;
+    const remote = remoteRaw ? (JSON.parse(remoteRaw) as Array<{ id?: string; updatedAt?: number }>) : [];
+    if (!Array.isArray(local) || !Array.isArray(remote)) return localRaw;
+    const byId = new Map<string, { id?: string; updatedAt?: number }>();
+    for (const conv of [...remote, ...local]) {
+      if (!conv || typeof conv.id !== "string") continue;
+      const prev = byId.get(conv.id);
+      if (!prev || (conv.updatedAt ?? 0) >= (prev.updatedAt ?? 0)) byId.set(conv.id, conv);
+    }
+    const merged = [...byId.values()]
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+      .slice(0, 20);
+    return JSON.stringify(merged);
+  } catch {
+    return localRaw;
+  }
+}
+
+/**
  * One full sync pass: pull the server snapshot, reconcile each tracked key with
  * the local mirror, apply remote wins, then push local wins. Returns the set of
  * keys whose local value changed because of a remote value.
@@ -424,6 +463,17 @@ export async function runSync(): Promise<{ appliedKeys: string[] }> {
       const locallyChanged = localVal !== seenVal;
       const remoteNewer = !!remote && remote.t > seenT && (remote.v ?? null) !== seenVal;
 
+      const firstTracked = !(key in meta.seen);
+      if (key === CONVERSATIONS_KEY && firstTracked && localVal !== null && remote) {
+        const merged = mergeConversations(localVal, remote.v);
+        if (merged !== localVal) applyRemote(key, merged);
+        toPush[key] = { v: merged, t: now };
+        meta.seen[key] = merged;
+        meta.t[key] = now;
+        if (merged !== localVal) appliedKeys.push(key);
+        continue;
+      }
+
       if (locallyChanged) {
         // Local wins (including deletions, encoded as a null tombstone).
         toPush[key] = { v: localVal, t: now };
@@ -452,6 +502,9 @@ export async function runSync(): Promise<{ appliedKeys: string[] }> {
       }
       if (appliedKeys.includes("biopulse_alarms_v1")) {
         window.dispatchEvent(new Event("biopulse:alarms-changed"));
+      }
+      if (appliedKeys.includes("cyberdt_conversations")) {
+        window.dispatchEvent(new Event("cyberdt:conversations-synced"));
       }
       const studyflow = appliedKeys.some((k) => k.startsWith("biopulse.studyflow.d."));
       window.dispatchEvent(

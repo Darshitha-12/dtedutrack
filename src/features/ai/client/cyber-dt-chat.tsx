@@ -303,6 +303,41 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
     }
   }, [greeting]);
 
+  // Pull conversations changed on another device (account sync) into the open
+  // chat without a reload. Refs keep the listener stable so it never needs to be
+  // re-registered while streaming.
+  const syncViewRef = useRef({ currentConvId, isTyping, hasUserMessage: false });
+  syncViewRef.current = {
+    currentConvId,
+    isTyping,
+    hasUserMessage: messages.some((m) => m.role === "user"),
+  };
+  useEffect(() => {
+    const onSynced = () => {
+      try {
+        const raw = window.localStorage.getItem(CONV_STORAGE);
+        if (!raw) return;
+        const convs = JSON.parse(raw) as Conversation[];
+        if (!Array.isArray(convs) || convs.length === 0) return;
+        const view = syncViewRef.current;
+        setConversations(convs);
+        const match = view.currentConvId
+          ? convs.find((c) => c.id === view.currentConvId)
+          : undefined;
+        if (match) {
+          if (!view.isTyping) setMessages(match.messages);
+        } else if (!view.currentConvId && !view.hasUserMessage) {
+          setCurrentConvId(convs[0].id);
+          setMessages(convs[0].messages);
+        }
+      } catch {
+        /* ignore corrupt storage */
+      }
+    };
+    window.addEventListener("cyberdt:conversations-synced", onSynced);
+    return () => window.removeEventListener("cyberdt:conversations-synced", onSynced);
+  }, []);
+
   // Persist the current conversation whenever a turn finishes.
   useEffect(() => {
     if (isTyping) return;

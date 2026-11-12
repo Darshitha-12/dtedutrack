@@ -95,3 +95,11 @@ export async function resolveSyncUserId(req: Request): Promise<string | null> {
   const identity = await resolveSyncIdentity(req);
   return identity?.userId ?? null;
 }
+
+/**
+ * Drops a revoked device token from the in-process cache so it stops
+ * authenticating immediately instead of lingering for the cache TTL.
+ */
+export function forgetToken(token: string): void {
+  tokenCache.delete(token);
+}

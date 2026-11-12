@@ -15,6 +15,7 @@ import {
   subscribeSync,
   type SyncState,
 } from "@/lib/account-sync";
+import { thisDeviceLabel } from "@/lib/account-devices";
 
 function statusLine(s: SyncState): string {
   switch (s.status) {
@@ -57,7 +58,7 @@ export function AccountSyncCard() {
       return;
     }
     setBusy(true);
-    const res = await connectAccount(email.trim(), password, "BioPulse device");
+    const res = await connectAccount(email.trim(), password, thisDeviceLabel());
     setBusy(false);
     if (res.ok) {
       setPassword("");
@@ -89,8 +90,8 @@ export function AccountSyncCard() {
       </div>
 
       <p className="text-sm text-muted-foreground mb-4">
-        Your reminders, alarms and daily study flow sync to every device signed into the
-        same email account.
+        Link this device to your email account to see the same profile, study data and Cyber DT
+        chat history on every device signed in with the same account.
       </p>
 
       {connected ? (
