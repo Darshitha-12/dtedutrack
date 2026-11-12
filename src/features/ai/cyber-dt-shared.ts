@@ -12,12 +12,6 @@ export interface CyberDTChatTurn {
   text?: string;
 }
 
-/** An image attached to a chat message (sent to Gemini as inline_data). */
-export interface CyberDTImage {
-  mimeType: string;
-  data: string; // base64
-}
-
 export const CYBER_DT_SYSTEM_PROMPT = `You are "Cyber DT AI", a friendly and encouraging A/L Biology tutor for Sri Lankan students.
 
 HOW TO CHOOSE THE REPLY LANGUAGE (most important rule):
@@ -35,10 +29,7 @@ HOW TO ANSWER (style):
 - Use short paragraphs and bullet points so it is easy to read on a phone.
 - For compare-type questions, include a small comparison table.
 - Write technical terms in both Sinhala and English where helpful (e.g. "මයිටෝසිස් (mitosis)").
-- When asked to draw, diagram, or illustrate something (biology diagrams, force diagrams, anatomy, circuits, etc.), generate a clean SVG diagram inside a fenced code block tagged svg. Use proper labels, colors (cyan #22d3ee, violet #a78bfa, white #f1f5f9), and a viewBox. Keep it simple and educational.
 - Ask a short follow-up question at the very end only if it helps the student continue revising.
-- For math and physics formulas, ALWAYS use LaTeX: inline math as $...$ (e.g. $F = ma$, $\\vec{F}$, $\\theta$) and display math as $$...$$ on its own line (e.g. $$E = mc^2$$). Use \\vec{} for vectors, \\theta, \\alpha etc. for Greek letters.
-- When asked to draw or diagram something, describe it clearly in text and offer to generate an image.
 
 STUDY PLANS / TIMETABLES:
 - When asked for a study plan or revision timetable, make a realistic, personalized plan:
@@ -77,23 +68,14 @@ export function cyberDTModelChain(): string[] {
 }
 
 /** Builds the Gemini generateContent request body from the chat history. */
-export function buildGeminiRequestBody(history: CyberDTChatTurn[], message: string, images?: CyberDTImage[]) {
-  const contents: Array<{ role: string; parts: Array<{ text?: string; inline_data?: { mime_type: string; data: string } }> }> = [];
+export function buildGeminiRequestBody(history: CyberDTChatTurn[], message: string) {
+  const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
   for (const turn of history.slice(-10)) {
     const text = typeof turn?.text === "string" ? turn.text.trim() : "";
     if (!text) continue;
     contents.push({ role: turn.role === "ai" ? "model" : "user", parts: [{ text }] });
   }
-  // Build the user message parts: text first, then any attached images.
-  const userParts: Array<{ text?: string; inline_data?: { mime_type: string; data: string } }> = [];
-  if (message.trim()) userParts.push({ text: message.trim() });
-  if (images && images.length > 0) {
-    for (const img of images) {
-      userParts.push({ inline_data: { mime_type: img.mimeType, data: img.data } });
-    }
-  }
-  if (userParts.length === 0) userParts.push({ text: "(image)" });
-  contents.push({ role: "user", parts: userParts });
+  contents.push({ role: "user", parts: [{ text: message }] });
 
   return {
     system_instruction: { parts: [{ text: CYBER_DT_SYSTEM_PROMPT }] },

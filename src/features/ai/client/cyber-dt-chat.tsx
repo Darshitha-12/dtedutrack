@@ -17,9 +17,6 @@ import {
   Target,
   FileText,
   Lightbulb,
-  Paperclip,
-  X,
-  Image as ImageIcon,
   History,
   Plus,
 } from "lucide-react";
@@ -38,7 +35,6 @@ import {
   geminiStreamEndpoint,
   cyberDTModelChain,
   parseSSEBuffer,
-  type CyberDTImage,
 } from "@/features/ai/cyber-dt-shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,8 +49,6 @@ interface ChatMessage {
   time?: string;
   /** True while the answer is still streaming in. */
   streaming?: boolean;
-  /** Images attached to this message (user uploads). */
-  images?: { id: string; preview: string }[];
 }
 
 interface Conversation {
@@ -93,46 +87,6 @@ function nextId() {
 
 function nowTime(): string {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-/** Compresses an image file to a max 1024px JPEG for Gemini (keeps payload small). */
-async function compressImage(file: File): Promise<{ id: string; preview: string; mimeType: string; data: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const MAX = 1024;
-        let w = img.width;
-        let h = img.height;
-        if (w > MAX || h > MAX) {
-          if (w > h) {
-            h = Math.round((h * MAX) / w);
-            w = MAX;
-          } else {
-            w = Math.round((w * MAX) / h);
-            h = MAX;
-          }
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          reject(new Error("canvas unavailable"));
-          return;
-        }
-        ctx.drawImage(img, 0, 0, w, h);
-        const preview = canvas.toDataURL("image/jpeg", 0.82);
-        const data = preview.split(",")[1] || "";
-        resolve({ id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, preview, mimeType: "image/jpeg", data });
-      };
-      img.onerror = () => reject(new Error("image load failed"));
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = () => reject(new Error("file read failed"));
-    reader.readAsDataURL(file);
-  });
 }
 
 /** localStorage key for the user's own Gemini API key (browser-direct fallback). */
@@ -239,27 +193,12 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
   const { locale } = useLanguage();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [attachedImages, setAttachedImages] = useState<{ id: string; preview: string; mimeType: string; data: string }[]>([]);
-  // Image generation state
-  const [showImageGen, setShowImageGen] = useState(false);
-  const [imageGenPrompt, setImageGenPrompt] = useState("");
-  const [imageGenLoading, setImageGenLoading] = useState(false);
-  // Canvas / whiteboard state
-  const [showCanvas, setShowCanvas] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const timers = useRef<NodeJS.Timeout[]>([]);
   const abortRef = useRef<AbortController | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  // Canvas/whiteboard refs
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [canvasColor, setCanvasColor] = useState("#22d3ee");
-  const [canvasSize, setCanvasSize] = useState(3);
-  const [canvasTool, setCanvasTool] = useState<"pen" | "eraser">("pen");
-  const isDrawing = useRef(false);
-  const lastPos = useRef<{ x: number; y: number } | null>(null);
   // Gemini API key state: server-configured key or a key pasted by the user.
   const [serverHasKey, setServerHasKey] = useState(false);
   const [localHasKey, setLocalHasKey] = useState(false);
@@ -411,20 +350,17 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
 
   const send = async (
     raw: string,
-    opts?: { noUserMessage?: boolean; historyOverride?: Array<{ role: string; text: string }>; images?: { id: string; preview: string; mimeType: string; data: string }[] },
+    opts?: { noUserMessage?: boolean; historyOverride?: Array<{ role: string; text: string }> },
   ) => {
     const text = raw.trim();
-    const imgs = opts?.images ?? attachedImages;
-    if (!text && imgs.length === 0) return;
-    if (isTyping) return;
+    if (!text || isTyping) return;
 
     const history =
       opts?.historyOverride ?? messages.slice(-10).map((m) => ({ role: m.role, text: m.text }));
     if (!opts?.noUserMessage) {
-      setMessages((prev) => [...prev, { id: nextId(), role: "user", text, time: nowTime(), images: imgs.length > 0 ? imgs.map((i) => ({ id: i.id, preview: i.preview })) : undefined }]);
+      setMessages((prev) => [...prev, { id: nextId(), role: "user", text, time: nowTime() }]);
     }
     setInput("");
-    setAttachedImages([]);
     setIsTyping(true);
 
     // Reply in the SAME language as the question: Sinhala script, Singlish
@@ -472,7 +408,7 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text, history, images: imgs.map((i) => ({ mimeType: i.mimeType, data: i.data })) }),
+          body: JSON.stringify({ message: text, history }),
           signal: controller.signal,
         },
         (event) => {
@@ -502,7 +438,7 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
                 "Content-Type": "application/json",
                 "x-goog-api-key": storedKey,
               },
-              body: JSON.stringify(buildGeminiRequestBody(history, text, imgs.map((i) => ({ mimeType: i.mimeType, data: i.data })))),
+              body: JSON.stringify(buildGeminiRequestBody(history, text)),
               signal: controller.signal,
             },
             (event) => extractGeminiStreamDelta(event),
@@ -532,28 +468,17 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
     // 3) Offline fallback: the built-in knowledge base, replying in the
     //    detected language (works with zero internet or no API key).
     if (!answer && !aiText.trim()) {
-      if (imgs.length > 0) {
-        const kbText =
-          "🖼️ I can't analyze images offline — the built-in knowledge base only answers text questions. " +
-          "To get an answer about this image, please either:\n" +
-          "• Try again in a few minutes (the AI service may be busy), or\n" +
-          "• Paste your own free Google AI Studio key (🔑 button) — it has its own separate quota and usually works even when the shared key is busy.\n\n" +
-          "In the meantime, you can ask me about any A/L Biology topic in text and I'll give you a full exam-style answer.";
-        finishStreaming(kbText);
-        setMessages((prev) => prev.map((m) => (m.id === aiId ? { ...m, emoji: "🖼️" } : m)));
-      } else {
-        const aiResponse = generateCyberDTResponse(text, replyLocale);
-        const kbText = renderCyberDTResponse(aiResponse, replyLocale);
-        // Minimum typing time so instant offline answers don't feel jarring.
-        await new Promise<void>((resolve) => {
-          const tm = setTimeout(resolve, 600);
-          timers.current.push(tm);
-        });
-        finishStreaming(kbText);
-        setMessages((prev) =>
-          prev.map((m) => (m.id === aiId ? { ...m, emoji: aiResponse.emoji } : m)),
-        );
-      }
+      const aiResponse = generateCyberDTResponse(text, replyLocale);
+      const kbText = renderCyberDTResponse(aiResponse, replyLocale);
+      // Minimum typing time so instant offline answers don't feel jarring.
+      await new Promise<void>((resolve) => {
+        const tm = setTimeout(resolve, 600);
+        timers.current.push(tm);
+      });
+      finishStreaming(kbText);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === aiId ? { ...m, emoji: aiResponse.emoji } : m)),
+      );
     } else {
       finishStreaming(answer ?? aiText);
     }
@@ -659,132 +584,6 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
   };
 
   const stopGenerating = () => abortRef.current?.abort();
-
-  const generateImage = async () => {
-    const prompt = imageGenPrompt.trim();
-    if (!prompt) return;
-    setImageGenLoading(true);
-    try {
-      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=512&height=512&nologo=true`;
-      // Preload the image to verify it loads
-      await new Promise<void>((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve();
-        img.onerror = () => reject(new Error("Image generation failed"));
-        img.src = url;
-      });
-      // Add as an AI message with the image
-      const aiId = nextId();
-      setMessages((prev) => [
-        ...prev,
-        { id: aiId, role: "ai", text: `🖼️ Generated image for: "${prompt}"`, emoji: "🎨", time: nowTime() },
-      ]);
-      // Insert the image URL into the message text as markdown
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === aiId
-            ? { ...m, text: `🖼️ Generated image for: "${prompt}"\n\n![Generated image](${url})` }
-            : m,
-        ),
-      );
-      setShowImageGen(false);
-      setImageGenPrompt("");
-    } catch (e) {
-      console.error("Image gen failed:", e);
-    } finally {
-      setImageGenLoading(false);
-    }
-  };
-
-  const handleImageFiles = async (files: FileList | File[] | null) => {
-    if (!files) return;
-    const arr = Array.from(files).filter((f) => f.type.startsWith("image/"));
-    if (arr.length === 0) return;
-    try {
-      const compressed = await Promise.all(arr.map(compressImage));
-      setAttachedImages((prev) => [...prev, ...compressed].slice(0, 4));
-    } catch (e) {
-      console.error("Image compress failed:", e);
-    }
-  };
-
-  // Canvas drawing helpers
-  const getCanvasPos = (e: React.MouseEvent | React.TouchEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
-    const rect = canvas.getBoundingClientRect();
-    const clientX = "touches" in e ? e.touches[0]?.clientX ?? 0 : (e as React.MouseEvent).clientX;
-    const clientY = "touches" in e ? e.touches[0]?.clientY ?? 0 : (e as React.MouseEvent).clientY;
-    return { x: clientX - rect.left, y: clientY - rect.top };
-  };
-
-  const startDraw = (e: React.MouseEvent | React.TouchEvent) => {
-    isDrawing.current = true;
-    lastPos.current = getCanvasPos(e);
-  };
-
-  const draw = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDrawing.current || !lastPos.current) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const pos = getCanvasPos(e);
-    if (!pos) return;
-    ctx.beginPath();
-    ctx.moveTo(lastPos.current.x, lastPos.current.y);
-    ctx.lineTo(pos.x, pos.y);
-    ctx.strokeStyle = canvasTool === "eraser" ? "#080D18" : canvasColor;
-    ctx.lineWidth = canvasTool === "eraser" ? canvasSize * 4 : canvasSize;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.stroke();
-    lastPos.current = pos;
-  };
-
-  const endDraw = () => {
-    isDrawing.current = false;
-    lastPos.current = null;
-  };
-
-  const clearCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-  };
-
-  const downloadCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const link = document.createElement("a");
-    link.download = "canvas.png";
-    link.href = canvas.toDataURL("image/png");
-    link.click();
-  };
-
-  // Paste images from clipboard.
-  useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
-      if (!e.clipboardData) return;
-      const items = e.clipboardData.items;
-      const files: File[] = [];
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i];
-        if (it.kind === "file" && it.type.startsWith("image/")) {
-          const f = it.getAsFile();
-          if (f) files.push(f);
-        }
-      }
-      if (files.length > 0) {
-        e.preventDefault();
-        void handleImageFiles(files);
-      }
-    };
-    window.addEventListener("paste", onPaste);
-    return () => window.removeEventListener("paste", onPaste);
-  }, []);
 
   const quickQuestions = QUICK_QUESTIONS[locale as CyberDTLocale] ?? QUICK_QUESTIONS.en;
 
@@ -954,7 +753,7 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
   const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if ((input.trim() || attachedImages.length > 0) && !isTyping) send(input, { images: attachedImages });
+      if (input.trim() && !isTyping) send(input);
     }
   };
 
@@ -1001,30 +800,6 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
               <span className="text-lg leading-none">×</span>
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setShowImageGen((v) => !v)}
-            title="Generate image"
-            className="grid h-8 w-8 place-items-center rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/5 text-fuchsia-300 transition hover:bg-fuchsia-500/15"
-          >
-            <span className="text-sm">🖼️</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => send("Draw a labeled diagram using SVG. Pick a clear A/L Biology or Physics example (heart, neuron, force diagram, circuit, etc.) and generate a clean, labeled SVG diagram with proper colors and labels.")}
-            title="Generate diagram"
-            className="grid h-8 w-8 place-items-center rounded-xl border border-cyan-400/30 bg-cyan-500/5 text-cyan-300 transition hover:bg-cyan-500/15"
-          >
-            <span className="text-sm">📐</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowCanvas(true)}
-            title="Whiteboard"
-            className="grid h-8 w-8 place-items-center rounded-xl border border-cyan-400/30 bg-cyan-500/5 text-cyan-300 transition hover:bg-cyan-500/15"
-          >
-            <span className="text-sm">🎨</span>
-          </button>
           <button
             type="button"
             onClick={() => {
@@ -1188,29 +963,6 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
         </div>
       )}
 
-      {/* Image generation panel */}
-      {showImageGen && (
-        <div className="shrink-0 space-y-3 border-b border-white/5 bg-fuchsia-500/5 px-4 py-4">
-          <p className="text-sm font-semibold text-fuchsia-200">Generate Image</p>
-          <p className="text-xs text-cyan-300/80">Describe a diagram, force diagram, or biology illustration to generate.</p>
-          <div className="mx-auto flex max-w-3xl gap-2">
-            <Input
-              value={imageGenPrompt}
-              onChange={(e) => setImageGenPrompt(e.target.value)}
-              placeholder="e.g. human heart anatomy diagram, labeled, educational"
-              className="flex-1 rounded-xl border-cyan-500/20 bg-[#111B2D] text-sm text-cyan-50 placeholder:text-cyan-400/40 focus-visible:ring-cyan-400/60"
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void generateImage(); } }}
-            />
-            <Button type="button" size="sm" onClick={() => void generateImage()} disabled={imageGenLoading || !imageGenPrompt.trim()} className="rounded-xl border border-fuchsia-400/50 bg-fuchsia-500/20 text-fuchsia-100 hover:bg-fuchsia-500/40 disabled:opacity-50">
-              {imageGenLoading ? "Generating..." : "Generate"}
-            </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => { setShowImageGen(false); setImageGenPrompt(""); }} className="rounded-xl border-cyan-400/30 bg-transparent text-cyan-300 hover:bg-cyan-500/10">
-              Close
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* ===== Messages / Welcome ===== */}
       <div ref={listRef} className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-4 py-6">
@@ -1251,20 +1003,8 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
           {messages.map((m) =>
             m.role === "user" ? (
               <div key={m.id} className="mb-6 flex justify-end">
-                <div className="max-w-[80%] space-y-2 rounded-2xl rounded-br-sm bg-cyan-500/15 px-4 py-2.5 text-sm text-cyan-50">
-                  {m.images && m.images.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {m.images.map((img) => (
-                        <img
-                          key={img.id}
-                          src={img.preview}
-                          alt="attached"
-                          className="max-h-40 max-w-full rounded-lg border border-cyan-400/30 object-cover"
-                        />
-                      ))}
-                    </div>
-                  )}
-                  {m.text && <div className="whitespace-pre-line">{m.text}</div>}
+                <div className="max-w-[80%] whitespace-pre-line rounded-2xl rounded-br-sm bg-cyan-500/15 px-4 py-2.5 text-sm text-cyan-50">
+                  {m.text}
                 </div>
               </div>
             ) : (
@@ -1327,50 +1067,13 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
 
       {/* ===== Composer ===== */}
       <div className="shrink-0 border-t border-white/5 bg-[#080D18]/90 px-4 py-3 backdrop-blur">
-        {attachedImages.length > 0 && (
-          <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-2">
-            {attachedImages.map((img) => (
-              <div key={img.id} className="relative">
-                <img src={img.preview} alt="attached" className="h-16 w-16 rounded-xl border border-cyan-400/30 object-cover" />
-                <button
-                  type="button"
-                  onClick={() => setAttachedImages((prev) => prev.filter((i) => i.id !== img.id))}
-                  className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-rose-500/90 text-white text-xs shadow hover:bg-rose-500"
-                  aria-label="Remove image"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        <form onSubmit={(e) => { e.preventDefault(); send(input, { images: attachedImages }); }} className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-cyan-500/20 bg-[#111B2D] p-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              void handleImageFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isTyping}
-            title="Attach image"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-cyan-400/30 bg-cyan-500/5 text-cyan-300 transition hover:bg-cyan-500/15 disabled:opacity-40"
-          >
-            <Paperclip className="h-4 w-4" />
-          </button>
+        <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-cyan-500/20 bg-[#111B2D] p-2">
           <textarea
             ref={composerRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleComposerKeyDown}
-            placeholder={attachedImages.length > 0 ? "Add a message about the image (optional)..." : (t("cyberdt.composerPlaceholder") || "Message Cyber DT AI...")}
+            placeholder={t("cyberdt.composerPlaceholder") || "Message Cyber DT AI..."}
             disabled={isTyping}
             rows={1}
             className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-cyan-50 placeholder:text-cyan-400/50 focus:outline-none disabled:opacity-50"
@@ -1398,41 +1101,6 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
           {t("cyberdt.disclaimer") || "Cyber DT AI can make mistakes. Verify important information."}
         </p>
       </div>
-
-      {/* ===== Canvas / Whiteboard overlay ===== */}
-      {showCanvas && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-[#080D18]">
-          <div className="flex items-center justify-between border-b border-white/5 px-4 py-3">
-            <p className="text-sm font-bold text-cyan-200">🎨 Whiteboard</p>
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setCanvasTool("pen")} className={`rounded-lg px-2 py-1 text-xs ${canvasTool === "pen" ? "bg-cyan-500/20 text-cyan-200" : "text-cyan-400/60 hover:bg-cyan-500/10"}`}>Pen</button>
-              <button type="button" onClick={() => setCanvasTool("eraser")} className={`rounded-lg px-2 py-1 text-xs ${canvasTool === "eraser" ? "bg-rose-500/20 text-rose-200" : "text-cyan-400/60 hover:bg-cyan-500/10"}`}>Eraser</button>
-              <input type="color" value={canvasColor} onChange={(e) => setCanvasColor(e.target.value)} className="h-7 w-7 cursor-pointer rounded border-0 bg-transparent" />
-              <input type="range" min={1} max={12} value={canvasSize} onChange={(e) => setCanvasSize(Number(e.target.value))} className="w-20" />
-              <button type="button" onClick={clearCanvas} className="rounded-lg px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10">Clear</button>
-              <button type="button" onClick={downloadCanvas} className="rounded-lg px-2 py-1 text-xs text-cyan-300 hover:bg-cyan-500/10">Save PNG</button>
-              <button type="button" onClick={() => setShowCanvas(false)} className="grid h-7 w-7 place-items-center rounded-lg text-cyan-400/70 hover:bg-cyan-500/10 hover:text-cyan-300">
-                <span className="text-lg leading-none">×</span>
-              </button>
-            </div>
-          </div>
-          <div className="flex-1 overflow-hidden p-2">
-            <canvas
-              ref={canvasRef}
-              width={1200}
-              height={800}
-              className="h-full w-full cursor-crosshair rounded-xl border border-cyan-500/20 bg-[#0b1220]"
-              onMouseDown={startDraw}
-              onMouseMove={draw}
-              onMouseUp={endDraw}
-              onMouseLeave={endDraw}
-              onTouchStart={startDraw}
-              onTouchMove={draw}
-              onTouchEnd={endDraw}
-            />
-          </div>
-        </div>
-      )}
 
       {/* ===== Chat history modal ===== */}
       {showHistory && (
