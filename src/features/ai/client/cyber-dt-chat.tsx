@@ -17,6 +17,8 @@ import {
   Target,
   FileText,
   Lightbulb,
+  History,
+  Plus,
 } from "lucide-react";
 import { useT, useLanguage } from "@/lib/language-context";
 import {
@@ -48,6 +50,15 @@ interface ChatMessage {
   /** True while the answer is still streaming in. */
   streaming?: boolean;
 }
+
+interface Conversation {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  updatedAt: number;
+}
+
+const CONV_STORAGE = "cyberdt_conversations";
 
 const QUICK_QUESTIONS: Record<CyberDTLocale, string[]> = {
   en: [
@@ -209,6 +220,13 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
   const planDateTouched = useRef(false);
   const planHoursTouched = useRef(false);
 
+  // Chat history (persisted in localStorage so previous conversations survive
+  // reloads and are shared between the /cyber-dt page and the floating widget).
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [currentConvId, setCurrentConvId] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const initializedRef = useRef(false);
+
   // Ask the server once whether a Gemini key is configured there.
   useEffect(() => {
     fetch(CYBER_DT_API)
@@ -260,10 +278,50 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
     };
   }, [locale]);
 
-  // Seed the conversation with the greeting once.
+  // Seed the conversation: load the most recent saved conversation, otherwise
+  // start fresh with the greeting.
   useEffect(() => {
-    setMessages([greeting()]);
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+    let loaded = false;
+    try {
+      const raw = window.localStorage.getItem(CONV_STORAGE);
+      if (raw) {
+        const convs = JSON.parse(raw);
+        if (Array.isArray(convs) && convs.length > 0) {
+          setConversations(convs);
+          setCurrentConvId(convs[0].id);
+          setMessages(convs[0].messages);
+          loaded = true;
+        }
+      }
+    } catch {
+      /* ignore corrupt storage */
+    }
+    if (!loaded) {
+      setMessages([greeting()]);
+    }
   }, [greeting]);
+
+  // Persist the current conversation whenever a turn finishes.
+  useEffect(() => {
+    if (isTyping) return;
+    if (!messages.some((m) => m.role === "user")) return;
+    const id = currentConvId || `conv-${Date.now()}`;
+    if (!currentConvId) setCurrentConvId(id);
+    const title = messages.find((m) => m.role === "user")?.text.slice(0, 40) || "New chat";
+    const conv: Conversation = { id, title, messages, updatedAt: Date.now() };
+    setConversations((prev) => {
+      const filtered = prev.filter((c) => c.id !== id);
+      const next = [conv, ...filtered].slice(0, 20);
+      try {
+        window.localStorage.setItem(CONV_STORAGE, JSON.stringify(next));
+      } catch {
+        /* storage blocked */
+      }
+      return next;
+    });
+  }, [messages, isTyping, currentConvId]);
 
   // Clear pending timers on unmount.
   useEffect(() => {
@@ -477,6 +535,52 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
   const clearChat = () => {
     if (isTyping) abortRef.current?.abort();
     setMessages([greeting()]);
+  };
+
+  const newChat = () => {
+    if (isTyping) abortRef.current?.abort();
+    // Save the current conversation first.
+    if (messages.some((m) => m.role === "user") && currentConvId) {
+      const title = messages.find((m) => m.role === "user")?.text.slice(0, 40) || "New chat";
+      const conv: Conversation = { id: currentConvId, title, messages, updatedAt: Date.now() };
+      setConversations((prev) => {
+        const filtered = prev.filter((c) => c.id !== currentConvId);
+        const next = [conv, ...filtered].slice(0, 20);
+        try {
+          window.localStorage.setItem(CONV_STORAGE, JSON.stringify(next));
+        } catch {
+          /* ignore */
+        }
+        return next;
+      });
+    }
+    setCurrentConvId(null);
+    setMessages([greeting()]);
+  };
+
+  const loadConversation = (id: string) => {
+    const conv = conversations.find((c) => c.id === id);
+    if (!conv) return;
+    if (isTyping) abortRef.current?.abort();
+    setCurrentConvId(conv.id);
+    setMessages(conv.messages);
+    setShowHistory(false);
+  };
+
+  const deleteConversation = (id: string) => {
+    setConversations((prev) => {
+      const next = prev.filter((c) => c.id !== id);
+      try {
+        window.localStorage.setItem(CONV_STORAGE, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+    if (currentConvId === id) {
+      setCurrentConvId(null);
+      setMessages([greeting()]);
+    }
   };
 
   const stopGenerating = () => abortRef.current?.abort();
@@ -714,8 +818,24 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
           </button>
           <button
             type="button"
+            onClick={() => setShowHistory(true)}
+            title="Chat history"
+            className="grid h-8 w-8 place-items-center rounded-xl border border-cyan-400/30 bg-cyan-500/5 text-cyan-300 transition hover:bg-cyan-500/15"
+          >
+            <History className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={newChat}
+            title="New chat"
+            className="grid h-8 w-8 place-items-center rounded-xl border border-cyan-400/30 bg-cyan-500/5 text-cyan-300 transition hover:bg-cyan-500/15"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
             onClick={clearChat}
-            title={t("cyberdt.clearChat") || "New chat"}
+            title={t("cyberdt.clearChat") || "Clear chat"}
             className="grid h-8 w-8 place-items-center rounded-xl border border-cyan-400/30 bg-cyan-500/5 text-cyan-300 transition hover:bg-cyan-500/15"
           >
             <Trash2 className="h-4 w-4" />
@@ -981,6 +1101,60 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
           {t("cyberdt.disclaimer") || "Cyber DT AI can make mistakes. Verify important information."}
         </p>
       </div>
+
+      {/* ===== Chat history modal ===== */}
+      {showHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setShowHistory(false)}>
+          <div className="w-full max-w-md rounded-2xl border border-cyan-500/30 bg-[#0D1424] p-4 shadow-[0_0_40px_rgba(34,211,238,0.2)]" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-cyan-200">Chat history</h3>
+              <button type="button" onClick={() => setShowHistory(false)} className="grid h-7 w-7 place-items-center rounded-lg text-cyan-400/70 hover:bg-cyan-500/10 hover:text-cyan-300">
+                <span className="text-lg leading-none">×</span>
+              </button>
+            </div>
+            <div className="mb-3 flex items-center gap-2">
+              <button type="button" onClick={newChat} className="flex items-center gap-1.5 rounded-xl border border-violet-400/50 bg-violet-500/15 px-3 py-1.5 text-xs font-semibold text-violet-200 transition hover:bg-violet-500/25">
+                <Plus className="h-3.5 w-3.5" /> New chat
+              </button>
+              <span className="text-[0.65rem] text-cyan-400/50">{conversations.length} saved</span>
+            </div>
+            <div className="max-h-80 space-y-1.5 overflow-y-auto">
+              {conversations.length === 0 && (
+                <p className="py-6 text-center text-xs text-cyan-400/60">No saved conversations yet.</p>
+              )}
+              {conversations.map((c) => (
+                <div
+                  key={c.id}
+                  className={cn(
+                    "flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition",
+                    c.id === currentConvId
+                      ? "border-cyan-400/50 bg-cyan-500/15 text-cyan-100"
+                      : "border-cyan-500/20 bg-[#111B2D] text-cyan-200 hover:border-cyan-400/40",
+                  )}
+                >
+                  <button type="button" onClick={() => loadConversation(c.id)} className="min-w-0 flex-1 truncate text-left">
+                    {c.title}
+                  </button>
+                  <span className="shrink-0 text-[0.6rem] text-cyan-500/60">
+                    {new Date(c.updatedAt).toLocaleDateString()}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteConversation(c.id);
+                    }}
+                    title="Delete"
+                    className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-rose-300/70 transition hover:bg-rose-500/15 hover:text-rose-200"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
