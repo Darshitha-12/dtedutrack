@@ -145,6 +145,43 @@ export function CyberDTMessageBody({ text }: { text: string }) {
       continue;
     }
 
+    // SVG diagram: ```svg ... ``` or <svg>...</svg>
+    if (line.trim().startsWith("```svg") || line.trim().startsWith("<svg")) {
+      let svgContent = "";
+      if (line.trim().startsWith("```svg")) {
+        i++;
+        while (i < lines.length && !lines[i].trim().startsWith("```")) {
+          svgContent += lines[i] + "\n";
+          i++;
+        }
+        i++; // skip closing ```
+      } else {
+        // Collect until </svg>
+        while (i < lines.length && !lines[i].includes("</svg>")) {
+          svgContent += lines[i] + "\n";
+          i++;
+        }
+        if (i < lines.length) {
+          svgContent += lines[i];
+          i++;
+        }
+      }
+      if (svgContent.trim()) {
+        // Sanitize: remove script tags and event handlers
+        const sanitized = svgContent
+          .replace(/<script[\s\S]*?<\/script>/gi, "")
+          .replace(/\bon\w+\s*=\s*"[^"]*"/gi, "")
+          .replace(/\bon\w+\s*=\s*'[^']*'/gi, "");
+        blocks.push(
+          <div
+            key={`svg${key++}`}
+            className="my-3 flex justify-center overflow-x-auto rounded-xl border border-cyan-400/20 bg-[#0b1220] p-3"
+            dangerouslySetInnerHTML={{ __html: sanitized }}
+          />,
+        );
+      }
+      continue;
+    }
     // Heading: # ## ### #### (leading ** inside headings is handled inline)
     const heading = line.match(/^\s*(#{1,4})\s+(.*)$/);
     if (heading) {
