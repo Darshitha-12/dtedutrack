@@ -45,8 +45,8 @@ export function CyberDTFloatingWidget() {
 
       {/* Chat panel */}
       {open && (
-        <div className="fixed inset-x-2 bottom-2 top-16 z-50 sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-auto sm:h-[85vh] sm:w-[460px]">
-          <div className="h-full w-full overflow-hidden rounded-2xl border border-cyan-500/30 bg-[#080D18] shadow-[0_0_60px_rgba(34,211,238,0.25)]">
+        <div className="fixed inset-x-2 bottom-2 top-16 z-50 sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-auto sm:h-[90vh] sm:w-[520px]">
+          <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-cyan-500/30 bg-[#080D18] shadow-[0_0_60px_rgba(34,211,238,0.25)]">
             <CyberDTChat onClose={() => setOpen(false)} />
           </div>
         </div>
