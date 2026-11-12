@@ -12,6 +12,12 @@ export interface CyberDTChatTurn {
   text?: string;
 }
 
+/** An image attached to a chat message (sent to Gemini as inline_data). */
+export interface CyberDTImage {
+  mimeType: string;
+  data: string; // base64
+}
+
 export const CYBER_DT_SYSTEM_PROMPT = `You are "Cyber DT AI", a friendly and encouraging A/L Biology tutor for Sri Lankan students.
 
 HOW TO CHOOSE THE REPLY LANGUAGE (most important rule):
@@ -68,14 +74,23 @@ export function cyberDTModelChain(): string[] {
 }
 
 /** Builds the Gemini generateContent request body from the chat history. */
-export function buildGeminiRequestBody(history: CyberDTChatTurn[], message: string) {
-  const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+export function buildGeminiRequestBody(history: CyberDTChatTurn[], message: string, images?: CyberDTImage[]) {
+  const contents: Array<{ role: string; parts: Array<{ text?: string; inline_data?: { mime_type: string; data: string } }> }> = [];
   for (const turn of history.slice(-10)) {
     const text = typeof turn?.text === "string" ? turn.text.trim() : "";
     if (!text) continue;
     contents.push({ role: turn.role === "ai" ? "model" : "user", parts: [{ text }] });
   }
-  contents.push({ role: "user", parts: [{ text: message }] });
+  // Build the user message parts: text first, then any attached images.
+  const userParts: Array<{ text?: string; inline_data?: { mime_type: string; data: string } }> = [];
+  if (message.trim()) userParts.push({ text: message.trim() });
+  if (images && images.length > 0) {
+    for (const img of images) {
+      userParts.push({ inline_data: { mime_type: img.mimeType, data: img.data } });
+    }
+  }
+  if (userParts.length === 0) userParts.push({ text: "(image)" });
+  contents.push({ role: "user", parts: userParts });
 
   return {
     system_instruction: { parts: [{ text: CYBER_DT_SYSTEM_PROMPT }] },

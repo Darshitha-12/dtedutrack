@@ -60,8 +60,14 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const message = typeof body.message === "string" ? body.message.trim() : "";
     const history: ChatTurn[] = Array.isArray(body.history) ? body.history : [];
+    const images = Array.isArray(body.images)
+      ? body.images
+          .filter((i: unknown) => i && typeof i === "object" && typeof (i as { mimeType?: unknown }).mimeType === "string" && typeof (i as { data?: unknown }).data === "string")
+          .map((i: { mimeType: string; data: string }) => ({ mimeType: i.mimeType, data: i.data }))
+          .slice(0, 4) // cap at 4 images per message
+      : [];
 
-    if (!message) {
+    if (!message && images.length === 0) {
       return NextResponse.json(
         { ok: false, error: "empty_message", fallback: true },
         { status: 400, headers: CORS },
@@ -74,7 +80,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "no_api_key", fallback: true }, { headers: CORS });
     }
 
-    const requestBody = JSON.stringify(buildGeminiRequestBody(history, message));
+    const requestBody = JSON.stringify(buildGeminiRequestBody(history, message, images));
 
     // Walk the model chain: free-tier rate limits are per model, so when the
     // primary model is busy (503), out of quota (429) or retired (404) the
