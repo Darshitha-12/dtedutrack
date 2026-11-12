@@ -177,7 +177,7 @@ async function readAnswerStream(
   return null;
 }
 
-export function CyberDTChat() {
+export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
   const t = useT();
   const { locale } = useLanguage();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -608,130 +608,154 @@ export function CyberDTChat() {
     createdAt: string;
   }
 
+  const showWelcome = messages.length <= 1;
+
+  const suggestionCards = [
+    {
+      emoji: "🔬",
+      title: t("cyberdt.actionExplain") || "Explain a topic",
+      desc: t("cyberdt.actionExplainDesc") || "Get a full exam-style explanation",
+      prompt: QUICK_QUESTIONS[locale as CyberDTLocale]?.[0] ?? "Explain photosynthesis",
+    },
+    {
+      emoji: "📝",
+      title: t("cyberdt.actionNote") || "Generate study notes",
+      desc: t("cyberdt.actionNoteDesc") || "AI-written revision notes",
+      prompt: t("cyberdt.quickAsk") || "Explain photosynthesis",
+    },
+    {
+      emoji: "🎯",
+      title: t("cyberdt.actionQuiz") || "Create a quiz",
+      desc: t("cyberdt.actionQuizDesc") || "Test yourself with MCQs",
+      prompt: `Start an interactive quiz for me. Ask ONE A/L Biology multiple-choice question at a time with 4 options (A-D) and WAIT for my answer. After I reply, tell me if it is correct with a 1-2 line explanation, then ask the next. Ask 10 questions total with increasing difficulty. Reply fully in ${replyLanguage}.`,
+    },
+    {
+      emoji: "📄",
+      title: t("cyberdt.actionPaper") || "Past paper help",
+      desc: t("cyberdt.actionPaperDesc") || "Marking points & model answers",
+      prompt: `Give me 3 G.C.E. A/L Biology past-paper-style structured essay questions, and for each one list the key marking points a full-mark answer must include. Reply fully in ${replyLanguage}.`,
+    },
+  ];
+
+  // Auto-resize the composer textarea.
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+  }, [input]);
+
+  const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (input.trim() && !isTyping) send(input);
+    }
+  };
+
   return (
-    <div className="flex h-screen w-full overflow-hidden rounded-3xl border border-cyan-500/30 bg-[#0b1220]/90 shadow-[0_0_40px_rgba(34,211,238,0.15)] backdrop-blur-xl">
-      <aside className="w-64 flex-shrink-0 border-e border-cyan-500/30 bg-[#0b1220]/90 flex flex-col">
-        {/* Sidebar with quick actions */}
-        <div className="flex-1 px-4 py-2 space-y-2">
-          <button type="button" onClick={startQuiz} className="w-full flex items-center gap-2 rounded-md border border-cyan-400/30 bg-cyan-500/5 text-sm text-cyan-300 hover:bg-cyan-500/10 transition"><Target className="h-4 w-4" /> {t("cyberdt.actionQuiz")}</button>
-          <button type="button" onClick={askPastPaper} className="w-full flex items-center gap-2 rounded-md border border-fuchsia-400/40 bg-fuchsia-500/10 text-sm text-fuchsia-200 hover:border-fuchsia-300 hover:bg-fuchsia-500/20 transition"><FileText className="h-4 w-4" /> {t("cyberdt.actionPaper")}</button>
-          <button type="button" onClick={askTips} className="w-full flex items-center gap-2 rounded-md border border-fuchsia-400/40 bg-fuchsia-500/10 text-sm text-fuchsia-200 hover:border-fuchsia-300 hover:bg-fuchsia-500/20 transition"><Lightbulb className="h-4 w-4" /> {t("cyberdt.actionTips")}</button>
-          <button type="button" onClick={() => generateNote(t("cyberdt.quickAsk"))} className="w-full flex items-center gap-2 rounded-md border border-violet-400/50 bg-violet-500/15 text-sm text-violet-200 hover:border-violet-300 hover:bg-violet-500/20 transition"><Lightbulb className="h-4 w-4" /> {t("cyberdt.actionNote")}</button>
-        </div>
-        {/* Header inside sidebar */}
-        <div className="flex items-center gap-3 border-b border-cyan-500/30 bg-gradient-to-r from-cyan-500/15 via-violet-500/10 to-fuchsia-500/15 px-4 py-3">
-          <span className="relative grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-cyan-400/50 bg-cyan-500/10 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.4)]"><Bot className="h-5 w-5" /></span>
-          <div><p className="text-sm font-extrabold tracking-wide text-cyan-200">Cyber DT AI</p><p className="text-2xs text-cyan-400/80">{t("cyberdt.responsesUnlimited")}</p></div>
-        </div>
-        {/* Quick action buttons */}
-        <div className="flex-1 px-4 py-2 space-y-1">
-          <button type="button" onClick={openPlanPanel} className="w-full flex items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 text-2xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50"><ClipboardList className="h-3.5 w-3.5" /> {t("cyberdt.actionPlan")}</button>
-          <button type="button" onClick={startQuiz} className="w-full flex items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 text-2xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50"><Target className="h-3 w-3" /> {t("cyberdt.actionQuiz")}</button>
-          <button type="button" onClick={askPastPaper} className="w-full flex items-center gap-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 text-2xs font-semibold text-fuchsia-200 transition hover:border-fuchsia-300 hover:bg-fuchsia-500/20 disabled:opacity-50"><FileText className="h-3 w-3" /> {t("cyberdt.actionPaper")}</button>
-          <button type="button" onClick={askTips} className="w-full flex items-center gap-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 text-2xs font-semibold text-fuchsia-200 transition hover:border-fuchsia-300 hover:bg-fuchsia-500/20 disabled:opacity-50"><Lightbulb className="h-3 w-3" /> {t("cyberdt.actionTips")}</button>
-        </div>
-      </aside>
-      <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex items-center gap-3 border-b border-cyan-500/30 bg-gradient-to-r from-cyan-500/15 via-violet-500/10 to-fuchsia-500/15 px-5 py-4">
-        <span className="relative grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-cyan-400/50 bg-cyan-500/10 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.4)]">
-          <Bot className="h-6 w-6" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-extrabold tracking-wide text-cyan-200">
-            {t("cyberdt.name")}
-          </p>
-          <p className="flex items-center gap-1.5 text-2xs text-cyan-400/80">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400 opacity-70" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-cyan-300" />
-            </span>
-            {t("cyberdt.responsesUnlimited")}
-          </p>
+    <div className="flex h-full w-full flex-col bg-[#080D18] text-[#F1F5F9]">
+      {/* ===== Top bar ===== */}
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/5 bg-[#080D18]/80 px-4 py-3 backdrop-blur">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-cyan-400/40 bg-cyan-500/10 text-cyan-300 shadow-[0_0_16px_rgba(34,211,238,0.35)]">
+            <Bot className="h-5 w-5" />
+            <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#080D18] bg-emerald-400" />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-extrabold tracking-wide text-cyan-200">
+              {t("cyberdt.name") || "Cyber DT AI"}
+            </p>
+            <p className="flex items-center gap-1.5 text-[0.65rem] text-cyan-400/70">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400 opacity-70" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300" />
+              </span>
+              {t("cyberdt.responsesUnlimited") || "Online"}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <span
             className={cn(
-              "hidden rounded-full px-2 py-0.5 text-2xs font-semibold sm:inline-block",
+              "hidden rounded-full px-2.5 py-1 text-[0.65rem] font-semibold sm:inline-block",
               aiMode
-                ? "border border-fuchsia-400/50 bg-fuchsia-500/15 text-fuchsia-200"
-                : "border border-cyan-400/40 bg-cyan-500/10 text-cyan-300",
+                ? "border border-fuchsia-400/40 bg-fuchsia-500/10 text-fuchsia-200"
+                : "border border-cyan-400/30 bg-cyan-500/5 text-cyan-300",
             )}
           >
-            {aiMode ? "✨ " + t("cyberdt.aiMode") : t("cyberdt.offlineMode")}
+            {aiMode ? "✨ " + (t("cyberdt.aiMode") || "AI mode") : (t("cyberdt.offlineMode") || "Offline")}
           </span>
-          <button
-            type="button"
-            onClick={clearChat}
-            title={t("cyberdt.clearChat")}
-            className="grid h-8 w-8 place-items-center rounded-xl border border-cyan-400/40 bg-cyan-500/10 text-cyan-300 transition hover:bg-cyan-500/20"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              title="Close"
+              className="grid h-8 w-8 place-items-center rounded-xl border border-cyan-400/30 bg-cyan-500/5 text-cyan-300 transition hover:bg-cyan-500/15"
+            >
+              <span className="text-lg leading-none">×</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
               setShowPlanPanel(false);
               setShowKeyPanel((v) => !v);
             }}
-            title={t("cyberdt.apiKey")}
+            title={t("cyberdt.apiKey") || "API key"}
             className={cn(
               "grid h-8 w-8 place-items-center rounded-xl border transition",
               localHasKey || serverHasKey
-                ? "border-fuchsia-400/60 bg-fuchsia-500/15 text-fuchsia-300"
-                : "border-cyan-400/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20",
+                ? "border-fuchsia-400/50 bg-fuchsia-500/10 text-fuchsia-300"
+                : "border-cyan-400/30 bg-cyan-500/5 text-cyan-300 hover:bg-cyan-500/15",
             )}
           >
             <KeyRound className="h-4 w-4" />
           </button>
-          <Sparkles className="h-4 w-4 text-fuchsia-300/70" />
+          <button
+            type="button"
+            onClick={clearChat}
+            title={t("cyberdt.clearChat") || "New chat"}
+            className="grid h-8 w-8 place-items-center rounded-xl border border-cyan-400/30 bg-cyan-500/5 text-cyan-300 transition hover:bg-cyan-500/15"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
         </div>
-      </div>
+      </header>
 
-      {/* Gemini API key panel (optional, personal free key) */}
+      {/* ===== Panels (key / plan / note) ===== */}
       {showKeyPanel && (
-        <div className="space-y-2 border-b border-cyan-500/20 bg-cyan-500/5 px-4 py-3">
-          <p className="text-2xs leading-relaxed text-cyan-200/80">{t("cyberdt.apiKeyHint")}</p>
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="shrink-0 space-y-2 border-b border-white/5 bg-cyan-500/5 px-4 py-3">
+          <p className="text-xs leading-relaxed text-cyan-200/80">{t("cyberdt.apiKeyHint")}</p>
+          <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
             <Input
               value={keyInput}
               onChange={(e) => setKeyInput(e.target.value)}
               placeholder="AIza..."
               type="password"
-              className="min-w-0 flex-1 rounded-xl border-cyan-500/30 bg-transparent text-sm text-cyan-50 placeholder:text-cyan-400/40 focus-visible:ring-cyan-400/60"
+              className="min-w-0 flex-1 rounded-xl border-cyan-500/20 bg-[#111B2D] text-sm text-cyan-50 placeholder:text-cyan-400/40 focus-visible:ring-cyan-400/60"
             />
-            <Button
-              type="button"
-              size="sm"
-              onClick={saveKey}
-              className="rounded-xl border border-cyan-400/50 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30"
-            >
-              {t("cyberdt.apiKeySave")}
+            <Button type="button" size="sm" onClick={saveKey} className="rounded-xl bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30">
+              {t("cyberdt.apiKeySave") || "Save"}
             </Button>
             {localHasKey && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={removeKey}
-                className="rounded-xl border border-rose-400/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20"
-              >
-                {t("cyberdt.apiKeyRemove")}
+              <Button type="button" size="sm" variant="outline" onClick={removeKey} className="rounded-xl border-rose-400/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20">
+                {t("cyberdt.apiKeyRemove") || "Remove"}
               </Button>
             )}
           </div>
         </div>
       )}
 
-      {/* Study plan mini-form */}
       {showPlanPanel && (
-        <div className="space-y-2 border-b border-cyan-500/20 bg-violet-500/5 px-4 py-3">
-          <p className="text-2xs font-semibold text-violet-200">{t("cyberdt.planTitle")}</p>
-          <div className="grid grid-cols-2 gap-2">
+        <div className="shrink-0 space-y-3 border-b border-white/5 bg-violet-500/5 px-4 py-4">
+          <p className="text-sm font-semibold text-violet-200">{t("cyberdt.planTitle") || "Personalized study plan"}</p>
+          <div className="mx-auto grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="space-y-1">
-              <span className="text-2xs text-cyan-300/80">
-                {t("cyberdt.planExamDate")}
+              <span className="text-xs text-cyan-300/80">
+                {t("cyberdt.planExamDate") || "Exam date"}
                 {planDateAuto && planDate && !planDateTouched.current ? (
-                  <span className="ml-1 text-fuchsia-300/70">· {t("cyberdt.planAutoDate")}</span>
+                  <span className="ml-1 text-fuchsia-300/70">· {t("cyberdt.planAutoDate") || "from dashboard"}</span>
                 ) : null}
               </span>
               <Input
@@ -742,11 +766,11 @@ export function CyberDTChat() {
                   setPlanDateAuto(false);
                   setPlanDate(e.target.value);
                 }}
-                className="rounded-xl border-cyan-500/30 bg-transparent text-sm text-cyan-50 [color-scheme:dark] focus-visible:ring-cyan-400/60"
+                className="rounded-xl border-cyan-500/20 bg-[#111B2D] text-sm text-cyan-50 [color-scheme:dark] focus-visible:ring-cyan-400/60"
               />
             </label>
             <label className="space-y-1">
-              <span className="text-2xs text-cyan-300/80">{t("cyberdt.planHours")}</span>
+              <span className="text-xs text-cyan-300/80">{t("cyberdt.planHours") || "Study hours per day"}</span>
               <Input
                 type="number"
                 min={1}
@@ -756,252 +780,206 @@ export function CyberDTChat() {
                   planHoursTouched.current = true;
                   setPlanHours(e.target.value);
                 }}
-                className="rounded-xl border-cyan-500/30 bg-transparent text-sm text-cyan-50 [color-scheme:dark] focus-visible:ring-cyan-400/60"
+                className="rounded-xl border-cyan-500/20 bg-[#111B2D] text-sm text-cyan-50 [color-scheme:dark] focus-visible:ring-cyan-400/60"
+              />
+            </label>
+            <label className="space-y-1 sm:col-span-2">
+              <span className="text-xs text-cyan-300/80">{t("cyberdt.planSubjects") || "Subjects"}</span>
+              <Input
+                value={planSubjects}
+                onChange={(e) => setPlanSubjects(e.target.value)}
+                placeholder="Biology, Chemistry, Physics"
+                className="rounded-xl border-cyan-500/20 bg-[#111B2D] text-sm text-cyan-50 placeholder:text-cyan-400/40 focus-visible:ring-cyan-400/60"
+              />
+            </label>
+            <label className="space-y-1 sm:col-span-2">
+              <span className="text-xs text-cyan-300/80">{t("cyberdt.planWeak") || "Difficult topics"}</span>
+              <Input
+                value={planWeak}
+                onChange={(e) => setPlanWeak(e.target.value)}
+                placeholder={t("cyberdt.planWeakPlaceholder") || "e.g. Genetics, Calculus"}
+                className="rounded-xl border-cyan-500/20 bg-[#111B2D] text-sm text-cyan-50 placeholder:text-cyan-400/50 focus-visible:ring-cyan-400/60"
+              />
+            </label>
+            <label className="space-y-1 sm:col-span-2">
+              <span className="text-xs text-cyan-300/80">{t("cyberdt.planDesc") || "Extra instructions (VERY IMPORTANT)"}</span>
+              <textarea
+                value={planDesc}
+                onChange={(e) => setPlanDesc(e.target.value)}
+                placeholder={t("cyberdt.planDescPlaceholder") || "e.g. chemistry 6h, physics 6h video, bio unit 07 this week, start 4 AM"}
+                rows={3}
+                maxLength={600}
+                className="w-full resize-y rounded-xl border border-cyan-500/20 bg-[#111B2D] px-3 py-2 text-sm text-cyan-50 outline-none placeholder:text-cyan-400/40 focus-visible:ring-2 focus-visible:ring-cyan-400/60"
               />
             </label>
           </div>
-          <label className="block space-y-1">
-            <span className="text-2xs text-cyan-300/80">{t("cyberdt.planSubjects")}</span>
-            <Input
-              value={planSubjects}
-              onChange={(e) => setPlanSubjects(e.target.value)}
-              placeholder="Biology, Chemistry, Physics"
-              className="rounded-xl border-cyan-500/30 bg-transparent text-sm text-cyan-50 placeholder:text-cyan-400/40 focus-visible:ring-cyan-400/60"
-            />
-          </label>
-          <label className="block space-y-1">
-            <span className="text-2xs text-cyan-300/80">{t("cyberdt.planWeak")}</span>
-            <Input
-              value={planWeak}
-              onChange={(e) => setPlanWeak(e.target.value)}
-              placeholder={t("cyberdt.planWeakPlaceholder")}
-              className="rounded-xl border-cyan-500/30 bg-transparent text-sm text-cyan-50 placeholder:text-cyan-400/40 focus-visible:ring-cyan-400/60"
-            />
-          </label>
-          <label className="block space-y-1">
-            <span className="text-2xs text-cyan-300/80">{t("cyberdt.planDesc")}</span>
-            <textarea
-              value={planDesc}
-              onChange={(e) => setPlanDesc(e.target.value)}
-              placeholder={t("cyberdt.planDescPlaceholder")}
-              rows={3}
-              maxLength={600}
-              className="w-full resize-y rounded-xl border border-cyan-500/30 bg-transparent px-3 py-2 text-sm text-cyan-50 outline-none placeholder:text-cyan-400/40 focus-visible:ring-2 focus-visible:ring-cyan-400/60"
-            />
-          </label>
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setShowPlanPanel(false)}
-              className="rounded-xl border border-cyan-400/30 bg-transparent text-cyan-300 hover:bg-cyan-500/10"
-            >
-              {t("cyberdt.planCancel")}
+          <div className="mx-auto flex max-w-3xl items-center justify-end gap-2 pt-1">
+            <Button type="button" size="sm" variant="outline" onClick={() => setShowPlanPanel(false)} className="rounded-xl border-cyan-400/30 bg-transparent text-cyan-300 hover:bg-cyan-500/10">
+              {t("cyberdt.planCancel") || "Cancel"}
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={generatePlan}
-              disabled={isTyping}
-              className="rounded-xl border border-violet-400/50 bg-violet-500/25 text-violet-100 hover:bg-violet-500/40 disabled:opacity-50"
-            >
+            <Button type="button" size="sm" onClick={generatePlan} disabled={isTyping} className="rounded-xl border border-violet-400/50 bg-violet-500/20 text-violet-100 hover:bg-violet-500/40 disabled:opacity-50">
               <ClipboardList className="mr-1 h-3.5 w-3.5" />
-              {t("cyberdt.planGenerate")}
+              {t("cyberdt.planGenerate") || "Generate plan"}
             </Button>
           </div>
         </div>
       )}
 
-
-      {/* Note generation panel */}
       {showNotePanel && (
-        <div className="space-y-4 border-b border-cyan-500/20 bg-violet-500/5 px-4 py-3">
-          <p className="text-2xs font-semibold text-violet-200">{t("cyberdt.noteTitle")}</p>
-          <p className="text-2xs text-cyan-300/80">{t("cyberdt.noteSubtitle")}</p>
-          <div className="space-y-2 max-w-full">
-            <p className="text-[0.85rem] text-cyan-400/60">{noteTopic || t("cyberdt.generateNotePrompt")}</p>
+        <div className="shrink-0 space-y-3 border-b border-white/5 bg-violet-500/5 px-4 py-4">
+          <p className="text-sm font-semibold text-violet-200">{t("cyberdt.noteTitle") || "Study Note"}</p>
+          <p className="text-xs text-cyan-300/80">{t("cyberdt.noteSubtitle") || "Generated AI study notes"}</p>
+          <div className="mx-auto max-w-3xl space-y-2">
+            <p className="text-sm text-cyan-400/60">{noteTopic || t("cyberdt.generateNotePrompt")}</p>
             {noteGenerated && (
-              <pre className="rounded-xl border border-violet-400/30 bg-violet-500/10 p-3 text-sm text-violet-400 overflow-auto">{noteGenerated.content}</pre>
+              <pre className="max-h-64 overflow-auto rounded-xl border border-violet-400/30 bg-violet-500/10 p-3 text-sm text-violet-100">{noteGenerated.content}</pre>
             )}
           </div>
-          <div className="flex items-center justify-end gap-2 pt-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setShowNotePanel(false)}
-              className="rounded-xl border border-cyan-400/30 bg-transparent text-cyan-300 hover:bg-cyan-500/10"
-            >
-              {t("cyberdt.close")}
+          <div className="mx-auto flex max-w-3xl items-center justify-end gap-2 pt-1">
+            <Button type="button" size="sm" variant="outline" onClick={() => setShowNotePanel(false)} className="rounded-xl border-cyan-400/30 bg-transparent text-cyan-300 hover:bg-cyan-500/10">
+              {t("cyberdt.close") || "Close"}
             </Button>
           </div>
         </div>
       )}
-      {/* Messages */}
-      <div ref={listRef} className="flex-1 scrollbar-slim overflow-y-auto px-4 py-4">
-        {messages.map((m) =>
-          m.role === "user" ? (
-            <div key={m.id} className="flex flex-col items-end">
-              <div className="whitespace-pre-line rounded-2xl rounded-br-sm border border-cyan-400/40 bg-cyan-500/15 px-4 py-2.5 text-sm text-cyan-50">
-                {m.text}
+
+      {/* ===== Messages / Welcome ===== */}
+      <div ref={listRef} className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-3xl px-4 py-6">
+          {showWelcome && (
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+              <div className="relative mb-6 grid h-20 w-20 place-items-center rounded-3xl border border-cyan-400/30 bg-gradient-to-br from-cyan-500/20 to-violet-500/20 shadow-[0_0_40px_rgba(34,211,238,0.25)]">
+                <Bot className="h-10 w-10 text-cyan-200" />
+                <span className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-[#080D18] bg-emerald-400" />
               </div>
-              {m.time && <span className="mt-0.5 pr-1 text-[0.6rem] text-cyan-500/60">{m.time}</span>}
+              <h2 className="text-2xl font-extrabold tracking-tight text-cyan-100">
+                {t("cyberdt.welcomeTitle") || "How can I help you study today?"}
+              </h2>
+              <p className="mt-2 max-w-md text-sm text-cyan-300/70">
+                {t("cyberdt.welcomeSubtitle") || "Ask me about any A/L Biology topic, generate study notes, create quizzes, or build a personalized study plan."}
+              </p>
+              <div className="mt-8 grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
+                {suggestionCards.map((card) => (
+                  <button
+                    key={card.title}
+                    type="button"
+                    onClick={() => send(card.prompt)}
+                    disabled={isTyping}
+                    className="group flex items-start gap-3 rounded-2xl border border-cyan-500/20 bg-[#111B2D] p-4 text-left transition hover:border-cyan-400/50 hover:bg-cyan-500/5 disabled:opacity-50"
+                  >
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-cyan-500/10 text-xl">
+                      {card.emoji}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-cyan-100">{card.title}</p>
+                      <p className="mt-0.5 text-xs text-cyan-400/70">{card.desc}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
-          ) : (
-            <div key={m.id} className="flex flex-col items-start">
-              <div className="flex items-end gap-2">
-                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-violet-400/40 bg-violet-500/15 text-sm">
+          )}
+
+          {messages.map((m) =>
+            m.role === "user" ? (
+              <div key={m.id} className="mb-6 flex justify-end">
+                <div className="max-w-[80%] whitespace-pre-line rounded-2xl rounded-br-sm bg-cyan-500/15 px-4 py-2.5 text-sm text-cyan-50">
+                  {m.text}
+                </div>
+              </div>
+            ) : (
+              <div key={m.id} className="mb-6 flex gap-3">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-violet-400/40 bg-violet-500/15 text-sm">
                   {m.emoji ?? "🤖"}
                 </span>
-                <div className="whitespace-pre-line rounded-2xl rounded-bl-sm border border-violet-400/30 bg-violet-500/10 px-4 py-2.5 text-sm text-violet-50 [&_h4]:text-sm [&_h5]:text-sm [&_h6]:text-[0.92rem] [&_p]:text-sm">
-                  {m.text ? (
-                    <>
-                      <CyberDTMessageBody text={m.text} />
-                      {m.streaming && (
-                        <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse rounded bg-cyan-300 align-middle" />
+                <div className="min-w-0 flex-1">
+                  <div className="whitespace-pre-line text-sm text-violet-50 [&_h4]:text-sm [&_h5]:text-sm [&_h6]:text-[0.92rem] [&_p]:text-sm">
+                    {m.text ? (
+                      <>
+                        <CyberDTMessageBody text={m.text} />
+                        {m.streaming && (
+                          <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse rounded bg-cyan-300 align-middle" />
+                        )}
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-1.5 py-1">
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:-0.3s]" />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:-0.15s]" />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300" />
+                        <span className="ml-2 text-xs text-cyan-400/80">
+                          {t("cyberdt.thinking") || "Thinking"}
+                          {elapsed > 0 ? ` · ${elapsed}s` : ""}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {m.text && !m.streaming && (
+                    <div className="mt-2 flex items-center gap-3 text-[0.7rem] text-cyan-400/60">
+                      {m.time && <span>{m.time}</span>}
+                      <button type="button" onClick={() => copyMessage(m)} className="flex items-center gap-1 transition hover:text-cyan-300">
+                        {copiedId === m.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                        {copiedId === m.id ? (t("cyberdt.copied") || "Copied") : (t("cyberdt.copy") || "Copy")}
+                      </button>
+                      {m.id === lastAiId && messages.length > 1 && !isTyping && (
+                        <button type="button" onClick={regenerate} className="flex items-center gap-1 transition hover:text-violet-300">
+                          <RefreshCw className="h-3 w-3" /> {t("cyberdt.regenerate") || "Regenerate"}
+                        </button>
                       )}
-                    </>
-                  ) : (
-                    // Thinking indicator while the first words are on their way.
-                    <div className="flex items-center gap-1.5 py-1">
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:-0.3s]" />
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:-0.15s]" />
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300" />
-                      <span className="ml-2 text-2xs text-cyan-400/80">
-                        {t("cyberdt.thinking")}
-                        {elapsed > 0 ? ` · ${elapsed}s` : ""}
-                      </span>
                     </div>
                   )}
                 </div>
               </div>
-              <div className="ml-9 mt-0.5 flex items-center gap-2">
-                {m.time && <span className="text-[0.6rem] text-violet-400/50">{m.time}</span>}
-                {m.text && !m.streaming && (
-                  <button
-                    type="button"
-                    onClick={() => copyMessage(m)}
-                    title={t("cyberdt.copy")}
-                    className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.65rem] text-cyan-400/70 transition hover:bg-cyan-500/10 hover:text-cyan-300"
-                  >
-                    {copiedId === m.id ? (
-                      <>
-                        <Check className="h-3 w-3" /> {t("cyberdt.copied")}
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="h-3 w-3" /> {t("cyberdt.copy")}
-                      </>
-                    )}
-                  </button>
-                )}
-                {m.id === lastAiId && m.text && !m.streaming && !isTyping && messages.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={regenerate}
-                    title={t("cyberdt.regenerate")}
-                    className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.65rem] text-violet-400/70 transition hover:bg-violet-500/10 hover:text-violet-300"
-                  >
-                    <RefreshCw className="h-3 w-3" /> {t("cyberdt.regenerate")}
-                  </button>
-                )}
+            ),
+          )}
+
+          {isTyping && messages[messages.length - 1]?.role === "user" && (
+            <div className="mb-6 flex gap-3">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-violet-400/40 bg-violet-500/15 text-sm">✨</span>
+              <div className="flex items-center gap-1.5 py-1">
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:-0.3s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:-0.15s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300" />
               </div>
             </div>
-          ),
-        )}
+          )}
+        </div>
       </div>
 
-      {/* Quick actions + quick questions */}
-      <div className="flex flex-col gap-2 px-4 py-2.5 border-t border-cyan-500/20">
-        <button
-          type="button"
-          onClick={openPlanPanel}
-          disabled={isTyping}
-          className="flex shrink-0 items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 px-3 py-1 text-2xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50"
-        >
-          <ClipboardList className="h-3 w-3" /> {t("cyberdt.actionPlan")}
-        </button>
-        <button
-          type="button"
-          onClick={startQuiz}
-          disabled={isTyping}
-          className="flex shrink-0 items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 px-3 py-1 text-2xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50"
-        >
-          <Target className="h-3 w-3" /> {t("cyberdt.actionQuiz")}
-        </button>
-        <button
-          type="button"
-          onClick={askPastPaper}
-          disabled={isTyping}
-          className="flex shrink-0 items-center gap-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 px-3 py-1 text-2xs font-semibold text-fuchsia-200 transition hover:border-fuchsia-300 hover:bg-fuchsia-500/20 disabled:opacity-50"
-        >
-          <FileText className="h-3 w-3" /> {t("cyberdt.actionPaper")}
-        </button>
-        <button
-          type="button"
-          onClick={askTips}
-          disabled={isTyping}
-          className="flex shrink-0 items-center gap-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 px-3 py-1 text-2xs font-semibold text-fuchsia-200 transition hover:border-fuchsia-300 hover:bg-fuchsia-500/20 disabled:opacity-50"
-        >
-          <Lightbulb className="h-3 w-3" /> {t("cyberdt.actionTips")}
-        </button>
-        <button
-          type="button"
-          onClick={() => generateNote(t("cyberdt.quickAsk"))}
-          disabled={isTyping}
-          className="flex shrink-0 items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 px-3 py-1 text-2xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50"
-        >
-          <Lightbulb className="h-3 w-3" /> {t("cyberdt.actionNote")}
-        </button>
-        <span className="mx-1 my-auto h-4 w-px shrink-0 bg-cyan-500/20" />
-        {quickQuestions.map((q) => (
-          <button
-            key={q}
-            onClick={() => send(q)}
+      {/* ===== Composer ===== */}
+      <div className="shrink-0 border-t border-white/5 bg-[#080D18]/90 px-4 py-3 backdrop-blur">
+        <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-cyan-500/20 bg-[#111B2D] p-2">
+          <textarea
+            ref={composerRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleComposerKeyDown}
+            placeholder={t("cyberdt.composerPlaceholder") || "Message Cyber DT AI..."}
             disabled={isTyping}
-            className="shrink-0 rounded-full border border-cyan-400/30 bg-cyan-500/5 px-3 py-1 text-2xs font-semibold text-cyan-300 transition hover:border-cyan-300 hover:bg-cyan-500/15 disabled:opacity-50"
-          >
-            {q}
-          </button>
-        ))}
-      </div>
-
-      {/* Input */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          send(input);
-        }}
-        className="flex items-center gap-2 border-t border-cyan-500/30 bg-[#0b1220]/95 p-3"
-      >
-        <Input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={t("cyberdt.quickAsk")}
-          disabled={isTyping}
-          className="rounded-xl border-cyan-500/30 bg-transparent text-sm text-cyan-50 placeholder:text-cyan-400/50 focus-visible:ring-cyan-400/60"
-        />
-        {isTyping ? (
-          <Button
-            type="button"
-            onClick={stopGenerating}
-            title={t("cyberdt.stop")}
-            className="rounded-xl border border-rose-400/50 bg-rose-500/20 text-rose-200 hover:bg-rose-500/30"
-          >
-            <Square className="h-4 w-4" />
-          </Button>
-        ) : (
-          <Button
-            type="submit"
-            size="icon"
-            disabled={!input.trim()}
-            className="rounded-xl border border-cyan-400/50 bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30 disabled:opacity-40"
-          >
-            <Send className="h-4 w-4" />
-          </Button>
-        )}
-      </form>
+            rows={1}
+            className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-cyan-50 placeholder:text-cyan-400/50 focus:outline-none disabled:opacity-50"
+          />
+          {isTyping ? (
+            <button
+              type="button"
+              onClick={stopGenerating}
+              title={t("cyberdt.stop") || "Stop"}
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-rose-500/20 text-rose-200 transition hover:bg-rose-500/30"
+            >
+              <Square className="h-4 w-4" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!input.trim()}
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-cyan-500/80 text-[#080D18] transition hover:bg-cyan-400 disabled:opacity-40 disabled:hover:bg-cyan-500/80"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          )}
+        </form>
+        <p className="mt-2 text-center text-[0.65rem] text-cyan-400/50">
+          {t("cyberdt.disclaimer") || "Cyber DT AI can make mistakes. Verify important information."}
+        </p>
       </div>
     </div>
   );
