@@ -20,10 +20,10 @@ import {
  * Why not server-sent events? Netlify's function runtime reliably cut our
  * streamed responses a few seconds in — long answers arrived truncated
  * mid-sentence on the live site even though the same request completed
- * fine when called directly. Fully buffered JSON responses run for the
- * 20–30 s a long study plan needs, so the route returns the whole answer
- * at once and the chat page reveals it progressively with a typewriter
- * effect, which looks the same as streaming to the student.
+ * fine when called directly. Fully buffered JSON responses finish inside the
+ * platform's function timeout, so the route returns the whole answer at once
+ * and the chat page reveals it progressively with a typewriter effect, which
+ * looks the same as streaming to the student.
  *
  * Note: Netlify only passes env vars set in the dashboard (not netlify.toml
  * [build.environment]) to serverless functions at runtime.
@@ -45,20 +45,19 @@ const CORS: Record<string, string> = {
 };
 
 /**
- * Netlify kills a synchronous function at 60 s. We stop well before that and
- * return a clean JSON reply, because a killed function leaves the browser with
- * a dead socket and no answer at all.
+ * Hard ceiling for the whole request. Netlify cuts a synchronous function well
+ * before a minute — a 50 s budget produced 504 Gateway Timeouts on the live
+ * site — so we finish comfortably early and return a clean JSON reply. A killed
+ * function leaves the browser with a dead socket and no answer at all.
  */
-const TOTAL_BUDGET_MS = 50_000;
+const TOTAL_BUDGET_MS = 22_000;
 
-/** One model attempt may need to generate a long study plan; cap it so a hung
- *  request cannot eat the whole budget. */
-const ATTEMPT_TIMEOUT_MS = 20_000;
-
-/** Waits for `ms` without blocking the event loop. */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+/**
+ * How many models to ask at the same time. Free-tier quota is per model, so
+ * racing a few both hides a single busy model and gives the student the
+ * FASTEST answer instead of the sum of a sequential chain.
+ */
+const MAX_PARALLEL = 3;
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS });
@@ -92,76 +91,68 @@ export async function POST(req: NextRequest) {
 
     const requestBody = JSON.stringify(buildGeminiRequestBody(history, message));
 
-    // Walk the model chain: free-tier rate limits are per model, so when the
-    // primary model is busy (503), out of quota (429) or retired (404) the
-    // next one usually still answers. Attempts are capped so the total stays
-    // well under Netlify's 60-second function execution limit.
+    // Ask several models at once and keep the first complete answer. Free-tier
+    // limits are per model, so one model being overloaded (503) or out of quota
+    // (429) no longer ends in "no answer", and racing them means the student
+    // waits for the FASTEST model rather than the sum of a sequential chain.
     const models = cyberDTModelChain();
-    const deadline = Date.now() + TOTAL_BUDGET_MS;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TOTAL_BUDGET_MS);
+    let winner = "";
     let lastStatus = 0;
     let lastDetail = "";
-    let fatal = false;
 
-    // Two passes over the chain. A 503 ("spikes in demand are usually
-    // temporary") or a per-model 429 is often gone a moment later, so the
-    // second pass — after a short wait — recovers answers a single pass would
-    // drop. The deadline keeps the whole request under Netlify's 60 s limit so
-    // the chat page always receives a clean JSON reply instead of a dead
-    // socket (which looked to the student like "no answer").
-    for (let round = 0; round < 2 && !fatal; round++) {
-      for (const model of models) {
-        const remaining = deadline - Date.now();
-        if (remaining <= 2_000) break;
-
-        let res: Response;
-        try {
-          res = await fetch(geminiEndpoint(model), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-goog-api-key": apiKey,
-            },
-            body: requestBody,
-            signal: AbortSignal.timeout(Math.min(ATTEMPT_TIMEOUT_MS, remaining)),
-          });
-        } catch (e: unknown) {
-          // Network error / abort on this model — try the next one.
-          lastStatus = 0;
-          lastDetail = e instanceof Error ? e.message.slice(0, 200) : String(e);
-          continue;
-        }
+    const attempt = async (model: string): Promise<void> => {
+      if (winner) return;
+      try {
+        const res = await fetch(geminiEndpoint(model), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: requestBody,
+          signal: controller.signal,
+        });
 
         if (res.ok) {
           const data = await res.json().catch(() => null);
           const text = extractGeminiText(data);
-          if (text) {
-            return NextResponse.json({ ok: true, text }, { headers: CORS });
+          if (text && !winner) {
+            winner = text;
+            // We already have an answer — stop the other in-flight requests.
+            controller.abort();
           }
-          // Empty answer from this model — try the next one.
-          lastStatus = 0;
-          lastDetail = "empty_response";
-          continue;
+          return;
         }
 
         lastStatus = res.status;
         lastDetail = (await res.text().catch(() => "")).slice(0, 300);
-
-        // Rate limit (429), overload (503) or retired model (404) → another
-        // model may still answer. 404 means Google turned the model down.
-        if (res.status === 429 || res.status === 503 || res.status === 404) {
-          await sleep(400);
-          continue;
+      } catch (e: unknown) {
+        // Aborted (a winner exists, or we ran out of time) or a network error
+        // on this model. Keep the first useful detail for diagnostics.
+        if (!winner && lastStatus === 0) {
+          lastDetail = e instanceof Error ? e.message.slice(0, 200) : String(e);
         }
-
-        // Any other error (bad request, invalid key…) — retrying other models
-        // will not help, so stop and let the chat page fall back.
-        fatal = true;
-        break;
       }
+    };
 
-      if (!fatal && Date.now() < deadline - 1_000) {
-        await sleep(900);
+    // Race the fastest / most reliable models together.
+    await Promise.all(models.slice(0, MAX_PARALLEL).map(attempt));
+
+    // Still nothing? Try any remaining models one at a time while time allows.
+    if (!winner) {
+      for (const model of models.slice(MAX_PARALLEL)) {
+        if (controller.signal.aborted) break;
+        await attempt(model);
+        if (winner) break;
       }
+    }
+
+    clearTimeout(timer);
+
+    if (winner) {
+      return NextResponse.json({ ok: true, text: winner }, { headers: CORS });
     }
 
     return NextResponse.json(
