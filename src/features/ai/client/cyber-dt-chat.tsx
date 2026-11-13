@@ -1127,21 +1127,22 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
 
       {/* ===== Composer ===== */}
       <div className="shrink-0 border-t border-white/5 bg-[#080D18]/90 px-4 py-3 backdrop-blur">
-        {/* Quick actions row — horizontal, right above the input */}
-        <div className="mx-auto mb-2 flex max-w-3xl flex-wrap items-center gap-2">
-          <button type="button" onClick={openPlanPanel} disabled={isTyping} className="flex items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50">
+        {/* Quick actions row — horizontal, right above the input, always a
+            single row (scrolls sideways on narrow screens). */}
+        <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <button type="button" onClick={openPlanPanel} disabled={isTyping} className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-violet-400/50 bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50">
             <ClipboardList className="h-3.5 w-3.5" /> {t("cyberdt.actionPlan") || "Plan"}
           </button>
-          <button type="button" onClick={startQuiz} disabled={isTyping} className="flex items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50">
+          <button type="button" onClick={startQuiz} disabled={isTyping} className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-violet-400/50 bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50">
             <Target className="h-3.5 w-3.5" /> {t("cyberdt.actionQuiz") || "Quiz"}
           </button>
-          <button type="button" onClick={askPastPaper} disabled={isTyping} className="flex items-center gap-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 px-3 py-1 text-xs font-semibold text-fuchsia-200 transition hover:border-fuchsia-300 hover:bg-fuchsia-500/20 disabled:opacity-50">
+          <button type="button" onClick={askPastPaper} disabled={isTyping} className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 px-3 py-1 text-xs font-semibold text-fuchsia-200 transition hover:border-fuchsia-300 hover:bg-fuchsia-500/20 disabled:opacity-50">
             <FileText className="h-3.5 w-3.5" /> {t("cyberdt.actionPaper") || "Past papers"}
           </button>
-          <button type="button" onClick={askTips} disabled={isTyping} className="flex items-center gap-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 px-3 py-1 text-xs font-semibold text-fuchsia-200 transition hover:border-fuchsia-300 hover:bg-fuchsia-500/20 disabled:opacity-50">
+          <button type="button" onClick={askTips} disabled={isTyping} className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 px-3 py-1 text-xs font-semibold text-fuchsia-200 transition hover:border-fuchsia-300 hover:bg-fuchsia-500/20 disabled:opacity-50">
             <Lightbulb className="h-3.5 w-3.5" /> {t("cyberdt.actionTips") || "Tips"}
           </button>
-          <button type="button" onClick={() => generateNote(t("cyberdt.quickAsk"))} disabled={isTyping} className="flex items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50">
+          <button type="button" onClick={() => generateNote(t("cyberdt.quickAsk"))} disabled={isTyping} className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-violet-400/50 bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50">
             <Lightbulb className="h-3.5 w-3.5" /> {t("cyberdt.actionNote") || "Generate Note"}
           </button>
         </div>
