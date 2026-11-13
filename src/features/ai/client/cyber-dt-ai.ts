@@ -1092,6 +1092,32 @@ In the meantime, here's a reusable A/L revision framework you can adapt to your 
   return fallbackResponses[stableFallbackIndex(message, fallbackResponses.length)] ?? fallbackResponses[0];
 }
 
+/**
+ * Honest, actionable reply for when the real AI is reachable but busy (the
+ * server returned busy:true — Google's free tier is overloaded or out of
+ * quota). Unlike the offline knowledge base this never pretends to answer the
+ * question; it tells the student to retry, in their own language.
+ */
+export function getCyberDTAIBusyResponse(_locale: CyberDTLocale = "en"): CyberDTResponse {
+  return {
+    textEn: `⚠️ I couldn't finish an answer — the AI service is busy right now (Google's free tier is overloaded or out of quota).
+
+Your question wasn't lost. Tap the ↻ button under this message to try again — it usually works within a minute.
+
+If it keeps happening:
+• 🔑 Add your own free Google AI Studio key (key button at the top) — it has a separate quota and works even when the shared key is busy
+• Or ask me one A/L Biology topic at a time — those are answered instantly from my built-in notes`,
+    textSi: `⚠️ උත්තරය සම්පූර්ණ කරන්න බැරි වුණා — AI සේවාව දැන් busy (Google free tier එක overloaded හෝ quota ඉවරයි).
+
+ඔයාගේ ප්‍රශ්නය නැති වුණේ නැහැ. මේ පණිවිඩය යට ඇති ↻ බොත්තම එබලා නැවත try කරන්න — සාමාන්‍යයෙන් මිනිත්තුවක් ඇතුළත වැඩ කරනවා.
+
+නැවත නැවත වුණොත්:
+• 🔑 ඔයාගේම free Google AI Studio key එකක් එකතු කරන්න (උඩ ඇති key බොත්තම) — ඒකට වෙනම quota එකක් තියෙනවා, shared key එක busy වුණත් වැඩ කරනවා
+• නැත්නම් එක A/L ජීව විද්‍යා topic එකක් ගැන අහන්න — ඒවා මගේ built-in notes වලින් instant උත්තර දෙනවා`,
+    emoji: "⚠️",
+  };
+}
+
 /** Returns the response text in the requested language (English as a fallback). */
 export function renderCyberDTResponse(response: CyberDTResponse, locale: CyberDTLocale): string {
   if (locale === "si") return response.textSi ?? response.textEn;

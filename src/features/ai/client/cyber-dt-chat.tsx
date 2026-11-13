@@ -23,6 +23,7 @@ import {
 import { useT, useLanguage } from "@/lib/language-context";
 import {
   generateCyberDTResponse,
+  getCyberDTAIBusyResponse,
   getCyberDTGreeting,
   renderCyberDTResponse,
   detectCyberDTLocale,
@@ -153,6 +154,7 @@ async function readAnswerStream(
   init: RequestInit,
   mapEvent: SSEEventMapper,
   onDelta: (fullSoFar: string) => void,
+  onServerBusy?: () => void,
 ): Promise<string | null> {
   const res = await fetch(url, init);
   const contentType = res.headers.get("content-type") || "";
@@ -185,6 +187,10 @@ async function readAnswerStream(
     await typeOutAnswer(full, onDelta, init.signal);
     return full;
   }
+  // The route answered, but couldn't get an AI reply (busy/out of quota).
+  // Distinguish that from "offline" so the caller can offer a retry instead of
+  // a wrong offline answer.
+  if (data && data.busy) onServerBusy?.();
   return null;
 }
 
@@ -437,6 +443,9 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
     //    it progressively, so it still looks like live typing.
     let answer: string | null = null;
     let serverFailed = false;
+    // True when the route answered but the AI itself was busy (429/503) — the
+    // device is online, so an offline knowledge-base answer would be wrong.
+    let serverBusy = false;
     try {
       answer = await readAnswerStream(
         CYBER_DT_API,
@@ -451,6 +460,9 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
           return typeof delta === "string" ? delta : "";
         },
         onDelta,
+        () => {
+          serverBusy = true;
+        },
       );
       if (!answer) serverFailed = true;
     } catch {
@@ -504,10 +516,14 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
       return;
     }
 
-    // 3) Offline fallback: the built-in knowledge base, replying in the
-    //    detected language (works with zero internet or no API key).
+    // 3) No AI answer. If the AI itself was busy (the device is online), say so
+    //    honestly and offer a retry — an offline answer would ignore the actual
+    //    question. Otherwise (truly offline / no key) use the built-in
+    //    knowledge base, replying in the detected language.
     if (!answer && !aiText.trim()) {
-      const aiResponse = generateCyberDTResponse(text, replyLocale);
+      const aiResponse = serverBusy
+        ? getCyberDTAIBusyResponse(replyLocale)
+        : generateCyberDTResponse(text, replyLocale);
       const kbText = renderCyberDTResponse(aiResponse, replyLocale);
       // Minimum typing time so instant offline answers don't feel jarring.
       await new Promise<void>((resolve) => {
@@ -768,33 +784,6 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
   }
 
   const showWelcome = messages.length <= 1;
-
-  const suggestionCards = [
-    {
-      emoji: "🔬",
-      title: t("cyberdt.actionExplain") || "Explain a topic",
-      desc: t("cyberdt.actionExplainDesc") || "Get a full exam-style explanation",
-      prompt: QUICK_QUESTIONS[locale as CyberDTLocale]?.[0] ?? "Explain photosynthesis",
-    },
-    {
-      emoji: "📝",
-      title: t("cyberdt.actionNote") || "Generate study notes",
-      desc: t("cyberdt.actionNoteDesc") || "AI-written revision notes",
-      prompt: t("cyberdt.quickAsk") || "Explain photosynthesis",
-    },
-    {
-      emoji: "🎯",
-      title: t("cyberdt.actionQuiz") || "Create a quiz",
-      desc: t("cyberdt.actionQuizDesc") || "Test yourself with MCQs",
-      prompt: `Start an interactive quiz for me. If I have not said which subject, ask me first whether I want Biology, Physics or Chemistry. Then ask ONE A/L multiple-choice question at a time from the official Sri Lankan A/L Resource Book (NIE) for that subject, with 4 options (A-D), and WAIT for my answer. After I reply, tell me if it is correct with a 1-2 line explanation, then ask the next. Ask 10 questions total with increasing difficulty, targeting the subtle definitions, diagrams and summary-box points in the resource book. Reply fully in ${replyLanguage}.`,
-    },
-    {
-      emoji: "📄",
-      title: t("cyberdt.actionPaper") || "Past paper help",
-      desc: t("cyberdt.actionPaperDesc") || "Marking points & model answers",
-      prompt: `Give me 3 G.C.E. A/L past-paper-style structured essay questions from the official Sri Lankan A/L Resource Book (NIE), and for each one list the key marking points (ලකුණු දෙන ප්‍රධාන ලක්ෂණ) that a full-mark answer must include. If I have not said which subject, ask me first whether I want Biology, Physics or Chemistry. Reply fully in ${replyLanguage}.`,
-    },
-  ];
 
   // Auto-resize the composer textarea.
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -1068,25 +1057,6 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
               <p className="mt-2 max-w-md text-sm text-cyan-300/70">
                 {t("cyberdt.welcomeSubtitle") || "Ask me about any A/L Biology, Physics or Chemistry topic, generate study notes, create quizzes, or build a personalized study plan."}
               </p>
-              <div className="mt-8 grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
-                {suggestionCards.map((card) => (
-                  <button
-                    key={card.title}
-                    type="button"
-                    onClick={() => send(card.prompt)}
-                    disabled={isTyping}
-                    className="group flex items-start gap-3 rounded-2xl border border-cyan-500/20 bg-[#111B2D] p-4 text-left transition hover:border-cyan-400/50 hover:bg-cyan-500/5 disabled:opacity-50"
-                  >
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-cyan-500/10 text-xl">
-                      {card.emoji}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-cyan-100">{card.title}</p>
-                      <p className="mt-0.5 text-xs text-cyan-400/70">{card.desc}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
             </div>
           )}
 

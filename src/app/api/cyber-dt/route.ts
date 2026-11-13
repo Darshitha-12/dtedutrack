@@ -44,6 +44,22 @@ const CORS: Record<string, string> = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+/**
+ * Netlify kills a synchronous function at 60 s. We stop well before that and
+ * return a clean JSON reply, because a killed function leaves the browser with
+ * a dead socket and no answer at all.
+ */
+const TOTAL_BUDGET_MS = 50_000;
+
+/** One model attempt may need to generate a long study plan; cap it so a hung
+ *  request cannot eat the whole budget. */
+const ATTEMPT_TIMEOUT_MS = 20_000;
+
+/** Waits for `ms` without blocking the event loop. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS });
 }
@@ -81,67 +97,91 @@ export async function POST(req: NextRequest) {
     // next one usually still answers. Attempts are capped so the total stays
     // well under Netlify's 60-second function execution limit.
     const models = cyberDTModelChain();
+    const deadline = Date.now() + TOTAL_BUDGET_MS;
     let lastStatus = 0;
     let lastDetail = "";
+    let fatal = false;
 
-    for (let i = 0; i < models.length; i++) {
-      const model = models[i];
-      let res: Response;
-      try {
-        res = await fetch(geminiEndpoint(model), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey,
-          },
-          body: requestBody,
-          // A complete study-plan answer can take ~30 s to generate; the cap
-          // keeps one hung attempt from eating the whole function budget.
-          signal: AbortSignal.timeout(40_000),
-        });
-      } catch (e: unknown) {
-        // Network error / abort on this model — try the next one.
-        lastStatus = 0;
-        lastDetail = e instanceof Error ? e.message.slice(0, 200) : String(e);
-        continue;
-      }
+    // Two passes over the chain. A 503 ("spikes in demand are usually
+    // temporary") or a per-model 429 is often gone a moment later, so the
+    // second pass — after a short wait — recovers answers a single pass would
+    // drop. The deadline keeps the whole request under Netlify's 60 s limit so
+    // the chat page always receives a clean JSON reply instead of a dead
+    // socket (which looked to the student like "no answer").
+    for (let round = 0; round < 2 && !fatal; round++) {
+      for (const model of models) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 2_000) break;
 
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        const text = extractGeminiText(data);
-        if (text) {
-          return NextResponse.json({ ok: true, text }, { headers: CORS });
+        let res: Response;
+        try {
+          res = await fetch(geminiEndpoint(model), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": apiKey,
+            },
+            body: requestBody,
+            signal: AbortSignal.timeout(Math.min(ATTEMPT_TIMEOUT_MS, remaining)),
+          });
+        } catch (e: unknown) {
+          // Network error / abort on this model — try the next one.
+          lastStatus = 0;
+          lastDetail = e instanceof Error ? e.message.slice(0, 200) : String(e);
+          continue;
         }
-        // Empty answer from this model — try the next one.
-        lastStatus = 0;
-        lastDetail = "empty_response";
-        continue;
+
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          const text = extractGeminiText(data);
+          if (text) {
+            return NextResponse.json({ ok: true, text }, { headers: CORS });
+          }
+          // Empty answer from this model — try the next one.
+          lastStatus = 0;
+          lastDetail = "empty_response";
+          continue;
+        }
+
+        lastStatus = res.status;
+        lastDetail = (await res.text().catch(() => "")).slice(0, 300);
+
+        // Rate limit (429), overload (503) or retired model (404) → another
+        // model may still answer. 404 means Google turned the model down.
+        if (res.status === 429 || res.status === 503 || res.status === 404) {
+          await sleep(400);
+          continue;
+        }
+
+        // Any other error (bad request, invalid key…) — retrying other models
+        // will not help, so stop and let the chat page fall back.
+        fatal = true;
+        break;
       }
 
-      lastStatus = res.status;
-      lastDetail = (await res.text().catch(() => "")).slice(0, 300);
-
-      // Rate limit (429), overload (503) or retired model (404) → try the
-      // next model in the chain. 404 means the model was turned down by
-      // Google (several are retired now), so the fallbacks must take over.
-      if (res.status === 429 || res.status === 503 || res.status === 404) {
-        await new Promise((resolve) => setTimeout(resolve, 600));
-        continue;
+      if (!fatal && Date.now() < deadline - 1_000) {
+        await sleep(900);
       }
-
-      // Any other error (bad request, invalid key…) — no point retrying
-      // with other models; report it and let the chat page fall back.
-      break;
     }
 
     return NextResponse.json(
-      { ok: false, error: "api_error", status: lastStatus, detail: lastDetail, fallback: true },
+      {
+        ok: false,
+        error: "api_error",
+        status: lastStatus,
+        detail: lastDetail,
+        // Tells the chat page the AI itself is busy (not that the device is
+        // offline), so it can offer a retry instead of a wrong offline answer.
+        busy: true,
+        fallback: true,
+      },
       { status: 200, headers: CORS },
     );
   } catch (e: unknown) {
     const detail = e instanceof Error ? e.message : String(e);
     return NextResponse.json(
-      { ok: false, error: "exception", detail: detail.slice(0, 200), fallback: true },
+      // busy:true → the chat page offers a retry instead of an offline answer.
+      { ok: false, error: "exception", detail: detail.slice(0, 200), busy: true, fallback: true },
       { headers: CORS },
     );
   }
