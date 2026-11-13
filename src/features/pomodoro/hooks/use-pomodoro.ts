@@ -124,6 +124,19 @@ function phaseDuration(phase: PomodoroPhase, config: PomodoroConfig): number {
   }
 }
 
+/**
+ * Asks the account sync loop to push the live Pomodoro state right away, so a
+ * session started on one device appears on the account's other devices within
+ * seconds instead of waiting for the slow background interval.
+ */
+function requestSync() {
+  try {
+    window.dispatchEvent(new Event("biopulse:sync-now"));
+  } catch {
+    /* no window (SSR) */
+  }
+}
+
 export function usePomodoroTimer() {
   const { status: sessionStatus } = useSession();
   const [config, setConfig] = useState<PomodoroConfig>(() =>
@@ -247,7 +260,21 @@ export function usePomodoroTimer() {
     } catch {
       // storage full or unavailable
     }
+    // Push the running state so the account's other devices see this session.
+    requestSync();
   }, [live]);
+
+  // Mirror a Pomodoro started, paused or advanced on another device of the same
+  // account. `endTs` is absolute, so the countdown stays correct cross-device.
+  useEffect(() => {
+    const onSynced = (e: Event) => {
+      const keys = (e as CustomEvent<{ keys?: string[] }>).detail?.keys;
+      if (!keys || !keys.includes(LIVE_KEY)) return;
+      setLive(loadLive());
+    };
+    window.addEventListener("biopulse:kvsynced", onSynced);
+    return () => window.removeEventListener("biopulse:kvsynced", onSynced);
+  }, []);
 
   // Flush any work-log entries queued while signed out / offline once an auth
   // session is available, and retry when we come back online.

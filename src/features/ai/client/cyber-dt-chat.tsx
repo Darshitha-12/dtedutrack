@@ -61,6 +61,20 @@ interface Conversation {
 
 const CONV_STORAGE = "cyberdt_conversations";
 
+/**
+ * Asks the account sync loop to push the saved conversations right away. Without
+ * this, chats written to localStorage only reached the account on the slow
+ * background interval (and never while the tab was hidden), so they did not
+ * appear on the account's other devices.
+ */
+function requestSync() {
+  try {
+    window.dispatchEvent(new Event("biopulse:sync-now"));
+  } catch {
+    /* no window (SSR) */
+  }
+}
+
 const QUICK_QUESTIONS: Record<CyberDTLocale, string[]> = {
   en: [
     "Tell me about photosynthesis",
@@ -242,6 +256,9 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
       })
       .catch(() => {});
     setLocalHasKey(Boolean(getStoredGeminiKey()));
+    // Opening the chat is a good moment to pull the account's latest
+    // conversations, so a chat saved on another device shows up here.
+    requestSync();
   }, []);
 
   // Pre-fill the study-plan form from the profile the student keeps on the
@@ -351,8 +368,15 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
     const id = currentConvId || `conv-${Date.now()}`;
     if (!currentConvId) setCurrentConvId(id);
     const title = messages.find((m) => m.role === "user")?.text.slice(0, 40) || "New chat";
-    const conv: Conversation = { id, title, messages, updatedAt: Date.now() };
     setConversations((prev) => {
+      // Skip a no-op write: when another device's copy was just applied the
+      // messages are identical, and re-saving them would bump updatedAt and
+      // bounce the conversation back and forth between devices forever.
+      const existing = prev.find((c) => c.id === id);
+      if (existing && JSON.stringify(existing.messages) === JSON.stringify(messages)) {
+        return prev;
+      }
+      const conv: Conversation = { id, title, messages, updatedAt: Date.now() };
       const filtered = prev.filter((c) => c.id !== id);
       const next = [conv, ...filtered].slice(0, 20);
       try {
@@ -362,6 +386,7 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
       }
       return next;
     });
+    requestSync();
   }, [messages, isTyping, currentConvId]);
 
   // Clear pending timers on unmount.
@@ -611,6 +636,7 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
     }
     setCurrentConvId(null);
     setMessages([greeting()]);
+    requestSync();
   };
 
   const loadConversation = (id: string) => {
@@ -636,6 +662,7 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
       setCurrentConvId(null);
       setMessages([greeting()]);
     }
+    requestSync();
   };
 
   const stopGenerating = () => {

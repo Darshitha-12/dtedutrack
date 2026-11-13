@@ -105,6 +105,19 @@ function bridge(json: Record<string, unknown>) {
   }
 }
 
+/**
+ * Asks the account sync loop to push this timer's state right away, so a timer
+ * started on this device shows up on the account's other devices within
+ * seconds instead of waiting for the slow background interval.
+ */
+function requestSync() {
+  try {
+    window.dispatchEvent(new Event("biopulse:sync-now"))
+  } catch {
+    /* no window (SSR) */
+  }
+}
+
 function fmt(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
   const h = Math.floor(s / 3600)
@@ -168,6 +181,38 @@ export default function TimerPage() {
     return () => window.removeEventListener("online", onOnline)
   }, [])
 
+  // A timer started, paused or stopped on another device of the same account is
+  // written into localStorage by the sync engine. Re-read it here so both
+  // devices show the same running state (the absolute startedAt keeps the
+  // count-up correct even when the two clocks differ by a little).
+  React.useEffect(() => {
+    const onSynced = (e: Event) => {
+      const keys = (e as CustomEvent<{ keys?: string[] }>).detail?.keys
+      if (!keys || !keys.includes(LIVE_KEY)) return
+      const l = loadLive()
+      if (!l) return
+      labelRef.current = l.label
+      setLabel(l.label)
+      accumRef.current = l.accum
+      setAccum(l.accum)
+      if (l.running && l.startedAt > 0) {
+        startedAtRef.current = l.startedAt
+        setStartedAt(l.startedAt)
+        runningRef.current = true
+        setRunning(true)
+        setElapsed(l.accum + Math.max(0, Date.now() - l.startedAt))
+      } else {
+        startedAtRef.current = 0
+        runningRef.current = false
+        setRunning(false)
+        setStartedAt(0)
+        setElapsed(l.accum)
+      }
+    }
+    window.addEventListener("biopulse:kvsynced", onSynced)
+    return () => window.removeEventListener("biopulse:kvsynced", onSynced)
+  }, [])
+
   // Once an auth session is available, retry any work-log entries that were
   // queued while offline or signed out.
   React.useEffect(() => {
@@ -215,6 +260,7 @@ export default function TimerPage() {
     (live: Live) => {
       saveLive(live)
       pushNative(live)
+      requestSync()
     },
     [pushNative],
   )
@@ -231,6 +277,7 @@ export default function TimerPage() {
         setAccum(a)
         setElapsed(a)
         saveLive({ running: false, startedAt: 0, accum: a, label: labelRef.current })
+        requestSync()
       } else if (action === "resumed") {
         const s = typeof payload === "number" && payload > 0 ? payload : Date.now()
         runningRef.current = true
@@ -238,6 +285,7 @@ export default function TimerPage() {
         setRunning(true)
         setStartedAt(s)
         saveLive({ running: true, startedAt: s, accum: accumRef.current, label: labelRef.current })
+        requestSync()
       } else if (action === "stopped") {
         const e = typeof payload === "number" && payload > 0 ? payload : currentElapsed()
         runningRef.current = false
@@ -248,6 +296,7 @@ export default function TimerPage() {
         setAccum(0)
         setElapsed(0)
         saveLive({ running: false, startedAt: 0, accum: 0, label: labelRef.current })
+        requestSync()
         saveRun(e)
       }
     }

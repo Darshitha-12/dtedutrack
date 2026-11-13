@@ -41,6 +41,11 @@ const EXACT_KEYS = [
   "bp_mistakes_v1",
   "bp_timer_v1",
   "bp_pomodoro_v1",
+  // Live (running) timer state. Both carry absolute epoch timestamps
+  // (startedAt for the stopwatch, endTs for the Pomodoro), so a timer started
+  // on one device keeps counting correctly when it appears on another.
+  "bp_timer_live_v1",
+  "biopulse_pomodoro_live_v1",
   "bp_focus_v1",
   "bp_analytics_v1",
   "bp_fees_v1",
@@ -91,6 +96,13 @@ let state: SyncState = {
 };
 
 let inFlight = false;
+/**
+ * Set when a "sync now" arrives while a pass is already running. Without this
+ * the request would be dropped by the `inFlight` guard, so a timer started (or
+ * a chat saved) right then could wait the full slow interval before reaching
+ * the account's other devices.
+ */
+let pendingSync = false;
 let lastSyncAt = 0;
 
 /**
@@ -542,6 +554,11 @@ export async function runSync(): Promise<{ appliedKeys: string[] }> {
     return { appliedKeys: [] };
   } finally {
     inFlight = false;
+    // A "sync now" that arrived mid-pass was queued instead of dropped.
+    if (pendingSync) {
+      pendingSync = false;
+      void runSync();
+    }
   }
 }
 
@@ -590,9 +607,16 @@ export function startAccountSync(): () => void {
   window.addEventListener("online", onOnline);
   window.addEventListener("storage", onStorage);
   document.addEventListener("visibilitychange", onVisible);
-  // An explicit "sync now" (dispatched by the native shell) always goes through:
-  // it is a deliberate user action, not an opportunistic wake-up.
-  const onSyncNow = () => void runSync();
+  // An explicit "sync now" (dispatched by the native shell or a feature that
+  // just wrote tracked data) always goes through: it is a deliberate user
+  // action, not an opportunistic wake-up.
+  const onSyncNow = () => {
+    if (inFlight) {
+      pendingSync = true;
+      return;
+    }
+    void runSync();
+  };
   window.addEventListener("biopulse:sync-now", onSyncNow);
 
   return () => {
