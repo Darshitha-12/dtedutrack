@@ -130,6 +130,16 @@ export async function checkForOtaUpdate(): Promise<void> {
     // shipped that version bundled (meta), or the updater applied it before (bridge).
     const current = b.getWebVersion!() || metaVersion();
     if (manifest.version === current) return;
+    // Only ever move forward. Versions are fixed-width timestamps (vYYYYMMDDHHMMSS), so a plain
+    // string compare is a correct "newer than" test. Without this, an APK built after the last
+    // published bundle would download the older one and silently revert its own fixes.
+    if (
+      /^v\d{14}$/.test(current) &&
+      /^v\d{14}$/.test(manifest.version) &&
+      manifest.version <= current
+    ) {
+      return;
+    }
     if (manifest.size > MAX_BUNDLE_BYTES) return;
 
     const zipRes = await fetchWithTimeout(new URL(manifest.zipUrl, MANIFEST_URL).toString(), 120_000);
