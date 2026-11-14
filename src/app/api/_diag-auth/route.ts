@@ -10,7 +10,7 @@ function resolvedSecret() {
   return process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || FALLBACK;
 }
 
-function describe(e: any) {
+function describe(e: any): any {
   if (!e) return null;
   return {
     name: e.name,
