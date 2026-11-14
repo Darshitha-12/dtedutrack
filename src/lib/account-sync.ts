@@ -56,6 +56,9 @@ const EXACT_KEYS = [
   // Cyber DT AI conversations — keeps the same chat history on every device
   // (web, second browser, Android APK) linked to the account.
   "cyberdt_conversations",
+  // Tombstones for conversations the user deleted (id -> deletedAt). Synced so a
+  // union-merge of the conversation lists cannot resurrect a deleted chat.
+  "cyberdt_deleted_v1",
   // Study data that previously stayed on whichever device created it.
   "biopulse_revision_v1",
   "biopulse_fees_v1",
@@ -71,6 +74,8 @@ const PREFIX_KEYS = [
 ];
 
 const CONVERSATIONS_KEY = "cyberdt_conversations";
+/** localStorage key holding `{ [conversationId]: deletedAt }`. Shared with the chat UI. */
+export const CONV_DELETED_KEY = "cyberdt_deleted_v1";
 
 export const SYNC_EVENT = "biopulse:sync";
 
@@ -406,31 +411,76 @@ function applyRemote(key: string, value: string | null): void {
   }
 }
 
-/**
- * First-sync merge for Cyber DT conversations. Both devices may already hold
- * chats created before the account ever tracked this key; a plain last-write-wins
- * would make whichever device syncs last erase the other's conversations. Merge
- * by conversation id (newer `updatedAt` wins) for that first pass only — later
- * passes keep the deletion-safe whole-array rule.
- */
-function mergeConversations(localRaw: string, remoteRaw: string | null): string {
+type Conv = { id?: string; updatedAt?: number };
+type Tombstones = Record<string, number>;
+
+function parseTombstones(raw: string | null): Tombstones {
   try {
-    const local = JSON.parse(localRaw) as Array<{ id?: string; updatedAt?: number }>;
-    const remote = remoteRaw ? (JSON.parse(remoteRaw) as Array<{ id?: string; updatedAt?: number }>) : [];
-    if (!Array.isArray(local) || !Array.isArray(remote)) return localRaw;
-    const byId = new Map<string, { id?: string; updatedAt?: number }>();
-    for (const conv of [...remote, ...local]) {
-      if (!conv || typeof conv.id !== "string") continue;
-      const prev = byId.get(conv.id);
-      if (!prev || (conv.updatedAt ?? 0) >= (prev.updatedAt ?? 0)) byId.set(conv.id, conv);
+    const obj = raw ? (JSON.parse(raw) as unknown) : {};
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return {};
+    const out: Tombstones = {};
+    for (const [id, t] of Object.entries(obj as Record<string, unknown>)) {
+      if (typeof t === "number" && Number.isFinite(t)) out[id] = t;
     }
-    const merged = [...byId.values()]
-      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-      .slice(0, 20);
-    return JSON.stringify(merged);
+    return out;
   } catch {
-    return localRaw;
+    return {};
   }
+}
+
+/** Union of two tombstone maps; the later `deletedAt` wins per id. */
+function mergeTombstones(localRaw: string | null, remoteRaw: string | null): Tombstones {
+  const merged: Tombstones = { ...parseTombstones(remoteRaw) };
+  for (const [id, t] of Object.entries(parseTombstones(localRaw))) {
+    if (!(id in merged) || t > merged[id]) merged[id] = t;
+  }
+  return merged;
+}
+
+/** Keeps the tombstone map bounded; deletes are rare, so the newest 200 suffice. */
+function pruneTombstones(map: Tombstones): Tombstones {
+  return Object.fromEntries(Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 200));
+}
+
+/**
+ * Union merge for Cyber DT conversations. Both devices may hold chats the other
+ * has never seen, and a whole-array last-write-wins let whichever side had a
+ * local change overwrite the account's other chats — so a chat written on the
+ * web never reached a phone that had chatted since its last sync. Merge by
+ * conversation id instead (newer `updatedAt` wins), dropping any conversation
+ * the user deleted (its tombstone is newer than the chat).
+ */
+function mergeConversations(
+  localRaw: string | null,
+  remoteRaw: string | null,
+  tombstones: Tombstones,
+): string {
+  let local: Conv[] = [];
+  let remote: Conv[] = [];
+  try {
+    const parsed = localRaw ? (JSON.parse(localRaw) as unknown) : [];
+    if (Array.isArray(parsed)) local = parsed as Conv[];
+  } catch {
+    /* ignore corrupt local storage */
+  }
+  try {
+    const parsed = remoteRaw ? (JSON.parse(remoteRaw) as unknown) : [];
+    if (Array.isArray(parsed)) remote = parsed as Conv[];
+  } catch {
+    /* ignore corrupt remote value */
+  }
+  const byId = new Map<string, Conv>();
+  for (const conv of [...remote, ...local]) {
+    if (!conv || typeof conv.id !== "string") continue;
+    const deletedAt = tombstones[conv.id];
+    if (deletedAt && deletedAt >= (conv.updatedAt ?? 0)) continue;
+    const prev = byId.get(conv.id);
+    if (!prev || (conv.updatedAt ?? 0) >= (prev.updatedAt ?? 0)) byId.set(conv.id, conv);
+  }
+  const merged = [...byId.values()]
+    .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+    .slice(0, 20);
+  return JSON.stringify(merged);
 }
 
 /**
@@ -475,14 +525,48 @@ export async function runSync(): Promise<{ appliedKeys: string[] }> {
       const locallyChanged = localVal !== seenVal;
       const remoteNewer = !!remote && remote.t > seenT && (remote.v ?? null) !== seenVal;
 
-      const firstTracked = !(key in meta.seen);
-      if (key === CONVERSATIONS_KEY && firstTracked && localVal !== null && remote) {
-        const merged = mergeConversations(localVal, remote.v);
+      // Cyber DT conversations are union-merged on every pass (not just the first):
+      // a chat written on the account's other device must reach this device even
+      // when this device also chatted since its last sync. Tombstones keep deletes.
+      if (key === CONVERSATIONS_KEY) {
+        const remoteVal = remote?.v ?? null;
+        if (localVal === null && remoteVal === null) continue;
+        const tombstones = mergeTombstones(
+          readLocal(CONV_DELETED_KEY),
+          remoteKv[CONV_DELETED_KEY]?.v ?? null,
+        );
+        const merged = mergeConversations(localVal, remoteVal, tombstones);
+        if (merged !== localVal) {
+          applyRemote(key, merged);
+          appliedKeys.push(key);
+        }
+        if (merged !== remoteVal) {
+          toPush[key] = { v: merged, t: now };
+          meta.seen[key] = merged;
+          meta.t[key] = now;
+        } else {
+          meta.seen[key] = merged;
+          meta.t[key] = remote ? remote.t : now;
+        }
+        continue;
+      }
+
+      // Tombstone map for the conversations above: union so a delete on either
+      // device is remembered, and push it whenever the server lacks an entry.
+      if (key === CONV_DELETED_KEY) {
+        const remoteVal = remote?.v ?? null;
+        const merged = JSON.stringify(
+          pruneTombstones(mergeTombstones(localVal, remoteVal)),
+        );
         if (merged !== localVal) applyRemote(key, merged);
-        toPush[key] = { v: merged, t: now };
-        meta.seen[key] = merged;
-        meta.t[key] = now;
-        if (merged !== localVal) appliedKeys.push(key);
+        if (merged !== remoteVal) {
+          toPush[key] = { v: merged, t: now };
+          meta.seen[key] = merged;
+          meta.t[key] = now;
+        } else {
+          meta.seen[key] = merged;
+          meta.t[key] = remote ? remote.t : now;
+        }
         continue;
       }
 
@@ -504,10 +588,8 @@ export async function runSync(): Promise<{ appliedKeys: string[] }> {
 
     writeMeta(meta);
 
-    if (Object.keys(toPush).length > 0) {
-      await pushSnapshot(toPush);
-    }
-
+    // Notify listeners before the network push: the applied values are already in
+    // localStorage, and a failed push must not hide them from the open UI.
     if (appliedKeys.length > 0) {
       if (appliedKeys.includes("biopulse_reminders_v1")) {
         window.dispatchEvent(new Event("biopulse:reminders-changed"));
@@ -522,6 +604,10 @@ export async function runSync(): Promise<{ appliedKeys: string[] }> {
       window.dispatchEvent(
         new CustomEvent("biopulse:kvsynced", { detail: { keys: appliedKeys, studyflow } }),
       );
+    }
+
+    if (Object.keys(toPush).length > 0) {
+      await pushSnapshot(toPush);
     }
 
     // The offline APK keeps all "server" data in one localStorage blob. Mirror

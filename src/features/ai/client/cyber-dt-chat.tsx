@@ -41,6 +41,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { CyberDTMessageBody } from "@/features/ai/client/cyber-dt-markdown";
+import { CONV_DELETED_KEY } from "@/lib/account-sync";
 
 interface ChatMessage {
   id: string;
@@ -658,6 +659,16 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
       }
       return next;
     });
+    // Record a tombstone so the union-merge in account sync does not resurrect
+    // this conversation from the account's other device.
+    try {
+      const raw = window.localStorage.getItem(CONV_DELETED_KEY);
+      const map = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+      map[id] = Date.now();
+      window.localStorage.setItem(CONV_DELETED_KEY, JSON.stringify(map));
+    } catch {
+      /* ignore */
+    }
     if (currentConvId === id) {
       setCurrentConvId(null);
       setMessages([greeting()]);
