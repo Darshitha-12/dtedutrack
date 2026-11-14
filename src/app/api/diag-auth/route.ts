@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
     const csrfRes = await handlers.GET(new NextRequest("https://biopulse-study.netlify.app/api/auth/csrf"));
     const csrfJson: any = await csrfRes.json();
     const setCookie = csrfRes.headers.getSetCookie ? csrfRes.headers.getSetCookie() : [];
-    const cookieHeader = setCookie.map((c) => c.split(";")[0]).join("; ");
+    const cookieHeader = setCookie.map((c: string) => c.split(";")[0]).join("; ");
     const form = new URLSearchParams({
       email,
       password,
