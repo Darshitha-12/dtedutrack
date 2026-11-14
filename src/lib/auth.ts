@@ -11,6 +11,17 @@ const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || AUTH_SE
 // The secret is passed to NextAuth below; never write it back into process.env here.
 // next.config's `env` inlining turns such a write into an illegal assignment to a string.
 
+// When object storage isn't configured, avatars are stored on the user row as
+// base64 data URLs (up to a couple of megabytes). Embedding one of those in the
+// session JWT makes the encrypted token enormous; Auth.js then splits it into
+// hundreds of cookies, which exceeds the response-header limits on serverless
+// hosts and makes every *successful* sign-in fail with a 502. Keep the JWT small
+// by pointing at the avatar endpoint instead, and let the browser fetch the
+// bytes lazily.
+function toSessionImage(image: string): string {
+  return image.startsWith("data:") ? "/api/profile/avatar" : image;
+}
+
 function createAuth() {
   try {
     const nextAuthConfig = NextAuth({
@@ -94,12 +105,12 @@ function createAuth() {
             token.id = user.id;
             token.email = user.email;
             token.name = user.name;
-            if ("image" in user && user.image) token.picture = user.image;
+            if ("image" in user && user.image) token.picture = toSessionImage(user.image);
           }
 
           if (trigger === "update" && session) {
             token.name = session.user?.name ?? token.name;
-            if (session.user?.image) token.picture = session.user.image;
+            if (session.user?.image) token.picture = toSessionImage(session.user.image);
           }
 
           return token;

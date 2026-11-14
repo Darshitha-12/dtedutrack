@@ -7,6 +7,55 @@ const BUCKET = "chat-media"; // reuse existing bucket; avatars live under avatar
 const MAX_BYTES = 5 * 1024 * 1024; // 5MB
 const MAX_DB_BYTES = 2 * 1024 * 1024; // base64 data-URL fallback cap (2MB raw)
 
+// Serves the signed-in user's own avatar. Session JWTs intentionally store only
+// the short "/api/profile/avatar" URL (see src/lib/auth.ts) because an embedded
+// base64 data URL would make the token far too large.
+export async function GET() {
+  try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const user = await db.user.findUnique({
+      where: { id: session.user.id },
+      select: { image: true, avatarUrl: true },
+    });
+
+    const value = user?.image || user?.avatarUrl || "";
+    if (!value) {
+      return new NextResponse(null, { status: 404 });
+    }
+
+    if (value.startsWith("http://") || value.startsWith("https://")) {
+      return NextResponse.redirect(value);
+    }
+
+    if (value.startsWith("data:")) {
+      const comma = value.indexOf(",");
+      const meta = comma >= 0 ? value.slice(5, comma) : "";
+      const payload = comma >= 0 ? value.slice(comma + 1) : "";
+      const [mime, encoding] = meta.split(";");
+      const bytes =
+        encoding === "base64"
+          ? new Uint8Array(Buffer.from(payload, "base64"))
+          : new Uint8Array(Buffer.from(decodeURIComponent(payload), "utf8"));
+      return new NextResponse(bytes, {
+        headers: {
+          "Content-Type": mime || "image/png",
+          // Avatars change rarely but must not be served stale after an update.
+          "Cache-Control": "private, max-age=0, must-revalidate",
+        },
+      });
+    }
+
+    return new NextResponse(null, { status: 404 });
+  } catch (error) {
+    console.error("Avatar GET error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const session = await auth();
