@@ -352,15 +352,15 @@ export async function callCyberDTGemini(
   };
 
   try {
+    // Race the first few models together — the fastest wins.
     await Promise.all(models.slice(0, CYBER_DT_MAX_PARALLEL).map(attempt));
 
-    // Still nothing? Try any remaining models one at a time while time allows.
-    if (!winner) {
-      for (const model of models.slice(CYBER_DT_MAX_PARALLEL)) {
-        if (controller.signal.aborted) break;
-        await attempt(model);
-        if (winner) break;
-      }
+    // Still nothing? Race the remaining models as a SECOND parallel wave.
+    // Racing (not a sequential walk) matters: one model that accepts the
+    // connection but never replies used to block the rest and eat the whole
+    // budget, which surfaced as "the AI is busy".
+    if (!winner && !controller.signal.aborted) {
+      await Promise.all(models.slice(CYBER_DT_MAX_PARALLEL).map(attempt));
     }
   } finally {
     clearTimeout(timer);
@@ -420,21 +420,25 @@ export async function callCyberDTGeminiJson<T>(
   const startedAt = Date.now();
   let lastStatus = 0;
   let lastDetail = "";
+  let sawResponse = false;
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     const remaining = CYBER_DT_ROUTE_BUDGET_MS - (Date.now() - startedAt);
     if (attempt > 0 && remaining < 3_000) break;
+    // Cap each attempt so one hung model cannot consume the whole budget and
+    // starve the retries that smooth over a transient 503.
+    const budget = Math.max(3_000, Math.min(remaining, 9_000));
 
-    const result = await callCyberDTGemini(apiKey, body, Math.max(3_000, remaining));
+    const result = await callCyberDTGemini(apiKey, body, budget);
     if (!result.ok) {
-      lastStatus = result.status;
-      lastDetail = result.detail;
+      if (result.status !== 0) lastStatus = result.status;
+      lastDetail = result.detail || lastDetail;
       continue;
     }
 
+    sawResponse = true;
     const items = parse(result.text);
     if (items.length > 0) return { ok: true, items };
-    lastStatus = 0;
     lastDetail = "unparsable_json";
   }
 
@@ -442,7 +446,7 @@ export async function callCyberDTGeminiJson<T>(
     ok: false,
     status: lastStatus,
     detail: lastDetail,
-    reason: lastStatus === 0 ? "no_items" : "api_error",
+    reason: sawResponse ? "no_items" : "api_error",
   };
 }
 
