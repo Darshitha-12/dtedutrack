@@ -370,6 +370,82 @@ export async function callCyberDTGemini(
   return { ok: false, status: lastStatus, detail: lastDetail };
 }
 
+/**
+ * Parses a model's JSON reply leniently. Model answers often wrap the JSON in
+ * a sentence or a code fence, and a stray "[" in the prose used to make a
+ * naive slice pick the wrong span. Try the whole text, then the outermost
+ * {...}, then the outermost [...] and return the first that parses.
+ */
+export function parseJsonLoose(raw: string): unknown {
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/, "")
+    .trim();
+
+  const candidates: string[] = [cleaned];
+  const objStart = cleaned.indexOf("{");
+  const objEnd = cleaned.lastIndexOf("}");
+  if (objStart >= 0 && objEnd > objStart) candidates.push(cleaned.slice(objStart, objEnd + 1));
+  const arrStart = cleaned.indexOf("[");
+  const arrEnd = cleaned.lastIndexOf("]");
+  if (arrStart >= 0 && arrEnd > arrStart) candidates.push(cleaned.slice(arrStart, arrEnd + 1));
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  return undefined;
+}
+
+export type CyberDTJsonResult<T> =
+  | { ok: true; items: T[] }
+  | { ok: false; status: number; detail: string; reason: "api_error" | "no_items" };
+
+/**
+ * Calls Gemini for a JSON answer and parses it, retrying ONCE when the first
+ * reply yields no usable items. Free-tier models occasionally wrap the JSON in
+ * prose or return an odd shape, and a single retry almost always returns clean
+ * JSON. Both attempts share one CYBER_DT_ROUTE_BUDGET_MS deadline so the route
+ * still finishes well inside Netlify's function limit.
+ */
+export async function callCyberDTGeminiJson<T>(
+  apiKey: string,
+  body: unknown,
+  parse: (raw: string) => T[],
+): Promise<CyberDTJsonResult<T>> {
+  const startedAt = Date.now();
+  let lastStatus = 0;
+  let lastDetail = "";
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const remaining = CYBER_DT_ROUTE_BUDGET_MS - (Date.now() - startedAt);
+    if (attempt > 0 && remaining < 3_000) break;
+
+    const result = await callCyberDTGemini(apiKey, body, Math.max(3_000, remaining));
+    if (!result.ok) {
+      lastStatus = result.status;
+      lastDetail = result.detail;
+      continue;
+    }
+
+    const items = parse(result.text);
+    if (items.length > 0) return { ok: true, items };
+    lastStatus = 0;
+    lastDetail = "unparsable_json";
+  }
+
+  return {
+    ok: false,
+    status: lastStatus,
+    detail: lastDetail,
+    reason: lastStatus === 0 ? "no_items" : "api_error",
+  };
+}
+
 /** The Gemini REST streaming endpoint (server-sent events). */
 export function geminiStreamEndpoint(model: string): string {
   return `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;

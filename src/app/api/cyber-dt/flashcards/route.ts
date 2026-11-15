@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   CYBER_DT_CORS,
   buildCyberDTBody,
-  callCyberDTGemini,
+  callCyberDTGeminiJson,
+  parseJsonLoose,
 } from "@/features/ai/cyber-dt-shared";
 
 /**
@@ -33,25 +34,8 @@ interface Flashcard {
 
 /** Parses and sanitizes the model's JSON, tolerating stray code fences. */
 function parseCards(raw: string): Flashcard[] {
-  const cleaned = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-  // Accept either {"cards":[...]} or a bare [...] array, and any prose around it.
-  const objStart = cleaned.indexOf("{");
-  const arrStart = cleaned.indexOf("[");
-  let jsonText = cleaned;
-  if (arrStart >= 0 && (objStart < 0 || arrStart < objStart)) {
-    const end = cleaned.lastIndexOf("]");
-    if (end > arrStart) jsonText = cleaned.slice(arrStart, end + 1);
-  } else if (objStart >= 0) {
-    const end = cleaned.lastIndexOf("}");
-    if (end > objStart) jsonText = cleaned.slice(objStart, end + 1);
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(jsonText);
-  } catch {
-    return [];
-  }
+  const parsed = parseJsonLoose(raw);
+  if (parsed === undefined) return [];
 
   const list = Array.isArray(parsed) ? parsed : (parsed as { cards?: unknown })?.cards;
   if (!Array.isArray(list)) return [];
@@ -124,37 +108,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await callCyberDTGemini(
+    const outcome = await callCyberDTGeminiJson(
       apiKey,
       buildCyberDTBody(
         flashcardInstructions(subject, language),
         `Subject: ${subject}\nTopic: ${topic}`,
         { temperature: 0.7, maxOutputTokens: 8192, responseMimeType: "application/json" },
       ),
+      parseCards,
     );
 
-    if (!result.ok) {
+    if (!outcome.ok) {
       return NextResponse.json(
         {
           ok: false,
-          error: "api_error",
-          status: result.status,
-          detail: result.detail,
+          error: outcome.reason === "no_items" ? "no_cards" : "api_error",
+          status: outcome.status,
+          detail: outcome.detail,
           busy: true,
         },
         { headers: CYBER_DT_CORS },
       );
     }
 
-    const cards = parseCards(result.text);
-    if (cards.length === 0) {
-      return NextResponse.json(
-        { ok: false, error: "no_cards", busy: true },
-        { headers: CYBER_DT_CORS },
-      );
-    }
-
-    return NextResponse.json({ ok: true, cards }, { headers: CYBER_DT_CORS });
+    return NextResponse.json({ ok: true, cards: outcome.items }, { headers: CYBER_DT_CORS });
   } catch (e: unknown) {
     const detail = e instanceof Error ? e.message : String(e);
     return NextResponse.json(

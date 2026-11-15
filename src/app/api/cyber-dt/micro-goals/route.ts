@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   CYBER_DT_CORS,
   buildCyberDTBody,
-  callCyberDTGemini,
+  callCyberDTGeminiJson,
+  parseJsonLoose,
 } from "@/features/ai/cyber-dt-shared";
 
 /**
@@ -44,25 +45,8 @@ function canonicalSubject(value: string): MicroGoalSubject | "" {
 
 /** Parses and sanitizes the model's JSON, tolerating stray code fences. */
 function parseTasks(raw: string): MicroGoal[] {
-  const cleaned = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-  // Accept either {"tasks":[...]} or a bare [...] array, and any prose around it.
-  const objStart = cleaned.indexOf("{");
-  const arrStart = cleaned.indexOf("[");
-  let jsonText = cleaned;
-  if (arrStart >= 0 && (objStart < 0 || arrStart < objStart)) {
-    const end = cleaned.lastIndexOf("]");
-    if (end > arrStart) jsonText = cleaned.slice(arrStart, end + 1);
-  } else if (objStart >= 0) {
-    const end = cleaned.lastIndexOf("}");
-    if (end > objStart) jsonText = cleaned.slice(objStart, end + 1);
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(jsonText);
-  } catch {
-    return [];
-  }
+  const parsed = parseJsonLoose(raw);
+  if (parsed === undefined) return [];
 
   const list = Array.isArray(parsed) ? parsed : (parsed as { tasks?: unknown })?.tasks;
   if (!Array.isArray(list)) return [];
@@ -102,37 +86,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await callCyberDTGemini(
+    const outcome = await callCyberDTGeminiJson(
       apiKey,
       buildCyberDTBody(
         MICRO_GOAL_INSTRUCTIONS,
         date ? `Today's date: ${date}` : "Today.",
         { temperature: 0.6, maxOutputTokens: 4096, responseMimeType: "application/json" },
       ),
+      parseTasks,
     );
 
-    if (!result.ok) {
+    if (!outcome.ok) {
       return NextResponse.json(
         {
           ok: false,
-          error: "api_error",
-          status: result.status,
-          detail: result.detail,
+          error: outcome.reason === "no_items" ? "no_tasks" : "api_error",
+          status: outcome.status,
+          detail: outcome.detail,
           busy: true,
         },
         { headers: CYBER_DT_CORS },
       );
     }
 
-    const tasks = parseTasks(result.text);
-    if (tasks.length === 0) {
-      return NextResponse.json(
-        { ok: false, error: "no_tasks", busy: true },
-        { headers: CYBER_DT_CORS },
-      );
-    }
-
-    return NextResponse.json({ ok: true, tasks }, { headers: CYBER_DT_CORS });
+    return NextResponse.json({ ok: true, tasks: outcome.items }, { headers: CYBER_DT_CORS });
   } catch (e: unknown) {
     const detail = e instanceof Error ? e.message : String(e);
     return NextResponse.json(
