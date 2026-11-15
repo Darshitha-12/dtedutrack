@@ -1,8 +1,43 @@
 "use client";
 
+import { useState } from "react";
 import { CyberDTChat } from "@/features/ai/client/cyber-dt-chat";
+import {
+  CYBER_DT_FEATURES,
+  CyberDTEssayEvaluator,
+  CyberDTExamTracker,
+  CyberDTFeatures,
+  CyberDTFlashcards,
+  CyberDTOrganicAssistant,
+  CyberDTSolver,
+  type CyberDTFeatureId,
+} from "@/features/ai/client/cyber-dt-features";
+
+function FeatureWorkspace({
+  activeFeature,
+  starter,
+}: {
+  activeFeature: CyberDTFeatureId | null;
+  starter?: string;
+}) {
+  switch (activeFeature) {
+    case "calc_guide":
+      return <CyberDTSolver />;
+    case "essay_eval":
+      return <CyberDTEssayEvaluator />;
+    case "flashcards":
+      return <CyberDTFlashcards />;
+    case "organic":
+      return <CyberDTOrganicAssistant />;
+    default:
+      return <CyberDTChat key={activeFeature ?? "chat"} starter={starter} />;
+  }
+}
 
 export default function CyberDTPage() {
+  const [activeFeature, setActiveFeature] = useState<CyberDTFeatureId | null>(null);
+  const feature = CYBER_DT_FEATURES.find((f) => f.id === activeFeature) ?? null;
+
   return (
     <div className="space-y-4">
       <div>
@@ -13,7 +48,12 @@ export default function CyberDTPage() {
           Neon-powered study companion — free, offline, unlimited replies.
         </p>
       </div>
-      <CyberDTChat />
+      <CyberDTExamTracker />
+      <CyberDTFeatures
+        activeFeature={activeFeature}
+        setActiveFeature={(id) => setActiveFeature((current) => (current === id ? null : id))}
+      />
+      <FeatureWorkspace activeFeature={activeFeature} starter={feature?.starter} />
     </div>
   );
 }

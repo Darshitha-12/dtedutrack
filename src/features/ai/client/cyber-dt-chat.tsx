@@ -19,6 +19,8 @@ import {
   Lightbulb,
   History,
   Plus,
+  ImagePlus,
+  X,
 } from "lucide-react";
 import { useT, useLanguage } from "@/lib/language-context";
 import {
@@ -41,6 +43,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { CyberDTMessageBody } from "@/features/ai/client/cyber-dt-markdown";
+import {
+  CYBER_DT_IMAGE_ACCEPT,
+  prepareCyberDTImage,
+  type CyberDTImageAttachment,
+} from "@/features/ai/client/cyber-dt-image";
 import { CONV_DELETED_KEY } from "@/lib/account-sync";
 
 interface ChatMessage {
@@ -209,7 +216,10 @@ async function readAnswerStream(
   return null;
 }
 
-export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
+export function CyberDTChat({
+  onClose,
+  starter,
+}: { onClose?: () => void; starter?: string } = {}) {
   const t = useT();
   const { locale } = useLanguage();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -225,6 +235,12 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
   const [localHasKey, setLocalHasKey] = useState(false);
   const [showKeyPanel, setShowKeyPanel] = useState(false);
   const [keyInput, setKeyInput] = useState("");
+  // Image attached to the next message — a textbook diagram, past-paper
+  // question or handwritten note, read by the vision model.
+  const [attachment, setAttachment] = useState<CyberDTImageAttachment | null>(null);
+  const [attachBusy, setAttachBusy] = useState(false);
+  const [attachError, setAttachError] = useState("");
+  const attachInputRef = useRef<HTMLInputElement>(null);
   // Study plan mini-form. The date starts at the dashboard's default exam
   // target (2027-08-03) and is replaced by the student's saved exam date.
   const [showPlanPanel, setShowPlanPanel] = useState(false);
@@ -417,9 +433,21 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
 
   const send = async (
     raw: string,
-    opts?: { noUserMessage?: boolean; historyOverride?: Array<{ role: string; text: string }> },
+    opts?: {
+      noUserMessage?: boolean;
+      historyOverride?: Array<{ role: string; text: string }>;
+      image?: CyberDTImageAttachment | null;
+    },
   ) => {
-    const text = raw.trim();
+    const image = opts?.image ?? null;
+    // An image alone is a valid question ("explain this diagram").
+    const text =
+      raw.trim() ||
+      (image
+        ? locale === "si"
+          ? "මේ පින්තූරයේ ඇති දේ NIE Resource Book එකට අනුව පැහැදිලි කරන්න."
+          : "Explain this image according to the NIE resource book."
+        : "");
     if (!text || isTyping) return;
 
     const history =
@@ -478,7 +506,11 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text, history }),
+          body: JSON.stringify({
+            message: text,
+            history,
+            ...(image ? { image: { mimeType: image.mimeType, data: image.base64 } } : {}),
+          }),
           signal: controller.signal,
         },
         (event) => {
@@ -511,7 +543,13 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
                 "Content-Type": "application/json",
                 "x-goog-api-key": storedKey,
               },
-              body: JSON.stringify(buildGeminiRequestBody(history, text)),
+              body: JSON.stringify(
+                buildGeminiRequestBody(
+                  history,
+                  text,
+                  image ? { mimeType: image.mimeType, data: image.base64 } : undefined,
+                ),
+              ),
               signal: controller.signal,
             },
             (event) => extractGeminiStreamDelta(event),
@@ -567,6 +605,21 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
     setIsTyping(false);
     if (abortRef.current === controller) abortRef.current = null;
   };
+
+  // Kick-off prompt from the feature panel (quiz, essay evaluator, flashcards,
+  // organic pathways, study notes). Sent once after the chat has seeded, with
+  // an empty history so an older saved conversation cannot steer the flow.
+  const starterSent = useRef(false);
+  useEffect(() => {
+    if (!starter || starterSent.current) return;
+    const id = setTimeout(() => {
+      // Mark inside the timer: StrictMode clears this effect's timer on its
+      // probe mount, and a flag set earlier would swallow the real send.
+      starterSent.current = true;
+      void send(starter, { historyOverride: [] });
+    }, 400);
+    return () => clearTimeout(id);
+  }, [starter]);
 
   /** Re-asks the last question: drops the old answers and asks again. */
   const regenerate = () => {
@@ -835,8 +888,32 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
   const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (input.trim() && !isTyping) send(input);
+      if ((input.trim() || attachment) && !isTyping) submitComposer();
     }
+  };
+
+  const onPickImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setAttachError("");
+    setAttachBusy(true);
+    try {
+      setAttachment(await prepareCyberDTImage(file));
+    } catch (err) {
+      setAttachError(err instanceof Error ? err.message : "Could not read that image.");
+    } finally {
+      setAttachBusy(false);
+    }
+  };
+
+  const submitComposer = () => {
+    if (isTyping) return;
+    if (!input.trim() && !attachment) return;
+    const image = attachment;
+    setAttachment(null);
+    setAttachError("");
+    void send(input, image ? { image } : undefined);
   };
 
   return (
@@ -1184,7 +1261,45 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
             <Lightbulb className="h-3.5 w-3.5" /> {t("cyberdt.actionNote") || "Generate Note"}
           </button>
         </div>
-        <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-cyan-500/20 bg-[#111B2D] p-2">
+        {attachment && (
+          <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border border-cyan-500/30 bg-[#111B2D] p-2">
+            <div
+              role="img"
+              aria-label="Attached image preview"
+              className="h-12 w-12 shrink-0 rounded-lg border border-cyan-500/30 bg-cover bg-center"
+              style={{ backgroundImage: `url(${attachment.dataUrl})` }}
+            />
+            <span className="min-w-0 flex-1 truncate text-xs text-cyan-300/80">{attachment.name}</span>
+            <button
+              type="button"
+              onClick={() => setAttachment(null)}
+              title="Remove image"
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-cyan-300/80 transition hover:bg-rose-500/15 hover:text-rose-200"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+        {attachError && (
+          <p className="mx-auto mb-2 max-w-3xl text-xs text-rose-300">{attachError}</p>
+        )}
+        <form onSubmit={(e) => { e.preventDefault(); submitComposer(); }} className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-cyan-500/20 bg-[#111B2D] p-2">
+          <button
+            type="button"
+            onClick={() => attachInputRef.current?.click()}
+            disabled={isTyping || attachBusy}
+            title="Attach an image (PNG or JPEG)"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-cyan-300/80 transition hover:bg-cyan-500/10 hover:text-cyan-200 disabled:opacity-40"
+          >
+            {attachBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+          </button>
+          <input
+            ref={attachInputRef}
+            type="file"
+            accept={CYBER_DT_IMAGE_ACCEPT}
+            className="hidden"
+            onChange={onPickImage}
+          />
           <textarea
             ref={composerRef}
             value={input}
@@ -1207,7 +1322,7 @@ export function CyberDTChat({ onClose }: { onClose?: () => void } = {}) {
           ) : (
             <button
               type="submit"
-              disabled={!input.trim()}
+              disabled={!input.trim() && !attachment}
               className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-cyan-500/80 text-[#080D18] transition hover:bg-cyan-400 disabled:opacity-40 disabled:hover:bg-cyan-500/80"
             >
               <Send className="h-4 w-4" />

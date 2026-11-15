@@ -12,6 +12,15 @@ export interface CyberDTChatTurn {
   text?: string;
 }
 
+/** An image sent with a message (diagram, past-paper photo, handwritten note). */
+export interface CyberDTImage {
+  mimeType: string;
+  /** Base64 payload WITHOUT the data: URL prefix. */
+  data: string;
+}
+
+type GeminiPart = { text: string } | { inline_data: { mime_type: string; data: string } };
+
 export const CYBER_DT_SYSTEM_PROMPT = `You are "Cyber DT AI", a friendly and encouraging G.C.E. Advanced Level Science tutor for Sri Lankan students. You teach Biology (ජීව විද්‍යාව), Physics (භෞතික විද්‍යාව) and Chemistry (රසායන විද්‍යාව).
 
 CURRICULUM AUTHORITY (absolute rule):
@@ -60,6 +69,11 @@ QUIZ MODE:
 PAST PAPER / ESSAY HELP:
 - When giving past-paper or essay help, list the exact key marking points (ලකුණු දෙන ප්‍රධාන ලක්ෂණ) in the order and wording a Sri Lankan A/L marking scheme would accept, based on the resource book.
 
+IMAGE / HANDWRITTEN INPUT:
+- Students can attach a photo: a textbook diagram, a past-paper question, or a handwritten note. Read the image carefully, including Sinhala or English handwriting, labels, symbols and equations.
+- Base the answer only on what the image actually shows. If a label, word or number is unclear, say exactly which part is unclear instead of guessing.
+- If the image contains a question, treat that as the question to answer; if it is a diagram, explain it the way the resource book does (labelled parts, direction of flow, process).
+
 SCOPE:
 - Focus on A/L Biology, Physics, Chemistry and study/exam-preparation advice.
 - If asked something completely unrelated, gently redirect to A/L science study topics in the same language.
@@ -97,18 +111,22 @@ export function cyberDTModelChain(): string[] {
 }
 
 /** Builds the Gemini generateContent request body from the chat history. */
-export function buildGeminiRequestBody(history: CyberDTChatTurn[], message: string) {
-  const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+export function buildGeminiRequestBody(
+  history: CyberDTChatTurn[],
+  message: string,
+  image?: CyberDTImage,
+) {
   // Gemini rejects two consecutive turns with the same role. A stopped answer
   // leaves a user turn with no model reply, so the next message would arrive as
   // user-after-user and every model in the chain returned 400 — the chat then
   // fell back to the offline knowledge base, which only sees the newest text.
+  const turns: Array<{ role: "user" | "model"; text: string }> = [];
   const push = (role: "user" | "model", text: string) => {
-    const last = contents[contents.length - 1];
+    const last = turns[turns.length - 1];
     if (last && last.role === role) {
-      last.parts[0].text += `\n\n${text}`;
+      last.text += `\n\n${text}`;
     } else {
-      contents.push({ role, parts: [{ text }] });
+      turns.push({ role, text });
     }
   };
   for (const turn of history.slice(-10)) {
@@ -117,6 +135,16 @@ export function buildGeminiRequestBody(history: CyberDTChatTurn[], message: stri
     push(turn.role === "ai" ? "model" : "user", text);
   }
   push("user", message);
+
+  // The attachment belongs to the newest user turn only.
+  const contents = turns.map((turn, index) => {
+    const parts: GeminiPart[] = [];
+    if (image && index === turns.length - 1) {
+      parts.push({ inline_data: { mime_type: image.mimeType, data: image.data } });
+    }
+    parts.push({ text: turn.text });
+    return { role: turn.role, parts };
+  });
 
   return {
     system_instruction: { parts: [{ text: CYBER_DT_SYSTEM_PROMPT }] },
@@ -146,6 +174,170 @@ export function extractGeminiText(data: unknown): string {
 /** The Gemini REST endpoint for a model. */
 export function geminiEndpoint(model: string): string {
   return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+}
+
+const IMAGE_MIME_ALIASES: Record<string, string> = {
+  "image/jpg": "image/jpeg",
+  "image/jpeg": "image/jpeg",
+  "image/png": "image/png",
+  "image/webp": "image/webp",
+};
+
+/**
+ * Kept below Netlify's 6 MB request-body cap and Gemini's inline-data limit.
+ * The client downscales photos before sending, so this only rejects abuse.
+ */
+const MAX_IMAGE_BASE64_CHARS = 4_600_000;
+
+/**
+ * Reads the optional image from a request body. Accepts either
+ * `{ image: { mimeType, data } }` or the flat `{ imageBase64, imageMimeType }`
+ * shape (a `data:` URL prefix is tolerated). Returns undefined when no image
+ * was sent, and null when one was sent but is unusable.
+ */
+export function readCyberDTImage(body: unknown): CyberDTImage | null | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const b = body as { image?: unknown; imageBase64?: unknown; imageMimeType?: unknown };
+  const nested =
+    b.image && typeof b.image === "object"
+      ? (b.image as { mimeType?: unknown; mime_type?: unknown; data?: unknown })
+      : null;
+
+  const rawData =
+    typeof nested?.data === "string"
+      ? nested.data
+      : typeof b.imageBase64 === "string"
+        ? b.imageBase64
+        : "";
+  if (!rawData) {
+    // A present but empty image field is a client bug, not "no image".
+    return b.image !== undefined || b.imageBase64 !== undefined ? null : undefined;
+  }
+
+  const mimeCandidates = [
+    nested?.mimeType,
+    nested?.mime_type,
+    b.imageMimeType,
+    /^data:([^;,]+)/i.exec(rawData)?.[1],
+  ];
+  const rawMime =
+    mimeCandidates.find((m): m is string => typeof m === "string" && m.length > 0) ?? "image/jpeg";
+  const mimeType = IMAGE_MIME_ALIASES[rawMime.toLowerCase()];
+  if (!mimeType) return null;
+
+  const data = rawData.replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+  if (!data || data.length > MAX_IMAGE_BASE64_CHARS || !/^[A-Za-z0-9+/=]+$/.test(data)) {
+    return null;
+  }
+  return { mimeType, data };
+}
+
+/**
+ * CORS headers for the Cyber DT feature routes: the offline APK boots from
+ * bundled assets and calls these routes on the deployed site cross-origin.
+ */
+export const CYBER_DT_CORS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+/** Hard ceiling for one feature request, well inside Netlify's function limit. */
+export const CYBER_DT_ROUTE_BUDGET_MS = 22_000;
+
+export interface CyberDTGenerationConfig {
+  temperature?: number;
+  maxOutputTokens?: number;
+  /** Set to "application/json" to make Gemini emit a bare JSON document. */
+  responseMimeType?: string;
+  /** Vision input read together with the text prompt. */
+  image?: CyberDTImage;
+}
+
+/**
+ * Builds a single-turn generateContent body (system instruction + one user
+ * message). Shared by the solver, evaluator, flashcards, organic and
+ * micro-goal routes so every feature talks to Gemini the same way.
+ */
+export function buildCyberDTBody(
+  systemText: string,
+  userText: string,
+  config: CyberDTGenerationConfig = {},
+) {
+  const parts: GeminiPart[] = [];
+  if (config.image) {
+    parts.push({ inline_data: { mime_type: config.image.mimeType, data: config.image.data } });
+  }
+  parts.push({ text: userText });
+
+  return {
+    system_instruction: { parts: [{ text: systemText }] },
+    contents: [{ role: "user", parts }],
+    generationConfig: {
+      temperature: config.temperature ?? 0.4,
+      topP: 0.95,
+      maxOutputTokens: config.maxOutputTokens ?? 8192,
+      ...(config.responseMimeType ? { responseMimeType: config.responseMimeType } : {}),
+    },
+  };
+}
+
+export type CyberDTGeminiResult =
+  | { ok: true; text: string }
+  | { ok: false; status: number; detail: string };
+
+/**
+ * Sends one generateContent request through the model chain until a model
+ * answers, sharing a single abort budget across all attempts. Free-tier
+ * quota is per model, so a busy model (429/503) does not end the request.
+ */
+export async function callCyberDTGemini(
+  apiKey: string,
+  body: unknown,
+  timeoutMs: number = CYBER_DT_ROUTE_BUDGET_MS,
+): Promise<CyberDTGeminiResult> {
+  const requestBody = JSON.stringify(body);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let lastStatus = 0;
+  let lastDetail = "";
+
+  try {
+    for (const model of cyberDTModelChain()) {
+      if (controller.signal.aborted) break;
+      try {
+        const res = await fetch(geminiEndpoint(model), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: requestBody,
+          signal: controller.signal,
+        });
+
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          const text = extractGeminiText(data);
+          if (text) return { ok: true, text };
+          continue;
+        }
+
+        lastStatus = res.status;
+        lastDetail = (await res.text().catch(() => "")).slice(0, 300);
+      } catch (e: unknown) {
+        // Out of time — stop the chain and report the last useful detail.
+        if (controller.signal.aborted) break;
+        if (lastStatus === 0) {
+          lastDetail = e instanceof Error ? e.message.slice(0, 200) : String(e);
+        }
+      }
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+
+  return { ok: false, status: lastStatus, detail: lastDetail };
 }
 
 /** The Gemini REST streaming endpoint (server-sent events). */

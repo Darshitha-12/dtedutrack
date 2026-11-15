@@ -4,6 +4,7 @@ import {
   extractGeminiText,
   geminiEndpoint,
   cyberDTModelChain,
+  readCyberDTImage,
 } from "@/features/ai/cyber-dt-shared";
 
 /**
@@ -75,8 +76,17 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const message = typeof body.message === "string" ? body.message.trim() : "";
     const history: ChatTurn[] = Array.isArray(body.history) ? body.history : [];
+    // Optional vision input: a textbook diagram, past-paper question or
+    // handwritten note attached from the composer.
+    const image = readCyberDTImage(body);
 
-    if (!message) {
+    if (image === null) {
+      return NextResponse.json(
+        { ok: false, error: "invalid_image", fallback: true },
+        { status: 400, headers: CORS },
+      );
+    }
+    if (!message && !image) {
       return NextResponse.json(
         { ok: false, error: "empty_message", fallback: true },
         { status: 400, headers: CORS },
@@ -89,7 +99,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "no_api_key", fallback: true }, { headers: CORS });
     }
 
-    const requestBody = JSON.stringify(buildGeminiRequestBody(history, message));
+    // An image can arrive on its own (student just snaps a diagram).
+    const prompt =
+      message ||
+      "Explain what this image shows according to the NIE Resource Book and the A/L syllabus.";
+    const requestBody = JSON.stringify(buildGeminiRequestBody(history, prompt, image));
 
     // Ask several models at once and keep the first complete answer. Free-tier
     // limits are per model, so one model being overloaded (503) or out of quota
