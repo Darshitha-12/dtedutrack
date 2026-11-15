@@ -3,7 +3,7 @@ import {
   CYBER_DT_CORS,
   CYBER_DT_SYSTEM_PROMPT,
   buildCyberDTBody,
-  callCyberDTGemini,
+  callCyberDTGeminiRetry,
   readCyberDTImage,
 } from "@/features/ai/cyber-dt-shared";
 
@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .join("\n\n");
 
-    const result = await callCyberDTGemini(
+    const result = await callCyberDTGeminiRetry(
       apiKey,
       buildCyberDTBody(`${CYBER_DT_SYSTEM_PROMPT}\n\n${EVALUATOR_INSTRUCTIONS}`, userText, {
         // Marking must be consistent between runs.

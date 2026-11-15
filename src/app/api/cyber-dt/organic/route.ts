@@ -3,7 +3,7 @@ import {
   CYBER_DT_CORS,
   CYBER_DT_SYSTEM_PROMPT,
   buildCyberDTBody,
-  callCyberDTGemini,
+  callCyberDTGeminiRetry,
 } from "@/features/ai/cyber-dt-shared";
 
 /**
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
         ? `Mode: conversion\nStarting compound: ${startCompound}\nTarget compound: ${targetCompound}\nFind the shortest valid conversion pathway and show every step.`
         : `Mode: reagent_explain\nStarting compound: ${startCompound}\nTarget compound: ${targetCompound || "(not specified)"}\nExplain the reagents and conditions needed for this conversion and why.`;
 
-    const result = await callCyberDTGemini(
+    const result = await callCyberDTGeminiRetry(
       apiKey,
       buildCyberDTBody(`${CYBER_DT_SYSTEM_PROMPT}\n\n${ORGANIC_INSTRUCTIONS}`, prompt, {
         temperature: 0.3,

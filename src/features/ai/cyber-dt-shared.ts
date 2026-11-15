@@ -287,21 +287,16 @@ export type CyberDTGeminiResult =
   | { ok: false; status: number; detail: string };
 
 /**
- * How many models to ask at the same time. Free-tier quota is per model, so
- * racing a few hides a single busy model and returns the FASTEST answer
- * instead of the sum of a sequential chain. Mirrors the main chat route.
- */
-export const CYBER_DT_MAX_PARALLEL = 3;
-
-/**
  * Sends one generateContent request through the model chain and returns the
  * first complete answer, sharing a single abort budget across all attempts.
  *
- * The first few models are raced IN PARALLEL (like /api/cyber-dt) rather than
- * tried one after another: on the free tier a single model can be overloaded
- * (503), out of quota (429) or simply slow, and a sequential chain let that one
- * model eat the whole budget — every feature then reported "the AI is busy".
- * Racing means a slow model no longer blocks the answer.
+ * Every model is raced IN PARALLEL (like /api/cyber-dt) rather than tried one
+ * after another: on the free tier a single model can be overloaded (503), out
+ * of quota (429) or simply slow, and a sequential chain let that one model eat
+ * the whole budget — every feature then reported "the AI is busy". Each model
+ * also gets its own per-attempt timeout, because Promise.all waits for every
+ * member: without it a request that connects but never replies would hold the
+ * whole race until the deadline.
  */
 export async function callCyberDTGemini(
   apiKey: string,
@@ -310,14 +305,23 @@ export async function callCyberDTGemini(
 ): Promise<CyberDTGeminiResult> {
   const requestBody = JSON.stringify(body);
   const models = cyberDTModelChain();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), timeoutMs);
+  // Give each single model its own slice. A wave waits for EVERY member
+  // (Promise.all), so without this a model that accepts the connection but
+  // never replies would hold the whole wave until the deadline — the exact
+  // hang that surfaced as "the AI is busy".
+  const perAttemptMs = Math.max(8_000, Math.floor(timeoutMs / 2));
   let winner = "";
   let lastStatus = 0;
   let lastDetail = "";
 
   const attempt = async (model: string): Promise<void> => {
-    if (winner) return;
+    if (winner || deadline.signal.aborted) return;
+    const local = new AbortController();
+    const abortLocal = () => local.abort();
+    deadline.signal.addEventListener("abort", abortLocal);
+    const localTimer = setTimeout(() => local.abort(), perAttemptMs);
     try {
       const res = await fetch(geminiEndpoint(model), {
         method: "POST",
@@ -326,7 +330,7 @@ export async function callCyberDTGemini(
           "x-goog-api-key": apiKey,
         },
         body: requestBody,
-        signal: controller.signal,
+        signal: local.signal,
       });
 
       if (res.ok) {
@@ -334,8 +338,8 @@ export async function callCyberDTGemini(
         const text = extractGeminiText(data);
         if (text && !winner) {
           winner = text;
-          // We have an answer — stop the other in-flight requests.
-          controller.abort();
+          // We have an answer — stop every other in-flight request.
+          deadline.abort();
         }
         return;
       }
@@ -348,26 +352,46 @@ export async function callCyberDTGemini(
       if (!winner && lastStatus === 0) {
         lastDetail = e instanceof Error ? e.message.slice(0, 200) : String(e);
       }
+    } finally {
+      clearTimeout(localTimer);
+      deadline.signal.removeEventListener("abort", abortLocal);
     }
   };
 
   try {
-    // Race the first few models together — the fastest wins.
-    await Promise.all(models.slice(0, CYBER_DT_MAX_PARALLEL).map(attempt));
-
-    // Still nothing? Race the remaining models as a SECOND parallel wave.
-    // Racing (not a sequential walk) matters: one model that accepts the
-    // connection but never replies used to block the rest and eat the whole
-    // budget, which surfaced as "the AI is busy".
-    if (!winner && !controller.signal.aborted) {
-      await Promise.all(models.slice(CYBER_DT_MAX_PARALLEL).map(attempt));
-    }
+    // Race every model at once — the fastest complete answer wins. Each has
+    // its own timeout, so one slow model cannot block the rest.
+    await Promise.all(models.map(attempt));
   } finally {
     clearTimeout(timer);
   }
 
   if (winner) return { ok: true, text: winner };
   return { ok: false, status: lastStatus, detail: lastDetail };
+}
+
+/**
+ * Like callCyberDTGemini but retries when every model fails with a transient
+ * error (a free-tier 503/429 across the whole chain). Each attempt is capped so
+ * the route still finishes well inside the overall budget.
+ */
+export async function callCyberDTGeminiRetry(
+  apiKey: string,
+  body: unknown,
+  timeoutMs: number = CYBER_DT_ROUTE_BUDGET_MS,
+  attempts = 2,
+): Promise<CyberDTGeminiResult> {
+  const startedAt = Date.now();
+  const perAttempt = Math.max(4_000, Math.floor(timeoutMs / attempts));
+  let last: CyberDTGeminiResult = { ok: false, status: 0, detail: "" };
+
+  for (let i = 0; i < attempts; i++) {
+    const remaining = timeoutMs - (Date.now() - startedAt);
+    if (i > 0 && remaining < 3_000) break;
+    last = await callCyberDTGemini(apiKey, body, Math.max(3_000, Math.min(remaining, perAttempt)));
+    if (last.ok) return last;
+  }
+  return last;
 }
 
 /**
@@ -427,7 +451,7 @@ export async function callCyberDTGeminiJson<T>(
     if (attempt > 0 && remaining < 3_000) break;
     // Cap each attempt so one hung model cannot consume the whole budget and
     // starve the retries that smooth over a transient 503.
-    const budget = Math.max(3_000, Math.min(remaining, 9_000));
+    const budget = Math.max(3_000, Math.min(remaining, 8_000));
 
     const result = await callCyberDTGemini(apiKey, body, budget);
     if (!result.ok) {
