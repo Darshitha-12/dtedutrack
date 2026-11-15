@@ -20,6 +20,14 @@ const CHAT_CORS = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // pdfjs-dist ships a modern ESM build; let Next transpile it for the browser.
+  transpilePackages: ["pdfjs-dist"],
+  webpack: (config) => {
+    // pdf.js optionally requires the Node-only `canvas` package. In the browser
+    // build that import must resolve to nothing or the bundle fails.
+    config.resolve.alias = { ...(config.resolve.alias || {}), canvas: false };
+    return config;
+  },
   // Server-only secrets (AUTH_SECRET, NEXTAUTH_SECRET, NEXTAUTH_URL) must NOT live in
   // `env:`: Next inlines those into both bundles, which both leaks the auth secret to the
   // browser and rewrites runtime writes such as `process.env.AUTH_SECRET = …` into illegal

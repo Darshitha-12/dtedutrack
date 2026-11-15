@@ -37,3 +37,11 @@
   for = "/sw.js"
   [headers.values]
     Cache-Control = "no-store, max-age=0"
+
+# The pdf.js worker is loaded as an ES module by the browser; serve it with an
+# explicit JavaScript content type so the module-worker fetch is never rejected.
+[[headers]]
+  for = "/pdf.worker.min.mjs"
+  [headers.values]
+    Content-Type = "text/javascript; charset=utf-8"
+    Cache-Control = "public, max-age=31536000, immutable"

@@ -7,23 +7,30 @@ import {
   callCyberDTGemini,
   isCyberDTPdf,
   readCyberDTImage,
+  readCyberDTImages,
+  readCyberDTPdfText,
 } from "@/features/ai/cyber-dt-shared";
 
 /**
- * Cyber DT PDF → Study Note.
+ * Cyber DT document → Study Note.
  *
- * The student uploads a PDF (a chapter scan, class notes, a past paper). The
- * whole document is sent to Gemini as inline data — Gemini reads PDFs natively,
- * including the text inside scanned pages — so the browser never has to extract
- * text itself. One route powers the whole "learn from it" flow:
+ * The student uploads a PDF (a chapter scan, class notes, a past paper). A
+ * request body is capped at 6 MB by the host, so a large file is read in the
+ * browser and arrives here in whichever form fits:
+ *
+ *   { pdf:    { mimeType, data } }  — the whole PDF (small files, best fidelity)
+ *   { pdfText: "…" }                — the extracted text layer (large text PDFs)
+ *   { images: [{ mimeType, data }]} — rendered page images (large scanned PDFs)
+ *
+ * One route powers the whole "learn from it" flow:
  *
  *   mode: "note"       → a complete, structured study note
  *   mode: "teach"      → a patient, step-by-step lesson on the document
  *   mode: "quiz"       → 10 MCQs (A–D) with answers + explanations
  *   mode: "flashcards" → Q/A flashcards from the document
- *   mode: "ask"        → answer one follow-up question, grounded in the PDF
+ *   mode: "ask"        → answer one follow-up question, grounded in the document
  *
- * POST { pdf: { mimeType, data }, mode?, language?, subject?, question?, history? }
+ * POST { mode?, language?, subject?, question?, history? } + one source above
  *   → { ok: true, text }
  */
 
@@ -44,7 +51,7 @@ function normalizeLanguage(value: unknown): "Sinhala" | "English" {
 
 const MAX_QUESTION_CHARS = 1000;
 
-const PDF_RULES = `The student has uploaded a PDF document (this may be a chapter from a book, a scan of class notes, a past paper, or a set of revision notes).
+const PDF_RULES = `The student has uploaded a document — a chapter from a book, a scan of class notes, a past paper, or a set of revision notes. It may reach you as an attached PDF, as extracted text, or as page images rendered from a scan.
 
 READING THE DOCUMENT (absolute rules):
 - Read the WHOLE document carefully before answering, including text inside scanned/photographed pages, tables, captions, chemical equations and figure labels.
@@ -52,7 +59,7 @@ READING THE DOCUMENT (absolute rules):
 - If part of the document is unreadable or a term is unclear, say exactly which part is unclear instead of guessing.
 - Keep everything inside the Sri Lankan G.C.E. A/L Biology, Physics and Chemistry syllabus (NIE Resource Books). If the document drifts outside the syllabus, still explain it but note that it is beyond the A/L scope.`;
 
-function modeInstructions(mode: PdfMode, language: string, question: string): string {
+function modeInstructions(mode: PdfMode, language: string): string {
   const lang = `Write your entire reply in ${language}. Technical terms should be given in both Sinhala and English where helpful (e.g. "මයිටෝසිස් (mitosis)").`;
 
   switch (mode) {
@@ -124,25 +131,6 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
 
-    // The PDF may arrive as { pdf: {...} } or { image: {...} }; normalize so the
-    // shared reader (which understands { image }) can validate it either way.
-    const normalized =
-      body.pdf !== undefined && body.image === undefined ? { ...body, image: body.pdf } : body;
-
-    const attachment = readCyberDTImage(normalized);
-    if (attachment === null || attachment === undefined) {
-      return NextResponse.json(
-        { ok: false, error: "missing_pdf" },
-        { status: 400, headers: CYBER_DT_CORS },
-      );
-    }
-    if (!isCyberDTPdf(attachment)) {
-      return NextResponse.json(
-        { ok: false, error: "not_a_pdf" },
-        { status: 400, headers: CYBER_DT_CORS },
-      );
-    }
-
     const mode = normalizeMode(body.mode);
     const language = normalizeLanguage(body.language);
     const subject = typeof body.subject === "string" ? body.subject.trim().slice(0, 40) : "";
@@ -155,6 +143,34 @@ export async function POST(req: NextRequest) {
         { status: 400, headers: CYBER_DT_CORS },
       );
     }
+
+    // The document may arrive as rendered page images, extracted text, or the
+    // whole PDF. Prefer the most faithful form the client could produce.
+    const images = readCyberDTImages(body);
+    const pdfText = readCyberDTPdfText(body);
+    const normalized =
+      body.pdf !== undefined && body.image === undefined ? { ...body, image: body.pdf } : body;
+    const attachment = readCyberDTImage(normalized);
+
+    const hasImages = Array.isArray(images) && images.length > 0;
+    const hasText = typeof pdfText === "string";
+    const hasPdf = attachment != null;
+
+    if (!hasImages && !hasText && !hasPdf) {
+      const unreadable = images === null || pdfText === null || attachment === null;
+      return NextResponse.json(
+        { ok: false, error: unreadable ? "unreadable_pdf" : "missing_pdf" },
+        { status: 400, headers: CYBER_DT_CORS },
+      );
+    }
+    if (hasPdf && !isCyberDTPdf(attachment)) {
+      return NextResponse.json(
+        { ok: false, error: "not_a_pdf" },
+        { status: 400, headers: CYBER_DT_CORS },
+      );
+    }
+
+    const source: "images" | "text" | "pdf" = hasImages ? "images" : hasText ? "text" : "pdf";
 
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
     if (!apiKey) {
@@ -169,24 +185,35 @@ export async function POST(req: NextRequest) {
           .join("\n\n")
       : "";
 
+    const pageFrom = Number.isFinite(Number(body.pageFrom)) ? Number(body.pageFrom) : 0;
+    const pageTo = Number.isFinite(Number(body.pageTo)) ? Number(body.pageTo) : 0;
+    const truncated = body.pdfTruncated === true;
+
     const userText = [
       subject ? `Subject: ${subject}` : "",
       history ? `Earlier in this lesson:\n${history}` : "",
       mode === "ask" ? `Student's question: ${question}` : "",
-      "Now produce the requested output from the attached PDF.",
+      source === "text"
+        ? `The full text extracted from the student's PDF is below${truncated ? " (the document was very long, so the final pages may be missing)" : ""}:\n\n${pdfText}`
+        : "",
+      source === "images"
+        ? `Attached are ${(images as unknown[]).length} page images rendered from the student's scanned PDF${pageFrom && pageTo ? ` (pages ${pageFrom}–${pageTo})` : ""}. Read them in order.`
+        : "",
+      "Now produce the requested output from this document.",
     ]
       .filter(Boolean)
       .join("\n\n");
 
     const requestBody = buildCyberDTBody(
-      `${CYBER_DT_SYSTEM_PROMPT}\n\n${modeInstructions(mode, language, question)}`,
+      `${CYBER_DT_SYSTEM_PROMPT}\n\n${modeInstructions(mode, language)}`,
       userText,
       {
         // A faithful reading of the document, not a creative rewrite.
         temperature: mode === "quiz" || mode === "note" ? 0.3 : 0.5,
         // A big document plus a long note needs room; thinking tokens count too.
         maxOutputTokens: 16_384,
-        image: attachment,
+        ...(source === "images" ? { images: images as NonNullable<typeof images> } : {}),
+        ...(source === "pdf" && attachment ? { image: attachment } : {}),
       },
     );
 

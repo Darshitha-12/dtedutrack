@@ -247,6 +247,45 @@ export function isCyberDTPdf(attachment: CyberDTImage | null | undefined): boole
 }
 
 /**
+ * Reads an array of images from `{ images: [...] }`. Used when the browser has
+ * rendered the pages of a large scanned PDF (which cannot be sent whole because
+ * of the request-body cap). Returns undefined when no `images` key was sent,
+ * and null when the list is present but unusable.
+ */
+export function readCyberDTImages(body: unknown): CyberDTImage[] | null | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const list = (body as { images?: unknown }).images;
+  if (list === undefined) return undefined;
+  if (!Array.isArray(list) || list.length === 0) return null;
+
+  const out: CyberDTImage[] = [];
+  let total = 0;
+  for (const item of list) {
+    const one = readCyberDTImage({ image: item });
+    if (!one) return null;
+    total += one.data.length;
+    if (total > MAX_ATTACHMENT_BASE64_CHARS) return null;
+    out.push(one);
+  }
+  return out.length > 0 ? out : null;
+}
+
+/** Text is ~1 byte per char in JSON; keep the body under the 6 MB request cap. */
+const MAX_PDF_TEXT_CHARS = 3_500_000;
+
+/**
+ * Reads the text of a large text PDF that the browser extracted with pdf.js.
+ * Returns undefined when no `pdfText` key was sent, null when it is unusable.
+ */
+export function readCyberDTPdfText(body: unknown): string | null | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const value = (body as { pdfText?: unknown }).pdfText;
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !value.trim()) return null;
+  return value.slice(0, MAX_PDF_TEXT_CHARS);
+}
+
+/**
  * CORS headers for the Cyber DT feature routes: the offline APK boots from
  * bundled assets and calls these routes on the deployed site cross-origin.
  */
@@ -266,6 +305,8 @@ export interface CyberDTGenerationConfig {
   responseMimeType?: string;
   /** Vision input read together with the text prompt. */
   image?: CyberDTImage;
+  /** Several images (e.g. the rendered pages of a scanned PDF). */
+  images?: CyberDTImage[];
 }
 
 /**
@@ -279,7 +320,11 @@ export function buildCyberDTBody(
   config: CyberDTGenerationConfig = {},
 ) {
   const parts: GeminiPart[] = [];
-  if (config.image) {
+  if (config.images && config.images.length > 0) {
+    for (const image of config.images) {
+      parts.push({ inline_data: { mime_type: image.mimeType, data: image.data } });
+    }
+  } else if (config.image) {
     parts.push({ inline_data: { mime_type: config.image.mimeType, data: config.image.data } });
   }
   parts.push({ text: userText });
