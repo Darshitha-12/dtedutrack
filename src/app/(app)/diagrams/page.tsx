@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Loader2, Sparkles, Boxes, Eraser } from "lucide-react";
+import { Loader2, Sparkles, Boxes, Eraser, Download } from "lucide-react";
 
 export default function DiagramsPage() {
   const [topic, setTopic] = useState("");
@@ -15,6 +15,8 @@ export default function DiagramsPage() {
   const [language, setLanguage] = useState<"English" | "Sinhala">("English");
   const [loading, setLoading] = useState(false);
   const [content, setContent] = useState("");
+  const [image, setImage] = useState("");
+  const [mimeType, setMimeType] = useState("image/png");
   const [error, setError] = useState("");
 
   const generate = async (e: React.FormEvent) => {
@@ -26,6 +28,7 @@ export default function DiagramsPage() {
     setError("");
     setLoading(true);
     setContent("");
+    setImage("");
     try {
       const res = await fetch("/api/diagrams", {
         method: "POST",
@@ -34,6 +37,8 @@ export default function DiagramsPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to generate diagram");
+      setImage(typeof data.image === "string" ? data.image : "");
+      setMimeType(typeof data.mimeType === "string" ? data.mimeType : "image/png");
       setContent(data.content || "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate diagram");
@@ -42,11 +47,14 @@ export default function DiagramsPage() {
     }
   };
 
+  const extension = mimeType.includes("jpeg") ? "jpg" : mimeType.includes("svg") ? "svg" : "png";
+  const downloadName = `${(topic.trim() || "diagram").replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "") || "diagram"}.${extension}`;
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Diagram Lab"
-        description="Generate labelled Biology diagrams and explanations with AI."
+        description="Generate pencil-sketch labelled diagrams (Sinhala + English) for A/L Biology and Physics."
       />
 
       <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
@@ -106,12 +114,15 @@ export default function DiagramsPage() {
                 )}
                 Generate Diagram
               </Button>
-              {content && (
+              {(content || image) && (
                 <Button
                   type="button"
                   variant="ghost"
                   className="w-full gap-2"
-                  onClick={() => setContent("")}
+                  onClick={() => {
+                    setContent("");
+                    setImage("");
+                  }}
                 >
                   <Eraser className="h-4 w-4" /> Clear
                 </Button>
@@ -124,17 +135,45 @@ export default function DiagramsPage() {
           {loading ? (
             <div className="flex flex-col items-center justify-center py-24 text-center">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
-              <p className="mt-3 text-sm text-muted-foreground">Drawing diagram...</p>
+              <p className="mt-3 text-sm text-muted-foreground">Sketching your diagram...</p>
             </div>
+          ) : image ? (
+            <CardContent className="pt-6">
+              <div className="rounded-xl border border-border bg-[#F6F1E7] p-3 shadow-inner">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={image}
+                  alt={`Pencil-sketch diagram of ${topic}`}
+                  className="mx-auto w-full max-w-2xl rounded-md"
+                />
+              </div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-muted-foreground">
+                  {mimeType.includes("svg") ? "Pencil-sketch SVG" : "Pencil-sketch style"} · labels in Sinhala and English
+                </p>
+                <a
+                  href={image}
+                  download={downloadName}
+                  className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-muted"
+                >
+                  <Download className="h-4 w-4" /> Download
+                </a>
+              </div>
+              {content && (
+                <div className="mt-4 border-t border-border pt-4">
+                  {renderDiagram(content)}
+                </div>
+              )}
+            </CardContent>
           ) : content ? (
             <CardContent className="pt-6 max-w-none">
               {renderDiagram(content)}
             </CardContent>
           ) : (
             <EmptyState
-              icon="🧬"
+              icon="✏️"
               title="No diagram yet"
-              description="Enter a biological structure to generate a labelled diagram and explanation."
+              description="Enter a structure such as the human heart to get a pencil-sketch diagram with bilingual labels."
             />
           )}
         </Card>

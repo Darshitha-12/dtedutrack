@@ -34,9 +34,17 @@ interface Flashcard {
 /** Parses and sanitizes the model's JSON, tolerating stray code fences. */
 function parseCards(raw: string): Flashcard[] {
   const cleaned = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  const jsonText = start >= 0 && end > start ? cleaned.slice(start, end + 1) : cleaned;
+  // Accept either {"cards":[...]} or a bare [...] array, and any prose around it.
+  const objStart = cleaned.indexOf("{");
+  const arrStart = cleaned.indexOf("[");
+  let jsonText = cleaned;
+  if (arrStart >= 0 && (objStart < 0 || arrStart < objStart)) {
+    const end = cleaned.lastIndexOf("]");
+    if (end > arrStart) jsonText = cleaned.slice(arrStart, end + 1);
+  } else if (objStart >= 0) {
+    const end = cleaned.lastIndexOf("}");
+    if (end > objStart) jsonText = cleaned.slice(objStart, end + 1);
+  }
 
   let parsed: unknown;
   try {
@@ -45,7 +53,7 @@ function parseCards(raw: string): Flashcard[] {
     return [];
   }
 
-  const list = (parsed as { cards?: unknown })?.cards;
+  const list = Array.isArray(parsed) ? parsed : (parsed as { cards?: unknown })?.cards;
   if (!Array.isArray(list)) return [];
 
   return list
@@ -121,7 +129,7 @@ export async function POST(req: NextRequest) {
       buildCyberDTBody(
         flashcardInstructions(subject, language),
         `Subject: ${subject}\nTopic: ${topic}`,
-        { temperature: 0.7, maxOutputTokens: 4096, responseMimeType: "application/json" },
+        { temperature: 0.7, maxOutputTokens: 8192, responseMimeType: "application/json" },
       ),
     );
 

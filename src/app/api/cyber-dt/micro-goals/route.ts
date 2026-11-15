@@ -13,9 +13,10 @@ import {
  */
 
 const SUBJECTS = ["Biology", "Physics", "Chemistry"] as const;
+type MicroGoalSubject = (typeof SUBJECTS)[number];
 
 interface MicroGoal {
-  subject: string;
+  subject: MicroGoalSubject;
   task: string;
 }
 
@@ -32,12 +33,29 @@ Write the tasks in simple English.
 OUTPUT: return ONLY a JSON object, no prose and no code fences:
 {"tasks":[{"subject":"Biology","task":"..."},{"subject":"Physics","task":"..."},{"subject":"Chemistry","task":"..."}]}`;
 
+/** Maps any casing/variant of a subject name onto the canonical A/L subject. */
+function canonicalSubject(value: string): MicroGoalSubject | "" {
+  const v = value.trim().toLowerCase();
+  if (v.startsWith("bio")) return "Biology";
+  if (v.startsWith("phy")) return "Physics";
+  if (v.startsWith("chem")) return "Chemistry";
+  return "";
+}
+
 /** Parses and sanitizes the model's JSON, tolerating stray code fences. */
 function parseTasks(raw: string): MicroGoal[] {
   const cleaned = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  const jsonText = start >= 0 && end > start ? cleaned.slice(start, end + 1) : cleaned;
+  // Accept either {"tasks":[...]} or a bare [...] array, and any prose around it.
+  const objStart = cleaned.indexOf("{");
+  const arrStart = cleaned.indexOf("[");
+  let jsonText = cleaned;
+  if (arrStart >= 0 && (objStart < 0 || arrStart < objStart)) {
+    const end = cleaned.lastIndexOf("]");
+    if (end > arrStart) jsonText = cleaned.slice(arrStart, end + 1);
+  } else if (objStart >= 0) {
+    const end = cleaned.lastIndexOf("}");
+    if (end > objStart) jsonText = cleaned.slice(objStart, end + 1);
+  }
 
   let parsed: unknown;
   try {
@@ -46,21 +64,21 @@ function parseTasks(raw: string): MicroGoal[] {
     return [];
   }
 
-  const list = (parsed as { tasks?: unknown })?.tasks;
+  const list = Array.isArray(parsed) ? parsed : (parsed as { tasks?: unknown })?.tasks;
   if (!Array.isArray(list)) return [];
 
-  return list
-    .map((task) => task as { subject?: unknown; task?: unknown })
-    .filter((task) => typeof task?.subject === "string" && typeof task?.task === "string")
-    .map((task) => ({
-      subject: (task.subject as string).trim(),
-      task: (task.task as string).trim(),
-    }))
-    .filter(
-      (task) =>
-        (SUBJECTS as readonly string[]).includes(task.subject) && task.task.length > 0,
-    )
-    .slice(0, 3);
+  const seen = new Set<string>();
+  const out: MicroGoal[] = [];
+  for (const item of list) {
+    const task = item as { subject?: unknown; task?: unknown };
+    if (typeof task?.subject !== "string" || typeof task?.task !== "string") continue;
+    const subject = canonicalSubject(task.subject);
+    const text = task.task.trim();
+    if (!subject || !text || seen.has(subject)) continue;
+    seen.add(subject);
+    out.push({ subject, task: text });
+  }
+  return out.slice(0, 3);
 }
 
 export async function OPTIONS() {
@@ -89,7 +107,7 @@ export async function POST(req: NextRequest) {
       buildCyberDTBody(
         MICRO_GOAL_INSTRUCTIONS,
         date ? `Today's date: ${date}` : "Today.",
-        { temperature: 0.6, maxOutputTokens: 1024, responseMimeType: "application/json" },
+        { temperature: 0.6, maxOutputTokens: 4096, responseMimeType: "application/json" },
       ),
     );
 

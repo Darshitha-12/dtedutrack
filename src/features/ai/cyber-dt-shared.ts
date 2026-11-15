@@ -287,9 +287,21 @@ export type CyberDTGeminiResult =
   | { ok: false; status: number; detail: string };
 
 /**
- * Sends one generateContent request through the model chain until a model
- * answers, sharing a single abort budget across all attempts. Free-tier
- * quota is per model, so a busy model (429/503) does not end the request.
+ * How many models to ask at the same time. Free-tier quota is per model, so
+ * racing a few hides a single busy model and returns the FASTEST answer
+ * instead of the sum of a sequential chain. Mirrors the main chat route.
+ */
+export const CYBER_DT_MAX_PARALLEL = 3;
+
+/**
+ * Sends one generateContent request through the model chain and returns the
+ * first complete answer, sharing a single abort budget across all attempts.
+ *
+ * The first few models are raced IN PARALLEL (like /api/cyber-dt) rather than
+ * tried one after another: on the free tier a single model can be overloaded
+ * (503), out of quota (429) or simply slow, and a sequential chain let that one
+ * model eat the whole budget — every feature then reported "the AI is busy".
+ * Racing means a slow model no longer blocks the answer.
  */
 export async function callCyberDTGemini(
   apiKey: string,
@@ -297,46 +309,64 @@ export async function callCyberDTGemini(
   timeoutMs: number = CYBER_DT_ROUTE_BUDGET_MS,
 ): Promise<CyberDTGeminiResult> {
   const requestBody = JSON.stringify(body);
+  const models = cyberDTModelChain();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let winner = "";
   let lastStatus = 0;
   let lastDetail = "";
 
+  const attempt = async (model: string): Promise<void> => {
+    if (winner) return;
+    try {
+      const res = await fetch(geminiEndpoint(model), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: requestBody,
+        signal: controller.signal,
+      });
+
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        const text = extractGeminiText(data);
+        if (text && !winner) {
+          winner = text;
+          // We have an answer — stop the other in-flight requests.
+          controller.abort();
+        }
+        return;
+      }
+
+      lastStatus = res.status;
+      lastDetail = (await res.text().catch(() => "")).slice(0, 300);
+    } catch (e: unknown) {
+      // Aborted (a winner exists, or we ran out of time) or a network error.
+      // Keep the first useful detail for diagnostics.
+      if (!winner && lastStatus === 0) {
+        lastDetail = e instanceof Error ? e.message.slice(0, 200) : String(e);
+      }
+    }
+  };
+
   try {
-    for (const model of cyberDTModelChain()) {
-      if (controller.signal.aborted) break;
-      try {
-        const res = await fetch(geminiEndpoint(model), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey,
-          },
-          body: requestBody,
-          signal: controller.signal,
-        });
+    await Promise.all(models.slice(0, CYBER_DT_MAX_PARALLEL).map(attempt));
 
-        if (res.ok) {
-          const data = await res.json().catch(() => null);
-          const text = extractGeminiText(data);
-          if (text) return { ok: true, text };
-          continue;
-        }
-
-        lastStatus = res.status;
-        lastDetail = (await res.text().catch(() => "")).slice(0, 300);
-      } catch (e: unknown) {
-        // Out of time — stop the chain and report the last useful detail.
+    // Still nothing? Try any remaining models one at a time while time allows.
+    if (!winner) {
+      for (const model of models.slice(CYBER_DT_MAX_PARALLEL)) {
         if (controller.signal.aborted) break;
-        if (lastStatus === 0) {
-          lastDetail = e instanceof Error ? e.message.slice(0, 200) : String(e);
-        }
+        await attempt(model);
+        if (winner) break;
       }
     }
   } finally {
     clearTimeout(timer);
   }
 
+  if (winner) return { ok: true, text: winner };
   return { ok: false, status: lastStatus, detail: lastDetail };
 }
 

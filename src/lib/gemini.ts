@@ -29,6 +29,8 @@ interface GeminiOptions {
   systemInstruction?: string;
   temperature?: number;
   maxOutputTokens?: number;
+  /** 0 disables thinking; thinking tokens otherwise eat into maxOutputTokens. */
+  thinkingBudget?: number;
   retriesPerModel?: number;
   retryDelayMs?: number;
 }
@@ -82,6 +84,9 @@ export async function generateGeminiContent(
             systemInstruction: options.systemInstruction,
             temperature: options.temperature ?? config.gemini.temperature,
             maxOutputTokens: options.maxOutputTokens || config.gemini.maxTokens,
+            ...(options.thinkingBudget !== undefined
+              ? { thinkingConfig: { thinkingBudget: options.thinkingBudget } }
+              : {}),
           },
         });
         return result.text || "No content was generated. Please try again.";
@@ -96,4 +101,91 @@ export async function generateGeminiContent(
   const detail = lastError instanceof Error ? lastError.message : String(lastError);
   console.error("[GEMINI] All models failed:", lastError);
   throw new Error(`AI generation failed. ${detail.slice(0, 500)}`);
+}
+
+/** An image model's answer: a ready-to-use data URL plus any explanation text. */
+export interface GeminiImageResult {
+  dataUrl: string;
+  mimeType: string;
+  caption: string;
+}
+
+/**
+ * Image models, best-effort order: the flash image model is fastest and works
+ * on the free tier; the pro model renders Sinhala label text most reliably but
+ * costs the most, so it is only a last resort.
+ */
+const IMAGE_MODELS = [
+  "gemini-3.1-flash-image",
+  "gemini-2.5-flash-image",
+  "gemini-3-pro-image",
+];
+
+/**
+ * Generates an image (plus optional text) with a Gemini image model. Unlike
+ * generateGeminiContent this does not fall back to text models — a text model
+ * cannot draw — so callers must keep their own text fallback.
+ */
+export async function generateGeminiImage(
+  prompt: string,
+  options: { systemInstruction?: string; temperature?: number } = {},
+): Promise<GeminiImageResult> {
+  const hint = keySetupHint();
+  if (hint) {
+    throw new Error(hint);
+  }
+
+  const { GoogleGenAI, Modality } = await import("@google/genai");
+  const client = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+
+  let lastError: unknown = null;
+  // A "limit: 0" quota error means image generation is not enabled for this
+  // key at all — trying the other image models only wastes half a minute
+  // before the route's SVG fallback runs.
+  let quotaBlocked = false;
+
+  for (const model of IMAGE_MODELS) {
+    if (quotaBlocked) break;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const result = await client.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            systemInstruction: options.systemInstruction,
+            temperature: options.temperature ?? 0.4,
+            responseModalities: [Modality.TEXT, Modality.IMAGE],
+          },
+        });
+
+        const parts = result.candidates?.[0]?.content?.parts ?? [];
+        const image = parts.find((part) => part.inlineData?.data)?.inlineData;
+        if (image?.data) {
+          const mimeType = image.mimeType || "image/png";
+          return {
+            dataUrl: `data:${mimeType};base64,${image.data}`,
+            mimeType,
+            caption: (result.text || "").trim(),
+          };
+        }
+
+        // The model answered but drew nothing — the next model may still work.
+        lastError = new Error(`${model} returned no image.`);
+        break;
+      } catch (error) {
+        lastError = error;
+        const detail = error instanceof Error ? error.message : String(error);
+        if (/limit:\s*0\b/.test(detail)) {
+          quotaBlocked = true;
+          break;
+        }
+        if (!isRetryable(error)) break;
+        if (attempt < 1) await sleep(2500);
+      }
+    }
+  }
+
+  const detail = lastError instanceof Error ? lastError.message : String(lastError);
+  console.error("[GEMINI] Image generation failed:", lastError);
+  throw new Error(`Image generation failed. ${detail.slice(0, 500)}`);
 }
