@@ -12,6 +12,7 @@ import {
   CyberDTSolver,
   type CyberDTFeatureId,
 } from "@/features/ai/client/cyber-dt-features";
+import { CyberDTPdfNotes } from "@/features/ai/client/cyber-dt-pdf-notes";
 
 function FeatureWorkspace({
   activeFeature,
@@ -29,6 +30,8 @@ function FeatureWorkspace({
       return <CyberDTFlashcards />;
     case "organic":
       return <CyberDTOrganicAssistant />;
+    case "pdf_notes":
+      return <CyberDTPdfNotes />;
     default:
       return <CyberDTChat key={activeFeature ?? "chat"} starter={starter} />;
   }

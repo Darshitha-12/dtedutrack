@@ -12,7 +12,10 @@ export interface CyberDTChatTurn {
   text?: string;
 }
 
-/** An image sent with a message (diagram, past-paper photo, handwritten note). */
+/**
+ * A file sent with a message: a diagram, past-paper photo, handwritten note
+ * (image/*) or a whole PDF document (application/pdf).
+ */
 export interface CyberDTImage {
   mimeType: string;
   /** Base64 payload WITHOUT the data: URL prefix. */
@@ -176,24 +179,30 @@ export function geminiEndpoint(model: string): string {
   return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 }
 
-const IMAGE_MIME_ALIASES: Record<string, string> = {
+const ATTACHMENT_MIME_ALIASES: Record<string, string> = {
   "image/jpg": "image/jpeg",
   "image/jpeg": "image/jpeg",
   "image/png": "image/png",
   "image/webp": "image/webp",
+  // A whole PDF (a chapter scan, a past-paper paper, class notes). Gemini reads
+  // PDFs natively — including text inside scanned pages — so the client never
+  // has to extract the text itself.
+  "application/pdf": "application/pdf",
 };
 
 /**
  * Kept below Netlify's 6 MB request-body cap and Gemini's inline-data limit.
- * The client downscales photos before sending, so this only rejects abuse.
+ * The client downscales photos and caps PDFs before sending, so this only
+ * rejects abuse.
  */
-const MAX_IMAGE_BASE64_CHARS = 4_600_000;
+const MAX_ATTACHMENT_BASE64_CHARS = 4_600_000;
 
 /**
- * Reads the optional image from a request body. Accepts either
- * `{ image: { mimeType, data } }` or the flat `{ imageBase64, imageMimeType }`
- * shape (a `data:` URL prefix is tolerated). Returns undefined when no image
- * was sent, and null when one was sent but is unusable.
+ * Reads the optional attachment (an image OR a PDF) from a request body.
+ * Accepts either `{ image: { mimeType, data } }` or the flat
+ * `{ imageBase64, imageMimeType }` shape (a `data:` URL prefix is tolerated).
+ * Returns undefined when no attachment was sent, and null when one was sent
+ * but is unusable.
  */
 export function readCyberDTImage(body: unknown): CyberDTImage | null | undefined {
   if (!body || typeof body !== "object") return undefined;
@@ -210,7 +219,7 @@ export function readCyberDTImage(body: unknown): CyberDTImage | null | undefined
         ? b.imageBase64
         : "";
   if (!rawData) {
-    // A present but empty image field is a client bug, not "no image".
+    // A present but empty attachment field is a client bug, not "no attachment".
     return b.image !== undefined || b.imageBase64 !== undefined ? null : undefined;
   }
 
@@ -222,14 +231,19 @@ export function readCyberDTImage(body: unknown): CyberDTImage | null | undefined
   ];
   const rawMime =
     mimeCandidates.find((m): m is string => typeof m === "string" && m.length > 0) ?? "image/jpeg";
-  const mimeType = IMAGE_MIME_ALIASES[rawMime.toLowerCase()];
+  const mimeType = ATTACHMENT_MIME_ALIASES[rawMime.toLowerCase()];
   if (!mimeType) return null;
 
   const data = rawData.replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
-  if (!data || data.length > MAX_IMAGE_BASE64_CHARS || !/^[A-Za-z0-9+/=]+$/.test(data)) {
+  if (!data || data.length > MAX_ATTACHMENT_BASE64_CHARS || !/^[A-Za-z0-9+/=]+$/.test(data)) {
     return null;
   }
   return { mimeType, data };
+}
+
+/** True when an attachment is a PDF (as opposed to a photo/diagram image). */
+export function isCyberDTPdf(attachment: CyberDTImage | null | undefined): boolean {
+  return attachment?.mimeType === "application/pdf";
 }
 
 /**
@@ -302,6 +316,7 @@ export async function callCyberDTGemini(
   apiKey: string,
   body: unknown,
   timeoutMs: number = CYBER_DT_ROUTE_BUDGET_MS,
+  perAttemptMsOverride?: number,
 ): Promise<CyberDTGeminiResult> {
   const requestBody = JSON.stringify(body);
   const models = cyberDTModelChain();
@@ -310,8 +325,9 @@ export async function callCyberDTGemini(
   // Give each single model its own slice. A wave waits for EVERY member
   // (Promise.all), so without this a model that accepts the connection but
   // never replies would hold the whole wave until the deadline — the exact
-  // hang that surfaced as "the AI is busy".
-  const perAttemptMs = Math.max(8_000, Math.floor(timeoutMs / 2));
+  // hang that surfaced as "the AI is busy". Callers that expect a LONG answer
+  // (a PDF study note) pass a larger override so the note is not cut off.
+  const perAttemptMs = perAttemptMsOverride ?? Math.max(8_000, Math.floor(timeoutMs / 2));
   let winner = "";
   let lastStatus = 0;
   let lastDetail = "";

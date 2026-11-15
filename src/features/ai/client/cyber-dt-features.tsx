@@ -22,6 +22,7 @@ export type CyberDTFeatureId =
   | "calc_guide"
   | "flashcards"
   | "organic"
+  | "pdf_notes"
   | "notes";
 
 export interface CyberDTFeatureMeta {
@@ -62,6 +63,11 @@ export const CYBER_DT_FEATURES: CyberDTFeatureMeta[] = [
     id: "organic",
     icon: "🧪",
     label: "Organic Pathways",
+  },
+  {
+    id: "pdf_notes",
+    icon: "📄",
+    label: "PDF → Study Note",
   },
   {
     id: "notes",
