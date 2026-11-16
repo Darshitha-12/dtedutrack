@@ -372,16 +372,33 @@ export function isCyberDTTransientStatus(status: number): boolean {
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Sends one generateContent request through the model chain and returns the
- * first complete answer, sharing a single abort budget across all attempts.
+ * Fraction of a model's own time budget it may spend before sending its first
+ * streamed token. A working model sends its first token well inside this (even
+ * with thinking, and even while it digests a big inline PDF); a request whose
+ * connection is stuck sends nothing at all. Without this watchdog a hung model
+ * held the whole wave for its full per-attempt timeout — the exact wait that
+ * made a free-tier 503 burst feel like "the AI is very slow".
+ */
+const FIRST_TOKEN_FRACTION = 0.6;
+
+/** Never treat a model as hung before this much time has passed. */
+const FIRST_TOKEN_FLOOR_MS = 6_000;
+
+/**
+ * Sends one request through the model chain and returns the first COMPLETE
+ * answer, sharing a single abort budget across all attempts.
  *
  * Every model is raced IN PARALLEL (like /api/cyber-dt) rather than tried one
  * after another: on the free tier a single model can be overloaded (503), out
  * of quota (429) or simply slow, and a sequential chain let that one model eat
- * the whole budget — every feature then reported "the AI is busy". Each model
- * also gets its own per-attempt timeout, because Promise.all waits for every
- * member: without it a request that connects but never replies would hold the
- * whole race until the deadline.
+ * the whole budget — every feature then reported "the AI is busy".
+ *
+ * The models are consumed as SSE streams on the SERVER (the client still gets
+ * one buffered JSON answer). Streaming is what lets a stuck request be told
+ * apart from a slow long answer: a hung model sends no tokens and is dropped
+ * after {@link FIRST_TOKEN_MS}, while a model that keeps streaming is allowed
+ * to run on until the overall deadline. A wave therefore no longer waits for a
+ * dead straggler, so both the fast path and the "busy" path finish sooner.
  */
 export async function callCyberDTGemini(
   apiKey: string,
@@ -395,12 +412,15 @@ export async function callCyberDTGemini(
     modelsOverride && modelsOverride.length > 0 ? modelsOverride : cyberDTModelChain();
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(), timeoutMs);
-  // Give each single model its own slice. A wave waits for EVERY member
-  // (Promise.all), so without this a model that accepts the connection but
-  // never replies would hold the whole wave until the deadline — the exact
-  // hang that surfaced as "the AI is busy". Callers that expect a LONG answer
-  // (a PDF study note) pass a larger override so the note is not cut off.
+  // Upper bound for one model. Callers that expect a LONG answer (a PDF study
+  // note) pass a larger override. The first-token watchdog is the real safety
+  // net; this only stops a stream that trickles forever.
   const perAttemptMs = perAttemptMsOverride ?? Math.max(8_000, Math.floor(timeoutMs / 2));
+  // Watchdog: drop a model that has sent no token at all by this point.
+  const firstTokenMs = Math.min(
+    perAttemptMs,
+    Math.max(FIRST_TOKEN_FLOOR_MS, Math.floor(perAttemptMs * FIRST_TOKEN_FRACTION)),
+  );
   let winner = "";
   let lastStatus = 0;
   let lastDetail = "";
@@ -411,8 +431,13 @@ export async function callCyberDTGemini(
     const abortLocal = () => local.abort();
     deadline.signal.addEventListener("abort", abortLocal);
     const localTimer = setTimeout(() => local.abort(), perAttemptMs);
+    let sawToken = false;
+    const firstTokenTimer = setTimeout(() => {
+      // Nothing arrived in time — treat the connection as hung and free the wave.
+      if (!sawToken) local.abort();
+    }, firstTokenMs);
     try {
-      const res = await fetch(geminiEndpoint(model), {
+      const res = await fetch(geminiStreamEndpoint(model), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -422,34 +447,69 @@ export async function callCyberDTGemini(
         signal: local.signal,
       });
 
-      if (res.ok) {
+      if (!res.ok) {
+        lastStatus = res.status;
+        lastDetail = (await res.text().catch(() => "")).slice(0, 300);
+        return;
+      }
+
+      // No stream body (unexpected runtime) — fall back to a whole JSON read.
+      if (!res.body) {
         const data = await res.json().catch(() => null);
         const text = extractGeminiText(data);
         if (text && !winner) {
           winner = text;
-          // We have an answer — stop every other in-flight request.
           deadline.abort();
         }
         return;
       }
 
-      lastStatus = res.status;
-      lastDetail = (await res.text().catch(() => "")).slice(0, 300);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let text = "";
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!sawToken) {
+            sawToken = true;
+            clearTimeout(firstTokenTimer);
+          }
+          buffer += decoder.decode(value, { stream: true });
+          const parsed = parseSSEBuffer(buffer);
+          buffer = parsed.rest;
+          for (const event of parsed.events) {
+            text += extractGeminiStreamDelta(event);
+          }
+        }
+      } finally {
+        reader.releaseLock?.();
+      }
+
+      const answer = text.trim();
+      if (answer && !winner) {
+        winner = answer;
+        // We have a full answer — stop every other in-flight request.
+        deadline.abort();
+      } else if (!answer && !winner && lastStatus === 0) {
+        lastDetail = "empty stream";
+      }
     } catch (e: unknown) {
-      // Aborted (a winner exists, or we ran out of time) or a network error.
-      // Keep the first useful detail for diagnostics.
+      // Aborted (a winner exists, we ran out of time, or the model was hung) or
+      // a network error. Keep the first useful detail for diagnostics.
       if (!winner && lastStatus === 0) {
         lastDetail = e instanceof Error ? e.message.slice(0, 200) : String(e);
       }
     } finally {
+      clearTimeout(firstTokenTimer);
       clearTimeout(localTimer);
       deadline.signal.removeEventListener("abort", abortLocal);
     }
   };
 
   try {
-    // Race every model at once — the fastest complete answer wins. Each has
-    // its own timeout, so one slow model cannot block the rest.
+    // Race every model at once — the fastest COMPLETE answer wins.
     await Promise.all(models.map(attempt));
   } finally {
     clearTimeout(timer);
@@ -656,12 +716,17 @@ export function geminiStreamEndpoint(model: string): string {
  * Extracts the text delta from ONE SSE chunk of a streamGenerateContent
  * response. Each chunk is a JSON object shaped like a regular response.
  * Unlike extractGeminiText this does NOT trim, so word spacing is kept.
+ * "thought" parts are dropped so a thinking model's private reasoning can
+ * never leak into an answer.
  */
 export function extractGeminiStreamDelta(chunk: unknown): string {
-  const d = chunk as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> } | null;
+  const d = chunk as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
+  } | null;
   const parts = d?.candidates?.[0]?.content?.parts;
   if (!Array.isArray(parts)) return "";
   return parts
+    .filter((p) => !p?.thought)
     .map((p) => (typeof p?.text === "string" ? p.text : ""))
     .join("");
 }

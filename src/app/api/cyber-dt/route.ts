@@ -55,23 +55,32 @@ const TOTAL_BUDGET_MS = 22_000;
  * Release marker, returned by GET so a deploy can be verified from outside.
  * Bump this whenever the Cyber DT routes change.
  */
-const CYBER_DT_REV = "2026-11-16-plan-meals-fast";
+const CYBER_DT_REV = "2026-11-16-stream-hangfix";
 
 /**
  * How many models to ask at the same time. Free-tier quota is per model, so
- * racing a few both hides a single busy model and gives the student the
- * FASTEST answer instead of the sum of a sequential chain. The retry wave then
- * moves the window along the chain so it reaches models the first wave missed.
+ * racing the WHOLE chain both hides a single busy model and gives the student
+ * the FASTEST answer instead of the sum of a sequential chain. The retry wave
+ * then slides the window along the chain so it reaches models the first wave
+ * missed.
  */
-const MAX_PARALLEL = 4;
+const MAX_PARALLEL = 6;
 
 /**
  * Ceiling for one wave of models. A long study plan can take 15–20 s to write,
- * so a shorter cap would cut every model off mid-plan and force a retry — which
- * is exactly what made the bot feel slow. The wave still returns the moment the
- * fastest model finishes, so this is only an upper bound.
+ * so a shorter cap would cut every model off mid-plan. The wave returns the
+ * moment the fastest model finishes, and a model that sends NO tokens at all is
+ * dropped after a few seconds by the shared first-token watchdog (see
+ * callCyberDTGemini), so a dead connection no longer holds the wave.
  */
 const PER_ATTEMPT_MS = 18_000;
+
+/**
+ * Retry waves. The first wave already races every model in the chain, so one
+ * extra wave (after a short backoff) is enough to ride out a free-tier burst
+ * without making the student wait for a long chain of them.
+ */
+const ATTEMPTS = 2;
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS });
@@ -129,7 +138,7 @@ export async function POST(req: NextRequest) {
     // busy model (or a busy moment) no longer ends in "no answer".
     const result = await callCyberDTGeminiWithRetry(apiKey, requestBody, {
       timeoutMs: TOTAL_BUDGET_MS,
-      attempts: 3,
+      attempts: ATTEMPTS,
       perAttemptMs: PER_ATTEMPT_MS,
       raceCount: MAX_PARALLEL,
     });
