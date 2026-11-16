@@ -343,7 +343,30 @@ export function buildCyberDTBody(
 
 export type CyberDTGeminiResult =
   | { ok: true; text: string }
-  | { ok: false; status: number; detail: string };
+  | { ok: false; status: number; detail: string; attempts?: number };
+
+/**
+ * HTTP statuses that mean "try again in a moment" rather than "this request is
+ * wrong". The free tier answers with 429/503 whenever a model is briefly
+ * overloaded or the shared quota is spent, and a retry a moment later usually
+ * succeeds. A 400/401/403/404 will never succeed on a retry, so it is returned
+ * straight away.
+ */
+export function isCyberDTTransientStatus(status: number): boolean {
+  return (
+    // 0 = the request never produced a response (network error / timeout).
+    status === 0 ||
+    status === 408 ||
+    status === 425 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  );
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
  * Sends one generateContent request through the model chain and returns the
@@ -362,9 +385,11 @@ export async function callCyberDTGemini(
   body: unknown,
   timeoutMs: number = CYBER_DT_ROUTE_BUDGET_MS,
   perAttemptMsOverride?: number,
+  modelsOverride?: string[],
 ): Promise<CyberDTGeminiResult> {
   const requestBody = JSON.stringify(body);
-  const models = cyberDTModelChain();
+  const models =
+    modelsOverride && modelsOverride.length > 0 ? modelsOverride : cyberDTModelChain();
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(), timeoutMs);
   // Give each single model its own slice. A wave waits for EVERY member
@@ -431,10 +456,92 @@ export async function callCyberDTGemini(
   return { ok: false, status: lastStatus, detail: lastDetail };
 }
 
+/** Options for {@link callCyberDTGeminiWithRetry}. */
+export interface CyberDTRetryOptions {
+  /** Whole-request budget shared by every attempt (default CYBER_DT_ROUTE_BUDGET_MS). */
+  timeoutMs?: number;
+  /** Maximum attempts INCLUDING the first (default 3). */
+  attempts?: number;
+  /** Cap for one attempt's own timeout. */
+  perAttemptMs?: number;
+  /** How many models to race per attempt (default 3). */
+  raceCount?: number;
+  /** First backoff delay; it doubles after each failed attempt (default 350 ms). */
+  baseDelayMs?: number;
+  /** Backoff ceiling (default 3000 ms). */
+  maxDelayMs?: number;
+}
+
+/** Shortest useful slice: below this a retry could not finish in time. */
+const MIN_ATTEMPT_MS = 3_000;
+
 /**
- * Like callCyberDTGemini but retries when every model fails with a transient
- * error (a free-tier 503/429 across the whole chain). Each attempt is capped so
- * the route still finishes well inside the overall budget.
+ * Sends a generateContent request with exponential-backoff retries.
+ *
+ * The free tier fails in bursts — every model in the chain can answer 503/429
+ * at the same moment — so a single wave is not enough. This retries the whole
+ * wave 2–3 times, waiting a little longer each time (350 ms → 700 ms → …) with
+ * random jitter so simultaneous students do not retry in lockstep.
+ *
+ * Each attempt also races a DIFFERENT window of the model chain (a sliding
+ * window), because free-tier quota is per model: re-asking the same three busy
+ * models cannot help, but the next three usually can.
+ *
+ * A hard error (400/401/403/404) is returned immediately — a retry would just
+ * waste the budget. Everything shares one deadline, so the route still finishes
+ * well inside Netlify's function limit.
+ */
+export async function callCyberDTGeminiWithRetry(
+  apiKey: string,
+  body: unknown,
+  options: CyberDTRetryOptions = {},
+): Promise<CyberDTGeminiResult> {
+  const timeoutMs = options.timeoutMs ?? CYBER_DT_ROUTE_BUDGET_MS;
+  const attempts = Math.max(1, options.attempts ?? 3);
+  const raceCount = Math.max(1, options.raceCount ?? 3);
+  const baseDelayMs = options.baseDelayMs ?? 350;
+  const maxDelayMs = options.maxDelayMs ?? 3_000;
+  const chain = cyberDTModelChain();
+  const startedAt = Date.now();
+  let last: CyberDTGeminiResult = { ok: false, status: 0, detail: "", attempts: 0 };
+
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) {
+      const remaining = timeoutMs - (Date.now() - startedAt);
+      // Stop while a whole attempt still fits; otherwise a retry would be cut
+      // off mid-answer and report a misleading failure.
+      if (remaining < MIN_ATTEMPT_MS) break;
+      const backoff = Math.min(maxDelayMs, baseDelayMs * 2 ** (i - 1));
+      // Half the delay is fixed, half is jitter (avoids a retry stampede).
+      const wait = Math.round(backoff / 2 + Math.random() * (backoff / 2));
+      await sleep(Math.max(0, Math.min(wait, remaining - MIN_ATTEMPT_MS)));
+    }
+
+    const left = timeoutMs - (Date.now() - startedAt);
+    const slice = Math.max(MIN_ATTEMPT_MS, Math.min(left, options.perAttemptMs ?? left));
+
+    // Sliding window over the chain so a retry reaches fresh models.
+    const step = Math.max(1, Math.floor(chain.length / attempts));
+    const window: string[] = [];
+    for (let k = 0; k < raceCount; k++) {
+      window.push(chain[(i * step + k) % chain.length]);
+    }
+
+    const result = await callCyberDTGemini(apiKey, body, slice, slice, window);
+    if (result.ok) return result;
+
+    last = { ok: false, status: result.status, detail: result.detail, attempts: i + 1 };
+    // A hard error (bad key, malformed body, retired model) will not change.
+    if (!isCyberDTTransientStatus(result.status)) return last;
+  }
+
+  return last;
+}
+
+/**
+ * Backwards-compatible wrapper kept for the feature routes (solver, evaluator,
+ * organic). It now uses the shared exponential-backoff retry, so every feature
+ * gets the same resilience without changing its call site.
  */
 export async function callCyberDTGeminiRetry(
   apiKey: string,
@@ -442,17 +549,7 @@ export async function callCyberDTGeminiRetry(
   timeoutMs: number = CYBER_DT_ROUTE_BUDGET_MS,
   attempts = 2,
 ): Promise<CyberDTGeminiResult> {
-  const startedAt = Date.now();
-  const perAttempt = Math.max(4_000, Math.floor(timeoutMs / attempts));
-  let last: CyberDTGeminiResult = { ok: false, status: 0, detail: "" };
-
-  for (let i = 0; i < attempts; i++) {
-    const remaining = timeoutMs - (Date.now() - startedAt);
-    if (i > 0 && remaining < 3_000) break;
-    last = await callCyberDTGemini(apiKey, body, Math.max(3_000, Math.min(remaining, perAttempt)));
-    if (last.ok) return last;
-  }
-  return last;
+  return callCyberDTGeminiWithRetry(apiKey, body, { timeoutMs, attempts });
 }
 
 /**
@@ -508,13 +605,25 @@ export async function callCyberDTGeminiJson<T>(
   let sawResponse = false;
 
   for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      // Exponential backoff (350 ms → 700 ms) with the budget respected.
+      const left = CYBER_DT_ROUTE_BUDGET_MS - (Date.now() - startedAt);
+      if (left < 3_000) break;
+      const backoff = Math.min(2_000, 350 * 2 ** (attempt - 1));
+      await sleep(Math.max(0, Math.min(backoff, left - 3_000)));
+    }
     const remaining = CYBER_DT_ROUTE_BUDGET_MS - (Date.now() - startedAt);
-    if (attempt > 0 && remaining < 3_000) break;
+    if (remaining < 3_000) break;
     // Cap each attempt so one hung model cannot consume the whole budget and
     // starve the retries that smooth over a transient 503.
     const budget = Math.max(3_000, Math.min(remaining, 8_000));
 
-    const result = await callCyberDTGemini(apiKey, body, budget);
+    // Rotate the raced window so a retry reaches DIFFERENT models (quota is per
+    // model, so re-asking the same busy three would just fail again).
+    const chain = cyberDTModelChain();
+    const window = [0, 1, 2].map((k) => chain[(attempt + k) % chain.length]);
+
+    const result = await callCyberDTGemini(apiKey, body, budget, undefined, window);
     if (!result.ok) {
       if (result.status !== 0) lastStatus = result.status;
       lastDetail = result.detail || lastDetail;

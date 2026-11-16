@@ -1100,21 +1100,21 @@ In the meantime, here's a reusable A/L revision framework you can adapt to your 
  */
 export function getCyberDTAIBusyResponse(_locale: CyberDTLocale = "en"): CyberDTResponse {
   return {
-    textEn: `⚠️ I couldn't finish an answer — the AI service is busy right now (Google's free tier is overloaded or out of quota).
+    textEn: `⏳ AI එක දැන් කාර්යබහුලයි, තත්පර කිහිපයකින් නැවත උත්සාහ කරන්න...
 
-Your question wasn't lost. Tap the ↻ button under this message to try again — it usually works within a minute.
+I already retried 3 times automatically, but Google's free tier was busy every time. Your question wasn't lost — tap the ↻ Regenerate button under this message (or the "Try again" button) and it usually works within a few seconds.
 
 If it keeps happening:
 • 🔑 Add your own free Google AI Studio key (key button at the top) — it has a separate quota and works even when the shared key is busy
 • Or ask me one A/L Biology topic at a time — those are answered instantly from my built-in notes`,
-    textSi: `⚠️ උත්තරය සම්පූර්ණ කරන්න බැරි වුණා — AI සේවාව දැන් busy (Google free tier එක overloaded හෝ quota ඉවරයි).
+    textSi: `⏳ AI එක දැන් කාර්යබහුලයි, තත්පර කිහිපයකින් නැවත උත්සාහ කරන්න...
 
-ඔයාගේ ප්‍රශ්නය නැති වුණේ නැහැ. මේ පණිවිඩය යට ඇති ↻ බොත්තම එබලා නැවත try කරන්න — සාමාන්‍යයෙන් මිනිත්තුවක් ඇතුළත වැඩ කරනවා.
+මම ස්වයංක්‍රීයව 3 වතාවක් නැවත උත්සාහ කළා, නමුත් හැම වතාවකම Google free tier එක busy වුණා. ඔයාගේ ප්‍රශ්නය නැති වුණේ නැහැ — මේ පණිවිඩය යට ඇති ↻ Regenerate බොත්තම (හෝ "නැවත උත්සාහ කරන්න" බොත්තම) එබන්න, සාමාන්‍යයෙන් තත්පර කිහිපයකින් වැඩ කරනවා.
 
 නැවත නැවත වුණොත්:
 • 🔑 ඔයාගේම free Google AI Studio key එකක් එකතු කරන්න (උඩ ඇති key බොත්තම) — ඒකට වෙනම quota එකක් තියෙනවා, shared key එක busy වුණත් වැඩ කරනවා
 • නැත්නම් එක A/L ජීව විද්‍යා topic එකක් ගැන අහන්න — ඒවා මගේ built-in notes වලින් instant උත්තර දෙනවා`,
-    emoji: "⚠️",
+    emoji: "⏳",
   };
 }
 

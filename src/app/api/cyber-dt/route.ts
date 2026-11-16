@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   buildGeminiRequestBody,
-  extractGeminiText,
-  geminiEndpoint,
-  cyberDTModelChain,
+  callCyberDTGeminiWithRetry,
   readCyberDTImage,
 } from "@/features/ai/cyber-dt-shared";
 
@@ -56,7 +54,8 @@ const TOTAL_BUDGET_MS = 22_000;
 /**
  * How many models to ask at the same time. Free-tier quota is per model, so
  * racing a few both hides a single busy model and gives the student the
- * FASTEST answer instead of the sum of a sequential chain.
+ * FASTEST answer instead of the sum of a sequential chain. The retry wave then
+ * moves the window along the chain so it reaches models the first wave missed.
  */
 const MAX_PARALLEL = 3;
 
@@ -103,78 +102,32 @@ export async function POST(req: NextRequest) {
     const prompt =
       message ||
       "Explain what this image shows according to the NIE Resource Book and the A/L syllabus.";
-    const requestBody = JSON.stringify(buildGeminiRequestBody(history, prompt, image));
+    const requestBody = buildGeminiRequestBody(history, prompt, image);
 
-    // Ask several models at once and keep the first complete answer. Free-tier
-    // limits are per model, so one model being overloaded (503) or out of quota
-    // (429) no longer ends in "no answer", and racing them means the student
-    // waits for the FASTEST model rather than the sum of a sequential chain.
-    const models = cyberDTModelChain();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TOTAL_BUDGET_MS);
-    let winner = "";
-    let lastStatus = 0;
-    let lastDetail = "";
+    // Ask several models at once, keep the first complete answer, and — if the
+    // whole wave fails with a transient 503/429 — retry the wave with
+    // exponential backoff, sliding the model window along so the retry reaches
+    // models the first wave never asked. Free-tier limits are per model, so one
+    // busy model (or a busy moment) no longer ends in "no answer".
+    const result = await callCyberDTGeminiWithRetry(apiKey, requestBody, {
+      timeoutMs: TOTAL_BUDGET_MS,
+      attempts: 3,
+      perAttemptMs: 12_000,
+      raceCount: MAX_PARALLEL,
+    });
 
-    const attempt = async (model: string): Promise<void> => {
-      if (winner) return;
-      try {
-        const res = await fetch(geminiEndpoint(model), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey,
-          },
-          body: requestBody,
-          signal: controller.signal,
-        });
-
-        if (res.ok) {
-          const data = await res.json().catch(() => null);
-          const text = extractGeminiText(data);
-          if (text && !winner) {
-            winner = text;
-            // We already have an answer — stop the other in-flight requests.
-            controller.abort();
-          }
-          return;
-        }
-
-        lastStatus = res.status;
-        lastDetail = (await res.text().catch(() => "")).slice(0, 300);
-      } catch (e: unknown) {
-        // Aborted (a winner exists, or we ran out of time) or a network error
-        // on this model. Keep the first useful detail for diagnostics.
-        if (!winner && lastStatus === 0) {
-          lastDetail = e instanceof Error ? e.message.slice(0, 200) : String(e);
-        }
-      }
-    };
-
-    // Race the fastest / most reliable models together.
-    await Promise.all(models.slice(0, MAX_PARALLEL).map(attempt));
-
-    // Still nothing? Try any remaining models one at a time while time allows.
-    if (!winner) {
-      for (const model of models.slice(MAX_PARALLEL)) {
-        if (controller.signal.aborted) break;
-        await attempt(model);
-        if (winner) break;
-      }
-    }
-
-    clearTimeout(timer);
-
-    if (winner) {
-      return NextResponse.json({ ok: true, text: winner }, { headers: CORS });
+    if (result.ok) {
+      return NextResponse.json({ ok: true, text: result.text }, { headers: CORS });
     }
 
     return NextResponse.json(
       {
         ok: false,
         error: "api_error",
-        status: lastStatus,
-        detail: lastDetail,
+        status: result.status,
+        detail: result.detail,
+        // How many waves we tried, so the UI can say "tried N times".
+        attempts: result.attempts,
         // Tells the chat page the AI itself is busy (not that the device is
         // offline), so it can offer a retry instead of a wrong offline answer.
         busy: true,

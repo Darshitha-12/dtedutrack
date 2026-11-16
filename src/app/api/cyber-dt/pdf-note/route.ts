@@ -4,7 +4,7 @@ import {
   CYBER_DT_ROUTE_BUDGET_MS,
   CYBER_DT_SYSTEM_PROMPT,
   buildCyberDTBody,
-  callCyberDTGemini,
+  callCyberDTGeminiWithRetry,
   isCyberDTPdf,
   readCyberDTImage,
   readCyberDTImages,
@@ -59,8 +59,30 @@ READING THE DOCUMENT (absolute rules):
 - If part of the document is unreadable or a term is unclear, say exactly which part is unclear instead of guessing.
 - Keep everything inside the Sri Lankan G.C.E. A/L Biology, Physics and Chemistry syllabus (NIE Resource Books). If the document drifts outside the syllabus, still explain it but note that it is beyond the A/L scope.`;
 
-function modeInstructions(mode: PdfMode, language: string): string {
+function modeInstructions(
+  mode: PdfMode,
+  language: string,
+  part: { index: number; total: number } | null,
+): string {
   const lang = `Write your entire reply in ${language}. Technical terms should be given in both Sinhala and English where helpful (e.g. "මයිටෝසිස් (mitosis)").`;
+
+  // A large scanned book is split into several batches. Each batch is a
+  // separate request, so the continuation parts must NOT restart the note
+  // (no new Title/Overview) — they carry straight on from the previous part.
+  const isPart = part != null && part.total > 1;
+  const isFirstPart = isPart && part!.index <= 1;
+  const isLastPart = isPart && part!.index >= part!.total;
+  const partHeader = isPart
+    ? `\n\nIMPORTANT — this is PART ${part!.index} of ${part!.total} of the same document, split only because it is long. ${
+        isFirstPart
+          ? "Start the note normally."
+          : "Do NOT repeat the Title or Overview. Continue directly with the next sections, as a continuation of the previous part."
+      } ${
+        isLastPart
+          ? "This is the final part — finish with the Quick Revision Summary."
+          : "Do NOT write a Quick Revision Summary yet; the document continues in the next part."
+      } Begin each part with a small heading like "Part ${part!.index}/${part!.total}".`
+    : "";
 
   switch (mode) {
     case "teach":
@@ -119,7 +141,7 @@ TASK — WRITE A COMPLETE STUDY NOTE from this document, with these sections:
 6. **Formulas / Equations** — every equation with its symbols and units (omit if none).
 7. **Exam Tips** — the marking points and common mistakes examiners look for.
 8. **Quick Revision Summary** — 6–10 one-line facts to memorise.
-${lang}`;
+${lang}${partHeader}`;
   }
 }
 
@@ -189,10 +211,20 @@ export async function POST(req: NextRequest) {
     const pageTo = Number.isFinite(Number(body.pageTo)) ? Number(body.pageTo) : 0;
     const truncated = body.pdfTruncated === true;
 
+    // A very long document is generated in batches ("parts"). Each part covers
+    // only the pages the client sent, so the request stays small and the shared
+    // free-tier quota is not hammered by one giant prompt.
+    const partTotal = Math.max(1, Math.min(12, Math.floor(Number(body.partTotal)) || 1));
+    const partIndex = Math.max(1, Math.min(partTotal, Math.floor(Number(body.partIndex)) || 1));
+    const part = partTotal > 1 ? { index: partIndex, total: partTotal } : null;
+
     const userText = [
       subject ? `Subject: ${subject}` : "",
       history ? `Earlier in this lesson:\n${history}` : "",
       mode === "ask" ? `Student's question: ${question}` : "",
+      part
+        ? `This request is part ${part.index} of ${part.total} of the document — it contains ONLY the pages for this part.`
+        : "",
       source === "text"
         ? `The full text extracted from the student's PDF is below${truncated ? " (the document was very long, so the final pages may be missing)" : ""}:\n\n${pdfText}`
         : "",
@@ -205,7 +237,7 @@ export async function POST(req: NextRequest) {
       .join("\n\n");
 
     const requestBody = buildCyberDTBody(
-      `${CYBER_DT_SYSTEM_PROMPT}\n\n${modeInstructions(mode, language)}`,
+      `${CYBER_DT_SYSTEM_PROMPT}\n\n${modeInstructions(mode, language, part)}`,
       userText,
       {
         // A faithful reading of the document, not a creative rewrite.
@@ -217,21 +249,17 @@ export async function POST(req: NextRequest) {
       },
     );
 
-    // A full study note is a LONG answer, so each model gets a generous slice
+    // A full study note is a LONG answer, so each attempt gets a generous slice
     // of the budget (the default 8s cap was tuned for short feature replies and
-    // would cut a note off mid-sentence). All models are still raced, so the
-    // fastest complete answer wins.
-    const startedAt = Date.now();
-    let result = await callCyberDTGemini(apiKey, requestBody, 16_000, 16_000);
-
-    // A failure that comes back FAST means the models were busy (503/429), not
-    // slow — so there is plenty of budget left for one retry wave.
-    if (!result.ok) {
-      const remaining = CYBER_DT_ROUTE_BUDGET_MS - (Date.now() - startedAt);
-      if (remaining > 6_000) {
-        result = await callCyberDTGemini(apiKey, requestBody, remaining, remaining);
-      }
-    }
+    // would cut a note off mid-sentence). The retry wrapper races a few models
+    // per attempt, and retries the whole wave with backoff when the free tier
+    // answers 503/429 — so a briefly busy model no longer reaches the student.
+    const result = await callCyberDTGeminiWithRetry(apiKey, requestBody, {
+      timeoutMs: CYBER_DT_ROUTE_BUDGET_MS,
+      attempts: 3,
+      perAttemptMs: 16_000,
+      raceCount: 3,
+    });
 
     if (!result.ok) {
       return NextResponse.json(
@@ -240,6 +268,7 @@ export async function POST(req: NextRequest) {
           error: "api_error",
           status: result.status,
           detail: result.detail,
+          attempts: result.attempts,
           busy: true,
         },
         { headers: CYBER_DT_CORS },

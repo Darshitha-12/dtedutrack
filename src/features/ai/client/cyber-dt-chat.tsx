@@ -58,6 +58,8 @@ interface ChatMessage {
   time?: string;
   /** True while the answer is still streaming in. */
   streaming?: boolean;
+  /** True when the answer is the "AI is busy" notice, so we show a retry button. */
+  busy?: boolean;
 }
 
 interface Conversation {
@@ -596,7 +598,11 @@ export function CyberDTChat({
       });
       finishStreaming(kbText);
       setMessages((prev) =>
-        prev.map((m) => (m.id === aiId ? { ...m, emoji: aiResponse.emoji } : m)),
+        prev.map((m) =>
+          m.id === aiId
+            ? { ...m, emoji: aiResponse.emoji, ...(serverBusy ? { busy: true } : {}) }
+            : m,
+        ),
       );
     } else {
       finishStreaming(answer ?? aiText);
@@ -1208,6 +1214,17 @@ export function CyberDTChat({
                       </div>
                     )}
                   </div>
+                  {m.text && !m.streaming && m.busy && (
+                    <button
+                      type="button"
+                      onClick={regenerate}
+                      disabled={isTyping}
+                      className="mt-2 flex items-center gap-1.5 rounded-lg bg-amber-500/90 px-3 py-1.5 text-xs font-bold text-[#2a1a00] transition hover:bg-amber-400 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${isTyping ? "animate-spin" : ""}`} />
+                      නැවත උත්සාහ කරන්න · Try again
+                    </button>
+                  )}
                   {m.text && !m.streaming && (
                     <div className="mt-2 flex items-center gap-3 text-[0.7rem] text-cyan-400/60">
                       {m.time && <span>{m.time}</span>}

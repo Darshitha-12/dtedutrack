@@ -22,8 +22,14 @@ export const CYBER_DT_PDF_ACCEPT = "application/pdf,.pdf";
 const INLINE_MAX_BYTES = 3_400_000;
 /** Text is ~1 byte per char in JSON; stay well under the 6 MB body cap. */
 const MAX_TEXT_CHARS = 3_500_000;
-/** A scanned page at 1400 px JPEG is ~150–300 KB of base64; keep one request < ~4 MB. */
-const MAX_IMAGE_BASE64_CHARS = 3_800_000;
+/**
+ * A scanned page at 1400 px JPEG is ~150–300 KB of base64. Keep one request
+ * comfortably under the 6 MB body cap AND small enough that a single Gemini
+ * call stays fast: ~1.6 M base64 chars is roughly 7–8 pages, so a long scanned
+ * book is sent in several small batches instead of one huge request that would
+ * time out or trip the free-tier quota.
+ */
+const MAX_IMAGE_BASE64_CHARS = 1_600_000;
 /** Upper bound on pages rendered for one action. */
 const MAX_SCAN_PAGES = 40;
 const SCAN_MAX_EDGE = 1400;
@@ -166,11 +172,12 @@ async function renderWindow(
   fromPage: number,
   maxPages: number,
   onProgress?: (progress: CyberDTPdfProgress) => void,
+  endPage?: number,
 ): Promise<{ images: CyberDTPdfImage[]; fromPage: number; toPage: number }> {
   const images: CyberDTPdfImage[] = [];
   let totalChars = 0;
   let toPage = fromPage - 1;
-  const last = Math.min(doc.numPages, fromPage + maxPages - 1);
+  const last = Math.min(doc.numPages, endPage ?? fromPage + maxPages - 1);
 
   for (let page = fromPage; page <= last; page++) {
     onProgress?.({ phase: "rendering", page, pageCount: doc.numPages });
@@ -257,6 +264,26 @@ export async function renderCyberDTPdfFromPage(
   const doc = await openPdf(file);
   const start = Math.max(1, Math.min(fromPage, doc.numPages));
   const rendered = await renderWindow(doc, start, MAX_SCAN_PAGES, onProgress);
+  void doc.destroy();
+  return rendered;
+}
+
+/**
+ * Renders an explicit page range [fromPage, toPage] to images, honouring the
+ * same per-request size budget. Used by the batched "generate the full note"
+ * flow: a long scan is split into several small ranges so each request stays
+ * fast and never overloads the free-tier quota.
+ */
+export async function renderCyberDTPdfRange(
+  file: File,
+  fromPage: number,
+  toPage: number,
+  onProgress?: (progress: CyberDTPdfProgress) => void,
+): Promise<{ images: CyberDTPdfImage[]; fromPage: number; toPage: number }> {
+  const doc = await openPdf(file);
+  const start = Math.max(1, Math.min(fromPage, doc.numPages));
+  const end = Math.max(start, Math.min(toPage, doc.numPages));
+  const rendered = await renderWindow(doc, start, MAX_SCAN_PAGES, onProgress, end);
   void doc.destroy();
   return rendered;
 }

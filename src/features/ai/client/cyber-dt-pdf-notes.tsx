@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import {
   FileText,
   GraduationCap,
   Layers,
   ListChecks,
   Loader2,
+  RefreshCw,
   ScanLine,
   Send,
   Sparkles,
@@ -16,7 +17,7 @@ import { CyberDTMessageBody } from "@/features/ai/client/cyber-dt-markdown";
 import {
   CYBER_DT_PDF_ACCEPT,
   analyzeCyberDTPdf,
-  renderCyberDTPdfFromPage,
+  renderCyberDTPdfRange,
   type CyberDTPdfProgress,
   type CyberDTPdfSource,
 } from "@/features/ai/client/cyber-dt-pdf";
@@ -42,15 +43,55 @@ const API_BASE = (() => {
 
 const NO_KEY_MESSAGE =
   "The server has no Gemini key configured, so this tool cannot run right now. Ask your question in the main Cyber DT chat instead.";
-const BUSY_MESSAGE = "The AI is busy right now. Please try again in a moment.";
+/**
+ * Friendly, bilingual "the AI is busy" message. The backend already retries
+ * 3× with backoff, so seeing this means the whole free tier was busy at once —
+ * it is worth one more try a few seconds later, so the UI retries by itself and
+ * also offers a button.
+ */
+const BUSY_MESSAGE =
+  "AI එක දැන් කාර්යබහුලයි 😕 — තත්පර කිහිපයකින් නැවත උත්සාහ කරන්න. (The AI is busy right now — please try again in a few seconds.)";
 const OFFLINE_MESSAGE = "Could not reach the AI. Check your connection and try again.";
 const BAD_FILE_MESSAGE = "That file could not be read as a PDF. Please upload it again.";
+
+/** How long the UI waits before retrying a busy request by itself. */
+const AUTO_RETRY_SECONDS = 6;
+/** Upper bound on batches when generating a full note from a long scan. */
+const MAX_BATCHES = 6;
 
 type PdfMode = "note" | "teach" | "quiz" | "flashcards" | "ask";
 
 interface ThreadTurn {
   q: string;
   a: string;
+}
+
+/** One parsed reply from the /pdf-note route. */
+interface PdfReply {
+  ok: boolean;
+  text: string;
+  error: string;
+  busy: boolean;
+  status: number;
+}
+
+async function postPdfNote(payload: Record<string, unknown>): Promise<PdfReply> {
+  const res = await fetch(`${API_BASE}/pdf-note`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => null);
+  if (res.ok && data?.ok && typeof data.text === "string" && data.text.trim()) {
+    return { ok: true, text: data.text.trim(), error: "", busy: false, status: res.status };
+  }
+  return {
+    ok: false,
+    text: "",
+    error: typeof data?.error === "string" ? data.error : "",
+    busy: Boolean(data?.busy) || res.status >= 500,
+    status: typeof data?.status === "number" ? data.status : res.status,
+  };
 }
 
 function formatSize(bytes: number): string {
@@ -83,22 +124,68 @@ export function CyberDTPdfNotes() {
   const [pdfError, setPdfError] = useState("");
   const [subject, setSubject] = useState("");
   const [language, setLanguage] = useState<"English" | "Sinhala">("English");
-  const [startPage, setStartPage] = useState("1");
+  const [rangeFrom, setRangeFrom] = useState("1");
+  const [rangeTo, setRangeTo] = useState("");
 
   const [result, setResult] = useState<{ mode: PdfMode; text: string } | null>(null);
   const [thread, setThread] = useState<ThreadTurn[]>([]);
   const [loading, setLoading] = useState<PdfMode | null>(null);
   const [error, setError] = useState("");
+  /** True when the current error is a transient "AI busy" error. */
+  const [busy, setBusy] = useState(false);
+  /** Countdown shown while the UI waits to auto-retry a busy request. */
+  const [autoRetryIn, setAutoRetryIn] = useState<number | null>(null);
+  /** Progress of the multi-batch "generate the full note" flow. */
+  const [batch, setBatch] = useState<{ current: number; total: number } | null>(null);
 
   const [question, setQuestion] = useState("");
   const fileRef = useRef<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** The last action, replayed by the "Try again" button and auto-retry. */
+  const retryRef = useRef<(() => void) | null>(null);
+  const countdownRef = useRef(0);
 
   const resetOutput = () => {
     setResult(null);
     setThread([]);
     setError("");
+    setBusy(false);
+    setBatch(null);
   };
+
+  /** Flags a transient failure and remembers how to retry it. */
+  const raiseBusy = (retry: () => void) => {
+    retryRef.current = retry;
+    setError(BUSY_MESSAGE);
+    setBusy(true);
+  };
+
+  const clearError = () => {
+    setError("");
+    setBusy(false);
+  };
+
+  // Auto-retry a busy request after a short pause — the backend already tried
+  // 3×, so a few more seconds is usually enough for the free tier to recover.
+  useEffect(() => {
+    if (!busy) {
+      setAutoRetryIn(null);
+      return;
+    }
+    countdownRef.current = AUTO_RETRY_SECONDS;
+    setAutoRetryIn(AUTO_RETRY_SECONDS);
+    const iv = setInterval(() => {
+      countdownRef.current -= 1;
+      if (countdownRef.current <= 0) {
+        clearInterval(iv);
+        setAutoRetryIn(null);
+        retryRef.current?.();
+      } else {
+        setAutoRetryIn(countdownRef.current);
+      }
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [busy]);
 
   const onPickPdf = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -111,7 +198,8 @@ export function CyberDTPdfNotes() {
       const next = await analyzeCyberDTPdf(file, setProgress);
       fileRef.current = file;
       setSource(next);
-      setStartPage("1");
+      setRangeFrom("1");
+      setRangeTo(String(next.kind === "inline" ? "" : next.pageCount || ""));
       resetOutput();
     } catch (err) {
       fileRef.current = null;
@@ -123,17 +211,22 @@ export function CyberDTPdfNotes() {
     }
   };
 
-  const loadFromPage = async () => {
+  /** Reads a specific page range of a scan into the current working window. */
+  const loadRange = async () => {
     const file = fileRef.current;
     if (!file || pdfBusy || source?.kind !== "images") return;
-    const from = Math.max(1, Number.parseInt(startPage, 10) || 1);
+    const from = Math.max(1, Number.parseInt(rangeFrom, 10) || 1);
+    const to = Math.max(from, Number.parseInt(rangeTo, 10) || source.pageCount);
     setPdfError("");
     setPdfBusy(true);
     try {
-      const next = await renderCyberDTPdfFromPage(file, from, setProgress);
+      const next = await renderCyberDTPdfRange(file, from, to, setProgress);
       setSource({ ...source, ...next });
       // Pre-fill the next window so pressing Load again continues through the scan.
-      if (next.toPage < source.pageCount) setStartPage(String(next.toPage + 1));
+      if (next.toPage < source.pageCount) {
+        setRangeFrom(String(next.toPage + 1));
+        setRangeTo(String(source.pageCount));
+      }
       resetOutput();
     } catch (err) {
       setPdfError(err instanceof Error ? err.message : "Could not read that PDF.");
@@ -146,32 +239,31 @@ export function CyberDTPdfNotes() {
   const run = async (mode: Exclude<PdfMode, "ask">) => {
     if (!source || loading) return;
     setLoading(mode);
-    setError("");
+    clearError();
     try {
-      const res = await fetch(`${API_BASE}/pdf-note`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...sourceFields(source),
-          mode,
-          language,
-          subject: subject.trim(),
-        }),
+      const reply = await postPdfNote({
+        ...sourceFields(source),
+        mode,
+        language,
+        subject: subject.trim(),
       });
-      const data = await res.json().catch(() => null);
-      if (res.ok && data?.ok && typeof data.text === "string" && data.text.trim()) {
-        setResult({ mode, text: data.text.trim() });
+      if (reply.ok) {
+        setResult({ mode, text: reply.text });
         return;
       }
-      setError(
-        data?.error === "no_api_key"
-          ? NO_KEY_MESSAGE
-          : data?.error === "missing_pdf" ||
-              data?.error === "not_a_pdf" ||
-              data?.error === "unreadable_pdf"
-            ? BAD_FILE_MESSAGE
-            : BUSY_MESSAGE,
-      );
+      if (reply.error === "no_api_key") {
+        setError(NO_KEY_MESSAGE);
+        return;
+      }
+      if (
+        reply.error === "missing_pdf" ||
+        reply.error === "not_a_pdf" ||
+        reply.error === "unreadable_pdf"
+      ) {
+        setError(BAD_FILE_MESSAGE);
+        return;
+      }
+      raiseBusy(() => void run(mode));
     } catch {
       setError(OFFLINE_MESSAGE);
     } finally {
@@ -179,33 +271,98 @@ export function CyberDTPdfNotes() {
     }
   };
 
+  /**
+   * Generates a study note for a LONG scanned PDF in several small batches.
+   *
+   * Each batch renders only the pages that fit one request and is sent with
+   * partIndex/partTotal, so the route keeps every call small and the free-tier
+   * quota is never hammered by one giant prompt. The note is appended as each
+   * batch returns, so the student sees it grow.
+   */
+  const generateFullNote = async () => {
+    const file = fileRef.current;
+    if (!file || source?.kind !== "images" || loading) return;
+    const totalPages = source.pageCount;
+    const start = Math.max(1, Number.parseInt(rangeFrom, 10) || 1);
+    const end = Math.min(totalPages, Math.max(start, Number.parseInt(rangeTo, 10) || totalPages));
+    // How many pages the current window holds — a good estimate for a batch.
+    const perBatch = Math.max(1, source.images.length);
+    const batches = Math.min(MAX_BATCHES, Math.ceil((end - start + 1) / perBatch));
+
+    setLoading("note");
+    clearError();
+    setBatch({ current: 1, total: batches });
+    let acc = "";
+    let page = start;
+    try {
+      // Loop on the real page cursor (not the estimate) so a batch that ends
+      // up smaller than expected still gets its remaining pages covered.
+      for (let i = 1; page <= end && i <= MAX_BATCHES; i++) {
+        setBatch({ current: i, total: Math.max(batches, i) });
+        const chunkEnd = Math.min(end, page + perBatch - 1);
+        const rendered = await renderCyberDTPdfRange(file, page, chunkEnd, setProgress);
+        if (rendered.images.length === 0) break;
+
+        const isLast = rendered.toPage >= end || i >= MAX_BATCHES;
+        const reply = await postPdfNote({
+          images: rendered.images,
+          pageFrom: rendered.fromPage,
+          pageTo: rendered.toPage,
+          mode: "note",
+          language,
+          subject: subject.trim(),
+          partIndex: i,
+          partTotal: isLast ? i : Math.max(batches, i + 1),
+        });
+
+        if (!reply.ok) {
+          // Keep whatever was written so far, and offer a retry of the batch.
+          if (acc) setResult({ mode: "note", text: acc });
+          if (reply.error === "no_api_key") setError(NO_KEY_MESSAGE);
+          else raiseBusy(() => void generateFullNote());
+          return;
+        }
+
+        acc += (acc ? "\n\n---\n\n" : "") + reply.text;
+        setResult({ mode: "note", text: acc });
+        page = rendered.toPage + 1;
+      }
+    } catch {
+      if (acc) setResult({ mode: "note", text: acc });
+      setError(OFFLINE_MESSAGE);
+    } finally {
+      setLoading(null);
+      setBatch(null);
+      setProgress(null);
+    }
+  };
+
   const doAsk = async (q: string) => {
     if (!source || !q || loading) return;
     setLoading("ask");
-    setError("");
+    clearError();
     try {
-      const res = await fetch(`${API_BASE}/pdf-note`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...sourceFields(source),
-          mode: "ask",
-          language,
-          subject: subject.trim(),
-          question: q,
-          history: thread.flatMap((t) => [
-            { role: "user", text: t.q },
-            { role: "ai", text: t.a },
-          ]),
-        }),
+      const reply = await postPdfNote({
+        ...sourceFields(source),
+        mode: "ask",
+        language,
+        subject: subject.trim(),
+        question: q,
+        history: thread.flatMap((t) => [
+          { role: "user", text: t.q },
+          { role: "ai", text: t.a },
+        ]),
       });
-      const data = await res.json().catch(() => null);
-      if (res.ok && data?.ok && typeof data.text === "string" && data.text.trim()) {
-        setThread((prev) => [...prev, { q, a: data.text.trim() }]);
+      if (reply.ok) {
+        setThread((prev) => [...prev, { q, a: reply.text }]);
         setQuestion("");
         return;
       }
-      setError(data?.error === "no_api_key" ? NO_KEY_MESSAGE : BUSY_MESSAGE);
+      if (reply.error === "no_api_key") {
+        setError(NO_KEY_MESSAGE);
+        return;
+      }
+      raiseBusy(() => void doAsk(q));
     } catch {
       setError(OFFLINE_MESSAGE);
     } finally {
@@ -322,33 +479,64 @@ export function CyberDTPdfNotes() {
         )}
 
         {source?.kind === "images" && (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-cyan-500/20 bg-[#0b1220] p-2.5">
-            <span className="text-xs text-cyan-300/80">
-              This PDF has no text layer (it is a scan), so it is read as page images
+          <div className="space-y-2 rounded-lg border border-cyan-500/20 bg-[#0b1220] p-2.5">
+            <p className="text-xs text-cyan-300/80">
+              This PDF has no text layer (it is a scan), so it is read as page images — about{" "}
+              {Math.max(1, source.images.length)} pages per request, so the AI is never overloaded.
               {source.pageCount > source.toPage
-                ? ` — pages ${source.fromPage}–${source.toPage} of ${source.pageCount} for each action. Load from a later page to cover the rest.`
-                : " — all pages."}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="text-xs text-cyan-400/70">Read from page</span>
-              <input
-                type="number"
-                min={1}
-                max={Math.max(1, source.pageCount)}
-                value={startPage}
-                onChange={(e) => setStartPage(e.target.value)}
-                disabled={pdfBusy}
-                className="w-16 rounded-md border border-cyan-500/30 bg-[#080D18] px-2 py-1 text-xs text-cyan-50 focus:border-cyan-400/60 focus:outline-none"
-              />
+                ? ` Currently loaded: pages ${source.fromPage}–${source.toPage} of ${source.pageCount}.`
+                : " All pages are loaded."}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="flex items-center gap-1.5">
+                <span className="text-xs text-cyan-400/70">Pages</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={Math.max(1, source.pageCount)}
+                  value={rangeFrom}
+                  onChange={(e) => setRangeFrom(e.target.value)}
+                  disabled={pdfBusy}
+                  aria-label="From page"
+                  className="w-16 rounded-md border border-cyan-500/30 bg-[#080D18] px-2 py-1 text-xs text-cyan-50 focus:border-cyan-400/60 focus:outline-none"
+                />
+                <span className="text-xs text-cyan-400/70">to</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={Math.max(1, source.pageCount)}
+                  value={rangeTo}
+                  onChange={(e) => setRangeTo(e.target.value)}
+                  disabled={pdfBusy}
+                  aria-label="To page"
+                  placeholder={String(source.pageCount)}
+                  className="w-16 rounded-md border border-cyan-500/30 bg-[#080D18] px-2 py-1 text-xs text-cyan-50 placeholder:text-cyan-400/40 focus:border-cyan-400/60 focus:outline-none"
+                />
+              </span>
               <button
                 type="button"
-                onClick={() => void loadFromPage()}
-                disabled={pdfBusy}
+                onClick={() => void loadRange()}
+                disabled={pdfBusy || loading !== null}
                 className="rounded-md border border-cyan-400/50 bg-cyan-500/10 px-2.5 py-1 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20 disabled:opacity-50"
               >
-                Load
+                Load these pages
               </button>
-            </span>
+              <button
+                type="button"
+                onClick={() => void generateFullNote()}
+                disabled={pdfBusy || loading !== null}
+                className="flex items-center gap-1.5 rounded-md border border-violet-400/50 bg-violet-500/15 px-2.5 py-1 text-xs font-semibold text-violet-200 transition hover:border-violet-300 hover:bg-violet-500/25 disabled:opacity-50"
+              >
+                {batch ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                Generate full note (all pages)
+              </button>
+            </div>
+            {batch && (
+              <p className="text-xs text-violet-200/90">
+                Reading the document in {batch.total} small batches — batch {batch.current} of{" "}
+                {batch.total}…
+              </p>
+            )}
           </div>
         )}
 
@@ -369,7 +557,13 @@ export function CyberDTPdfNotes() {
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => run("note")}
+              onClick={() => {
+                if (source.kind === "images" && source.pageCount > source.images.length) {
+                  void generateFullNote();
+                } else {
+                  void run("note");
+                }
+              }}
               disabled={loading !== null || pdfBusy}
               className="flex shrink-0 items-center gap-2 rounded-lg bg-cyan-500/80 px-4 py-2 text-sm font-semibold text-[#080D18] transition hover:bg-cyan-400 disabled:opacity-40"
             >
@@ -378,7 +572,11 @@ export function CyberDTPdfNotes() {
               ) : (
                 <Sparkles className="h-4 w-4" />
               )}
-              {loading === "note" ? "Writing your note…" : "Generate Study Note"}
+              {loading === "note"
+                ? batch
+                  ? `Reading batches… (${batch.current}/${batch.total})`
+                  : "Writing your note…"
+                : "Generate Study Note"}
             </button>
           </div>
         )}
@@ -416,9 +614,31 @@ export function CyberDTPdfNotes() {
       {loading === "flashcards" && <LoadingNote label="Building flashcards from your PDF…" />}
 
       {error && (
-        <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
-          {error}
-        </p>
+        <div
+          className={`space-y-2 rounded-lg border p-3 text-sm ${
+            busy ? "border-amber-500/40 bg-amber-500/10 text-amber-100" : "border-rose-500/30 bg-rose-500/10 text-rose-200"
+          }`}
+        >
+          <p>{error}</p>
+          {busy && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => retryRef.current?.()}
+                disabled={loading !== null || pdfBusy}
+                className="flex items-center gap-1.5 rounded-lg bg-amber-500/90 px-3 py-1.5 text-xs font-bold text-[#2a1a00] transition hover:bg-amber-400 disabled:opacity-50"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+                නැවත උත්සාහ කරන්න · Try again
+              </button>
+              {autoRetryIn !== null && loading === null && (
+                <span className="text-xs text-amber-200/80">
+                  Auto-retrying in {autoRetryIn}s…
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {result && (

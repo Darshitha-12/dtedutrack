@@ -89,7 +89,8 @@ const API_BASE = (() => {
 
 const NO_KEY_MESSAGE =
   "The server has no Gemini key configured, so this tool cannot run right now. Ask your question in the main Cyber DT chat instead.";
-const BUSY_MESSAGE = "The AI is busy right now. Please try again in a moment.";
+const BUSY_MESSAGE =
+  "AI එක දැන් කාර්යබහුලයි 😕 — තත්පර කිහිපයකින් නැවත උත්සාහ කරන්න. (The AI is busy right now — please try again in a few seconds.)";
 const OFFLINE_MESSAGE = "Could not reach the AI. Check your connection and try again.";
 
 const SUBJECTS = ["Biology", "Physics", "Chemistry"] as const;
