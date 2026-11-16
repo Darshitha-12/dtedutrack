@@ -52,6 +52,12 @@ const CORS: Record<string, string> = {
 const TOTAL_BUDGET_MS = 22_000;
 
 /**
+ * Release marker, returned by GET so a deploy can be verified from outside.
+ * Bump this whenever the Cyber DT routes change.
+ */
+const CYBER_DT_REV = "2026-11-16-retry-chunking";
+
+/**
  * How many models to ask at the same time. Free-tier quota is per model, so
  * racing a few both hides a single busy model and gives the student the
  * FASTEST answer instead of the sum of a sequential chain. The retry wave then
@@ -65,9 +71,13 @@ export async function OPTIONS() {
 
 export async function GET() {
   // Cheap status check: lets the chat page know whether the server has a
-  // Gemini key configured, without making a real API call.
+  // Gemini key configured, without making a real API call. `rev` also lets a
+  // deploy be verified from outside (it changes with each release).
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
-  return NextResponse.json({ ok: true, serverKey: Boolean(apiKey) }, { headers: CORS });
+  return NextResponse.json(
+    { ok: true, serverKey: Boolean(apiKey), rev: CYBER_DT_REV },
+    { headers: CORS },
+  );
 }
 
 export async function POST(req: NextRequest) {
