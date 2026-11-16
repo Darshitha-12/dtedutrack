@@ -157,8 +157,11 @@ async function typeOutAnswer(
     onDelta(full);
     return;
   }
-  const CHUNK = 30; // characters per tick
-  const TICK = 12; // ms per tick — ~2,500 chars/s
+  // Reveal fast: a long study plan is already fully written by the time it
+  // arrives, so a slow typewriter just adds seconds of pointless waiting.
+  // Short answers type out at a readable pace; long ones appear almost at once.
+  const CHUNK = full.length > 4_000 ? 180 : 45; // characters per tick
+  const TICK = 8; // ms per tick — short ~5,600 chars/s, long ~22,000 chars/s
   let shown = 0;
   while (shown < full.length && !signal?.aborted) {
     shown = Math.min(shown + CHUNK, full.length);
@@ -806,7 +809,9 @@ export function CyberDTChat({
       desc
         ? `- My extra instructions (VERY IMPORTANT — the whole plan must follow these; where they conflict with the defaults above, these win): ${desc}`
         : "",
-      "Make it a realistic plan as a markdown table (date, subject + topic/unit, activity type — learning / revising / past papers — and time blocks). Split my daily hours across the subjects and rotate them so every subject appears several times a week. Include weekly goals, rest days, and 2-3 full past-paper days near the exam.",
+      "Make it a realistic DAILY ROUTINE plan as a markdown table (date/day, time block with real clock times like 06:30–08:00, subject + topic/unit, activity type — learning / revising / past papers).",
+      "MUST include the full day: wake-up time, BREAKFAST, LUNCH, DINNER, short 10-15 min breaks between sessions, an evening rest/relax time and a sleep time — as their own rows in the table. Never put study across a meal or sleep time, and fit meals/rest around my school, class and tuition times.",
+      "Split my daily hours across the subjects and rotate them so every subject appears several times a week. Include weekly goals, rest days, and 2-3 full past-paper days near the exam.",
       "If there is more than 2 months until my exam, first give a short phase-by-phase overview (what each month/week focuses on) and then the detailed day-wise table for the FINAL 4 weeks before the exam — do NOT try to list every single day of a very long period.",
       `Reply fully in ${planReplyLanguage}.`,
     ]

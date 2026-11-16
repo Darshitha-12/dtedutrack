@@ -55,7 +55,7 @@ const TOTAL_BUDGET_MS = 22_000;
  * Release marker, returned by GET so a deploy can be verified from outside.
  * Bump this whenever the Cyber DT routes change.
  */
-const CYBER_DT_REV = "2026-11-16-retry-chunking";
+const CYBER_DT_REV = "2026-11-16-plan-meals-fast";
 
 /**
  * How many models to ask at the same time. Free-tier quota is per model, so
@@ -63,7 +63,15 @@ const CYBER_DT_REV = "2026-11-16-retry-chunking";
  * FASTEST answer instead of the sum of a sequential chain. The retry wave then
  * moves the window along the chain so it reaches models the first wave missed.
  */
-const MAX_PARALLEL = 3;
+const MAX_PARALLEL = 4;
+
+/**
+ * Ceiling for one wave of models. A long study plan can take 15–20 s to write,
+ * so a shorter cap would cut every model off mid-plan and force a retry — which
+ * is exactly what made the bot feel slow. The wave still returns the moment the
+ * fastest model finishes, so this is only an upper bound.
+ */
+const PER_ATTEMPT_MS = 18_000;
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS });
@@ -122,7 +130,7 @@ export async function POST(req: NextRequest) {
     const result = await callCyberDTGeminiWithRetry(apiKey, requestBody, {
       timeoutMs: TOTAL_BUDGET_MS,
       attempts: 3,
-      perAttemptMs: 12_000,
+      perAttemptMs: PER_ATTEMPT_MS,
       raceCount: MAX_PARALLEL,
     });
 
