@@ -388,6 +388,9 @@ export function CyberDTChat({
   const voiceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const voiceSessionRef = useRef(0);
   const voiceSpeechEndRef = useRef<(() => void) | null>(null);
+  // Consecutive listens that heard no words at all. A blocked/silent input
+  // device otherwise loops "Listening…" forever with no explanation.
+  const voiceSilentRef = useRef(0);
   // Gemini API key state: server-configured key or a key pasted by the user.
   const [serverHasKey, setServerHasKey] = useState(false);
   const [localHasKey, setLocalHasKey] = useState(false);
@@ -1308,7 +1311,12 @@ export function CyberDTChat({
         return;
       }
       if (code === "network") {
-        setVoiceError("Speech recognition needs an internet connection.");
+        // Chrome/Edge transcribe on Google's servers, so no internet means no
+        // words — ever. Stop the loop instead of spinning silently.
+        failVoiceCall(
+          "Speech recognition needs an internet connection (the browser sends the audio to Google). Connect and tap Try again.",
+        );
+        return;
       }
       if (code === "language-not-supported") {
         // Chrome has no Sinhala recogniser in every region — fall back to English
@@ -1326,10 +1334,25 @@ export function CyberDTChat({
       const said = `${finalText} ${interimText}`.trim();
       if (said && !handled) {
         handled = true;
+        voiceSilentRef.current = 0;
         void handleUtterance(said);
-      } else {
-        scheduleListen(600);
+        return;
       }
+      // Nothing at all was heard. Usually a quiet/silent input device or the
+      // wrong mic selected in Windows — say so instead of looping forever.
+      voiceSilentRef.current += 1;
+      if (voiceSilentRef.current >= 4) {
+        failVoiceCall(
+          "The mic is open but I cannot hear any words. Check Windows Settings → System → Sound → Input: pick the right microphone and make sure its level bar moves while you talk. Then tap Try again.",
+        );
+        return;
+      }
+      if (voiceSilentRef.current === 2) {
+        setVoiceError(
+          "I have not heard any words yet. Speak a little louder and closer to the mic — or switch the mic in Windows Settings → Sound → Input.",
+        );
+      }
+      scheduleListen(400);
     };
 
     try {
@@ -1344,6 +1367,7 @@ export function CyberDTChat({
     voiceSessionRef.current += 1;
     voiceActiveRef.current = true;
     voiceMutedRef.current = false;
+    voiceSilentRef.current = 0;
     setVoiceMuted(false);
     setVoiceHeard("");
     setVoiceReply("");
