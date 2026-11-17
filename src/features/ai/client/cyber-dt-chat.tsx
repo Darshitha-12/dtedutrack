@@ -21,6 +21,11 @@ import {
   Plus,
   ImagePlus,
   X,
+  Phone,
+  PhoneOff,
+  Mic,
+  MicOff,
+  AudioLines,
 } from "lucide-react";
 import { useT, useLanguage } from "@/lib/language-context";
 import {
@@ -38,6 +43,7 @@ import {
   geminiStreamEndpoint,
   cyberDTModelChain,
   parseSSEBuffer,
+  CYBER_DT_VOICE_PROMPT,
 } from "@/features/ai/cyber-dt-shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -152,8 +158,9 @@ async function typeOutAnswer(
   full: string,
   onDelta: (fullSoFar: string) => void,
   signal?: AbortSignal | null,
+  instant?: boolean,
 ): Promise<void> {
-  if (full.length <= 480) {
+  if (instant || full.length <= 480) {
     onDelta(full);
     return;
   }
@@ -182,6 +189,8 @@ async function readAnswerStream(
   mapEvent: SSEEventMapper,
   onDelta: (fullSoFar: string) => void,
   onServerBusy?: () => void,
+  /** Reveal the answer at once instead of running the typewriter (voice mode). */
+  instant?: boolean,
 ): Promise<string | null> {
   const res = await fetch(url, init);
   const contentType = res.headers.get("content-type") || "";
@@ -211,7 +220,7 @@ async function readAnswerStream(
   const data = await res.json().catch(() => null);
   if (data && data.ok && typeof data.text === "string" && data.text.trim()) {
     const full = data.text.trim();
-    await typeOutAnswer(full, onDelta, init.signal);
+    await typeOutAnswer(full, onDelta, init.signal, instant);
     return full;
   }
   // The route answered, but couldn't get an AI reply (busy/out of quota).
@@ -219,6 +228,96 @@ async function readAnswerStream(
   // a wrong offline answer.
   if (data && data.busy) onServerBusy?.();
   return null;
+}
+
+// ===== Live Voice Tutor helpers =============================================
+
+type VoicePhase = "connecting" | "listening" | "thinking" | "speaking" | "error";
+
+interface SpeechRecognitionAlternativeLike {
+  transcript: string;
+  confidence: number;
+}
+interface SpeechRecognitionResultLike {
+  isFinal: boolean;
+  length: number;
+  [index: number]: SpeechRecognitionAlternativeLike;
+}
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: SpeechRecognitionResultLike;
+  };
+}
+interface SpeechRecognitionErrorEventLike {
+  error?: string;
+  message?: string;
+}
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  onstart: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+}
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
+/** Chrome/Edge expose the Web Speech API behind a webkit prefix. */
+function getSpeechRecognitionCtor(): SpeechRecognitionCtor | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
+
+/** Strips markdown so the text-to-speech engine reads words, not symbols. */
+function speechFriendly(markdown: string): string {
+  return markdown
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+[.)]\s+/gm, "")
+    .replace(/^\s*\|.*\|\s*$/gm, " ")
+    .replace(/[*_~#>|]+/g, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{2,}/g, ". ")
+    .replace(/\n/g, " ")
+    .trim();
+}
+
+/** Chooses a natural voice for the spoken language. */
+function pickVoice(voices: SpeechSynthesisVoice[], sinhala: boolean): SpeechSynthesisVoice | undefined {
+  if (sinhala) {
+    return (
+      voices.find((v) => v.lang.toLowerCase().startsWith("si")) ??
+      voices.find((v) => v.name.toLowerCase().includes("sinhala"))
+    );
+  }
+  return (
+    voices.find((v) => v.lang === "en-US" && /google/i.test(v.name)) ??
+    voices.find((v) => v.lang === "en-US") ??
+    voices.find((v) => v.lang.toLowerCase().startsWith("en"))
+  );
+}
+
+interface SendOptions {
+  noUserMessage?: boolean;
+  historyOverride?: Array<{ role: string; text: string }>;
+  image?: CyberDTImageAttachment | null;
+  /** Live Voice Tutor: ask for a short spoken-style answer. */
+  voice?: boolean;
 }
 
 export function CyberDTChat({
@@ -235,6 +334,28 @@ export function CyberDTChat({
   const listRef = useRef<HTMLDivElement>(null);
   const timers = useRef<NodeJS.Timeout[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  // ===== Live Voice Tutor =====
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [voicePhase, setVoicePhase] = useState<VoicePhase>("connecting");
+  const [voiceMuted, setVoiceMuted] = useState(false);
+  const [voiceLang, setVoiceLang] = useState<"en-US" | "si-LK">(locale === "si" ? "si-LK" : "en-US");
+  const [voiceHeard, setVoiceHeard] = useState("");
+  const [voiceReply, setVoiceReply] = useState("");
+  const [voiceError, setVoiceError] = useState("");
+  // Refs that let the voice loop always see the newest chat + send().
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
+  const sendRef = useRef<(raw: string, opts?: SendOptions) => Promise<string>>(async () => "");
+  // Live Voice Tutor engine refs — the loop lives outside React's render cycle.
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voiceActiveRef = useRef(false);
+  const voiceMutedRef = useRef(false);
+  const voiceLangRef = useRef<"en-US" | "si-LK">(voiceLang);
+  const voicePhaseRef = useRef<VoicePhase>(voicePhase);
+  voicePhaseRef.current = voicePhase;
+  const voiceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceSessionRef = useRef(0);
+  const voiceSpeechEndRef = useRef<(() => void) | null>(null);
   // Gemini API key state: server-configured key or a key pasted by the user.
   const [serverHasKey, setServerHasKey] = useState(false);
   const [localHasKey, setLocalHasKey] = useState(false);
@@ -436,14 +557,7 @@ export function CyberDTChat({
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, isTyping]);
 
-  const send = async (
-    raw: string,
-    opts?: {
-      noUserMessage?: boolean;
-      historyOverride?: Array<{ role: string; text: string }>;
-      image?: CyberDTImageAttachment | null;
-    },
-  ) => {
+  const send = async (raw: string, opts?: SendOptions): Promise<string> => {
     const image = opts?.image ?? null;
     // An image alone is a valid question ("explain this diagram").
     const text =
@@ -453,7 +567,7 @@ export function CyberDTChat({
           ? "මේ පින්තූරයේ ඇති දේ NIE Resource Book එකට අනුව පැහැදිලි කරන්න."
           : "Explain this image according to the NIE resource book."
         : "");
-    if (!text || isTyping) return;
+    if (!text || isTyping) return "";
 
     const history =
       opts?.historyOverride ?? messages.slice(-10).map((m) => ({ role: m.role, text: m.text }));
@@ -515,6 +629,7 @@ export function CyberDTChat({
             message: text,
             history,
             ...(image ? { image: { mimeType: image.mimeType, data: image.base64 } } : {}),
+            ...(opts?.voice ? { mode: "voice" } : {}),
           }),
           signal: controller.signal,
         },
@@ -526,6 +641,7 @@ export function CyberDTChat({
         () => {
           serverBusy = true;
         },
+        opts?.voice,
       );
       if (!answer) serverFailed = true;
     } catch {
@@ -553,12 +669,15 @@ export function CyberDTChat({
                   history,
                   text,
                   image ? { mimeType: image.mimeType, data: image.base64 } : undefined,
+                  opts?.voice ? CYBER_DT_VOICE_PROMPT : undefined,
                 ),
               ),
               signal: controller.signal,
             },
             (event) => extractGeminiStreamDelta(event),
             onDelta,
+            undefined,
+            opts?.voice,
           );
           if (answer) break;
           // Most likely rate-limited on this model — the loop tries the next.
@@ -582,13 +701,14 @@ export function CyberDTChat({
         setIsTyping(false);
         abortRef.current = null;
       }
-      return;
+      return aiText.trim();
     }
 
     // 3) No AI answer. If the AI itself was busy (the device is online), say so
     //    honestly and offer a retry — an offline answer would ignore the actual
     //    question. Otherwise (truly offline / no key) use the built-in
     //    knowledge base, replying in the detected language.
+    let finalText: string;
     if (!answer && !aiText.trim()) {
       const aiResponse = serverBusy
         ? getCyberDTAIBusyResponse(replyLocale)
@@ -607,13 +727,20 @@ export function CyberDTChat({
             : m,
         ),
       );
+      finalText = kbText;
     } else {
-      finishStreaming(answer ?? aiText);
+      finalText = answer ?? aiText;
+      finishStreaming(finalText);
     }
 
     setIsTyping(false);
     if (abortRef.current === controller) abortRef.current = null;
+    return finalText;
   };
+
+  // The voice loop runs outside React's render cycle, so it always calls the
+  // newest send() through this ref (never a stale closure).
+  sendRef.current = send;
 
   // Kick-off prompt from the feature panel (quiz, essay evaluator, flashcards,
   // organic pathways, study notes). Sent once after the chat has seeded, with
@@ -926,6 +1053,322 @@ export function CyberDTChat({
     setAttachError("");
     void send(input, image ? { image } : undefined);
   };
+
+  // ===== Live Voice Tutor engine ============================================
+  // A hands-free loop: SpeechRecognition hears a sentence → send() asks the
+  // same /api/cyber-dt route for a short spoken-style answer → speechSynthesis
+  // reads it back → listening restarts. The mic is always stopped while the
+  // answer is being written or spoken so the tutor never hears itself.
+
+  const clearVoiceTimer = () => {
+    if (voiceTimerRef.current) {
+      clearTimeout(voiceTimerRef.current);
+      voiceTimerRef.current = null;
+    }
+  };
+
+  const stopRecognition = () => {
+    const rec = recognitionRef.current;
+    recognitionRef.current = null;
+    if (!rec) return;
+    try {
+      rec.onresult = null;
+      rec.onerror = null;
+      rec.onend = null;
+      rec.onstart = null;
+      rec.abort();
+    } catch {
+      /* already stopped */
+    }
+  };
+
+  // Stops the loop but keeps the overlay open so the reason stays readable.
+  const failVoiceCall = (message: string) => {
+    voiceActiveRef.current = false;
+    clearVoiceTimer();
+    stopRecognition();
+    setVoiceError(message);
+    setVoicePhase("error");
+  };
+
+  const speakText = (text: string) =>
+    new Promise<void>((resolve) => {
+      const synth = typeof window === "undefined" ? null : window.speechSynthesis;
+      const spoken = speechFriendly(text);
+      if (!synth || !spoken) {
+        resolve();
+        return;
+      }
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        voiceSpeechEndRef.current = null;
+        resolve();
+      };
+      voiceSpeechEndRef.current = finish;
+      try {
+        synth.cancel();
+      } catch {
+        /* ignore */
+      }
+      const utter = new SpeechSynthesisUtterance(spoken);
+      const sinhala = /[\u0D80-\u0DFF]/.test(spoken);
+      const voice = pickVoice(synth.getVoices(), sinhala);
+      if (voice) utter.voice = voice;
+      utter.lang = voice?.lang || (sinhala ? "si-LK" : "en-US");
+      utter.rate = 1;
+      utter.pitch = 1;
+      utter.volume = 1;
+      // A stuck utterance must never leave the call muted forever.
+      const guard = setTimeout(finish, Math.min(90_000, 6_000 + spoken.length * 110));
+      const clearGuard = () => clearTimeout(guard);
+      utter.onend = () => {
+        clearGuard();
+        finish();
+      };
+      utter.onerror = () => {
+        clearGuard();
+        finish();
+      };
+      if (voiceActiveRef.current) setVoicePhase("speaking");
+      try {
+        synth.speak(utter);
+      } catch {
+        clearGuard();
+        finish();
+      }
+    });
+
+  const scheduleListen = (delay = 400) => {
+    clearVoiceTimer();
+    voiceTimerRef.current = setTimeout(() => {
+      voiceTimerRef.current = null;
+      if (!voiceActiveRef.current) return;
+      if (voiceMutedRef.current) {
+        setVoicePhase("listening");
+        return;
+      }
+      beginListening();
+    }, delay);
+  };
+
+  const handleUtterance = async (said: string) => {
+    if (!voiceActiveRef.current) return;
+    const session = voiceSessionRef.current;
+    clearVoiceTimer();
+    setVoiceError("");
+    setVoiceHeard(said);
+    setVoiceReply("");
+    setVoicePhase("thinking");
+    // History is read from the live chat so follow-up questions keep context.
+    const history = messagesRef.current.slice(-10).map((m) => ({ role: m.role, text: m.text }));
+    let reply = "";
+    try {
+      reply = await sendRef.current(said, { voice: true, historyOverride: history });
+    } catch {
+      reply = "";
+    }
+    // A newer call (or End Call) replaced this one while the answer was in flight.
+    if (session !== voiceSessionRef.current || !voiceActiveRef.current) return;
+    if (!reply.trim()) reply = "Sorry, I did not catch an answer to that. Could you say it again?";
+    setVoiceReply(reply);
+    await speakText(reply);
+    if (session !== voiceSessionRef.current || !voiceActiveRef.current) return;
+    setVoicePhase("listening");
+    scheduleListen(300);
+  };
+
+  function beginListening() {
+    if (!voiceActiveRef.current || voiceMutedRef.current) return;
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) {
+      setVoiceError("Live voice needs Chrome or Edge — this browser has no speech recognition.");
+      setVoicePhase("error");
+      return;
+    }
+    stopRecognition();
+    const rec = new Ctor();
+    rec.lang = voiceLangRef.current;
+    rec.continuous = false;
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+    recognitionRef.current = rec;
+
+    let finalText = "";
+    let interimText = "";
+    let handled = false;
+
+    rec.onstart = () => {
+      if (voiceActiveRef.current && !voiceMutedRef.current) setVoicePhase("listening");
+    };
+    rec.onresult = (event) => {
+      interimText = "";
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        const alt = result?.[0];
+        if (!alt) continue;
+        if (result.isFinal) finalText += `${alt.transcript} `;
+        else interimText += alt.transcript;
+      }
+      const heard = `${finalText} ${interimText}`.trim();
+      if (heard) setVoiceHeard(heard);
+    };
+    rec.onerror = (event) => {
+      const code = event?.error || "";
+      if (code === "not-allowed" || code === "service-not-allowed") {
+        failVoiceCall("Microphone access was blocked. Allow the mic in the address bar, then start again.");
+        return;
+      }
+      if (code === "audio-capture") {
+        failVoiceCall("No microphone was found. Connect one and start again.");
+        return;
+      }
+      if (code === "network") {
+        setVoiceError("Speech recognition needs an internet connection.");
+      }
+      if (code === "language-not-supported") {
+        // Chrome has no Sinhala recogniser in every region — fall back to English
+        // rather than leaving the call stuck.
+        voiceLangRef.current = "en-US";
+        setVoiceLang("en-US");
+        setVoiceError("Sinhala speech recognition is not available here — switched to English.");
+      }
+      // "no-speech" / "aborted" are normal — onend restarts the loop.
+    };
+    rec.onend = () => {
+      if (recognitionRef.current !== rec) return;
+      recognitionRef.current = null;
+      if (!voiceActiveRef.current) return;
+      const said = `${finalText} ${interimText}`.trim();
+      if (said && !handled) {
+        handled = true;
+        void handleUtterance(said);
+      } else {
+        scheduleListen(600);
+      }
+    };
+
+    try {
+      rec.start();
+    } catch {
+      // Chrome throws if start() races a previous stop().
+      scheduleListen(900);
+    }
+  }
+
+  const startVoiceCall = () => {
+    voiceSessionRef.current += 1;
+    voiceActiveRef.current = true;
+    voiceMutedRef.current = false;
+    setVoiceMuted(false);
+    setVoiceHeard("");
+    setVoiceReply("");
+    setVoiceError("");
+    setVoicePhase("connecting");
+    setVoiceOpen(true);
+    // Chrome loads the voice list asynchronously — warm it before the first reply.
+    try {
+      window.speechSynthesis?.getVoices();
+    } catch {
+      /* ignore */
+    }
+    if (!getSpeechRecognitionCtor()) {
+      failVoiceCall("Live voice needs Chrome or Edge — this browser has no speech recognition.");
+      return;
+    }
+    // Small delay so the overlay is on screen before the mic prompt appears.
+    scheduleListen(500);
+  };
+
+  function endVoiceCall() {
+    voiceActiveRef.current = false;
+    voiceSessionRef.current += 1;
+    clearVoiceTimer();
+    stopRecognition();
+    try {
+      voiceSpeechEndRef.current?.();
+    } catch {
+      /* ignore */
+    }
+    try {
+      window.speechSynthesis?.cancel();
+    } catch {
+      /* ignore */
+    }
+    // Cancel an answer that is still being written for this call.
+    if (abortRef.current) {
+      try {
+        abortRef.current.abort();
+      } catch {
+        /* ignore */
+      }
+    }
+    setVoiceOpen(false);
+    setVoicePhase("connecting");
+    setVoiceHeard("");
+    setVoiceReply("");
+    setVoiceError("");
+    setVoiceMuted(false);
+    voiceMutedRef.current = false;
+  }
+
+  const toggleVoiceMute = () => {
+    const next = !voiceMutedRef.current;
+    voiceMutedRef.current = next;
+    setVoiceMuted(next);
+    if (next) {
+      clearVoiceTimer();
+      stopRecognition();
+      if (voicePhaseRef.current !== "speaking" && voicePhaseRef.current !== "thinking") {
+        setVoicePhase("listening");
+      }
+      return;
+    }
+    if (!voiceActiveRef.current) return;
+    setVoiceError("");
+    if (voicePhaseRef.current !== "speaking" && voicePhaseRef.current !== "thinking") {
+      setVoicePhase("listening");
+      scheduleListen(200);
+    }
+  };
+
+  const changeVoiceLanguage = (lang: "en-US" | "si-LK") => {
+    setVoiceLang(lang);
+    voiceLangRef.current = lang;
+    if (!voiceActiveRef.current || voicePhaseRef.current !== "listening") return;
+    clearVoiceTimer();
+    stopRecognition();
+    scheduleListen(250);
+  };
+
+  // Tear the call down if the chat unmounts mid-conversation.
+  useEffect(
+    () => () => {
+      voiceActiveRef.current = false;
+      clearVoiceTimer();
+      stopRecognition();
+      try {
+        window.speechSynthesis?.cancel();
+      } catch {
+        /* ignore */
+      }
+    },
+    [],
+  );
+
+  const voiceStatus =
+    voicePhase === "thinking"
+      ? "Thinking..."
+      : voicePhase === "speaking"
+        ? "Speaking..."
+        : voicePhase === "listening"
+          ? voiceMuted
+            ? "Muted"
+            : "Listening..."
+          : voicePhase === "error"
+            ? "Microphone unavailable"
+            : "Connecting...";
 
   return (
     <div className="flex h-screen w-full flex-col bg-[#080D18] text-[#F1F5F9]">
@@ -1308,6 +1751,16 @@ export function CyberDTChat({
         <form onSubmit={(e) => { e.preventDefault(); submitComposer(); }} className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-cyan-500/20 bg-[#111B2D] p-2">
           <button
             type="button"
+            onClick={startVoiceCall}
+            disabled={isTyping}
+            title="Start the Live Voice Tutor"
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-2.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20 hover:text-emerald-200 disabled:opacity-40 disabled:hover:bg-emerald-500/10"
+          >
+            <Phone className="h-4 w-4" />
+            <span className="hidden sm:inline">Live Voice</span>
+          </button>
+          <button
+            type="button"
             onClick={() => attachInputRef.current?.click()}
             disabled={isTyping || attachBusy}
             title="Attach an image (PNG or JPEG)"
@@ -1406,6 +1859,195 @@ export function CyberDTChat({
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Live Voice Tutor overlay ===== */}
+      {voiceOpen && (
+        <div className="fixed inset-0 z-[80] flex flex-col overflow-hidden bg-[#05080F]/95 backdrop-blur-xl">
+          <style>{`
+            @keyframes dtvBar { 0%,100% { transform: scaleY(.25); opacity:.4 } 50% { transform: scaleY(1); opacity:1 } }
+            @keyframes dtvHalo { 0%,100% { transform: scale(1); opacity:.3 } 50% { transform: scale(1.16); opacity:.7 } }
+            @keyframes dtvSpin { to { transform: rotate(360deg) } }
+            .dtv-bar { animation: dtvBar 1s ease-in-out infinite; transform-origin: center; }
+            .dtv-halo { animation: dtvHalo 2.8s ease-in-out infinite; }
+            .dtv-ring { animation: dtvSpin 12s linear infinite; }
+          `}</style>
+
+          {/* neon bloom */}
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute left-1/2 top-[26%] h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-500/20 blur-[110px]" />
+            <div className="absolute bottom-[-6rem] right-[-4rem] h-72 w-72 rounded-full bg-violet-600/25 blur-[100px]" />
+            <div className="absolute bottom-[-8rem] left-[-4rem] h-72 w-72 rounded-full bg-emerald-500/15 blur-[100px]" />
+          </div>
+
+          <div className="relative mx-auto flex h-full w-full max-w-lg flex-col px-5 py-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="grid h-9 w-9 place-items-center rounded-xl border border-cyan-400/40 bg-cyan-500/10 text-cyan-300 shadow-[0_0_18px_rgba(34,211,238,0.35)]">
+                  <AudioLines className="h-4 w-4" />
+                </span>
+                <div>
+                  <p className="text-[0.58rem] uppercase tracking-[0.3em] text-cyan-400/70">Live</p>
+                  <p className="text-sm font-extrabold tracking-wide text-cyan-100">Cyber DT Live Voice</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={endVoiceCall}
+                title="End call"
+                className="grid h-8 w-8 place-items-center rounded-lg text-cyan-400/60 transition hover:bg-rose-500/15 hover:text-rose-200"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex flex-1 flex-col items-center justify-center gap-5 py-4">
+              {/* mic pulse */}
+              <div className="relative grid h-40 w-40 place-items-center">
+                <span
+                  className={cn(
+                    "absolute inset-0 rounded-full border border-cyan-400/20",
+                    voicePhase !== "error" && !voiceMuted && "dtv-halo",
+                  )}
+                />
+                <span className="dtv-ring absolute inset-3 rounded-full border border-dashed border-cyan-400/15" />
+                <span
+                  className={cn(
+                    "absolute inset-7 rounded-full blur-xl transition-colors",
+                    voicePhase === "speaking"
+                      ? "bg-violet-500/40"
+                      : voicePhase === "thinking"
+                        ? "bg-amber-400/30"
+                        : voicePhase === "error"
+                          ? "bg-rose-500/30"
+                          : "bg-cyan-400/30",
+                  )}
+                />
+                <span
+                  className={cn(
+                    "relative grid h-24 w-24 place-items-center rounded-full border text-cyan-100 transition-colors",
+                    voiceMuted
+                      ? "border-rose-400/40 bg-rose-500/10 text-rose-200"
+                      : voicePhase === "speaking"
+                        ? "border-violet-400/50 bg-violet-500/15 shadow-[0_0_40px_rgba(167,139,250,0.4)]"
+                        : voicePhase === "thinking"
+                          ? "border-amber-300/50 bg-amber-400/10 shadow-[0_0_40px_rgba(251,191,36,0.35)]"
+                          : "border-cyan-400/50 bg-cyan-500/10 shadow-[0_0_40px_rgba(34,211,238,0.4)]",
+                  )}
+                >
+                  {voiceMuted ? <MicOff className="h-9 w-9" /> : <Mic className="h-9 w-9" />}
+                </span>
+              </div>
+
+              {/* waveform */}
+              <div className="flex h-14 items-center gap-1.5">
+                {Array.from({ length: 9 }).map((_, i) => (
+                  <span
+                    key={i}
+                    className={cn(
+                      "dtv-bar w-1.5 rounded-full bg-gradient-to-t from-cyan-500 to-violet-400",
+                      (voiceMuted || voicePhase === "error") && "opacity-30",
+                    )}
+                    style={{
+                      height: `${18 + (i % 4) * 10}px`,
+                      animationDelay: `${i * 0.09}s`,
+                      animationDuration:
+                        voicePhase === "speaking" ? "0.55s" : voicePhase === "thinking" ? "1.7s" : "0.95s",
+                      animationPlayState: voiceMuted || voicePhase === "error" ? "paused" : "running",
+                    }}
+                  />
+                ))}
+              </div>
+
+              <p
+                className={cn(
+                  "text-lg font-bold tracking-wide",
+                  voicePhase === "error"
+                    ? "text-rose-300"
+                    : voicePhase === "thinking"
+                      ? "text-amber-200"
+                      : voicePhase === "speaking"
+                        ? "text-violet-200"
+                        : "text-cyan-200",
+                )}
+              >
+                {voiceStatus}
+              </p>
+
+              {/* language toggle */}
+              <div className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1">
+                {(["en-US", "si-LK"] as const).map((lang) => (
+                  <button
+                    key={lang}
+                    type="button"
+                    onClick={() => changeVoiceLanguage(lang)}
+                    className={cn(
+                      "rounded-full px-3 py-1 text-xs font-semibold transition",
+                      voiceLang === lang
+                        ? "bg-cyan-500/90 text-[#05080F]"
+                        : "text-cyan-300/70 hover:text-cyan-100",
+                    )}
+                  >
+                    {lang === "en-US" ? "English" : "සිංහල"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* captions */}
+            <div className="w-full space-y-2">
+              {voiceError && (
+                <p className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+                  {voiceError}
+                </p>
+              )}
+              <div className="rounded-2xl border border-white/5 bg-white/[0.03] px-3 py-2.5">
+                <p className="mb-0.5 text-[0.58rem] font-semibold uppercase tracking-[0.2em] text-cyan-400/60">
+                  You
+                </p>
+                <p className="max-h-20 overflow-y-auto text-sm leading-relaxed text-cyan-100/90">
+                  {voiceHeard || "Say something to begin…"}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.06] px-3 py-2.5">
+                <p className="mb-0.5 text-[0.58rem] font-semibold uppercase tracking-[0.2em] text-cyan-400/70">
+                  Cyber DT
+                </p>
+                <p className="max-h-28 overflow-y-auto text-sm leading-relaxed text-cyan-50">
+                  {voiceReply || "I'll answer out loud here."}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 flex w-full items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={toggleVoiceMute}
+                className={cn(
+                  "flex h-12 items-center gap-2 rounded-2xl border px-5 text-sm font-semibold transition",
+                  voiceMuted
+                    ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25"
+                    : "border-white/10 bg-white/5 text-cyan-200 hover:bg-white/10",
+                )}
+              >
+                {voiceMuted ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+                {voiceMuted ? "Unmute" : "Mute"}
+              </button>
+              <button
+                type="button"
+                onClick={endVoiceCall}
+                className="flex h-12 items-center gap-2 rounded-2xl border border-rose-400/40 bg-rose-500/15 px-5 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/25"
+              >
+                <PhoneOff className="h-4 w-4" />
+                End Call
+              </button>
+            </div>
+
+            <p className="mt-3 text-center text-[0.62rem] text-cyan-400/50">
+              Speak naturally — the tutor replies aloud and keeps listening.
+            </p>
           </div>
         </div>
       )}

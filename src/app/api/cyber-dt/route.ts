@@ -3,6 +3,7 @@ import {
   buildGeminiRequestBody,
   callCyberDTGeminiWithRetry,
   readCyberDTImage,
+  CYBER_DT_VOICE_PROMPT,
 } from "@/features/ai/cyber-dt-shared";
 
 /**
@@ -55,7 +56,7 @@ const TOTAL_BUDGET_MS = 22_000;
  * Release marker, returned by GET so a deploy can be verified from outside.
  * Bump this whenever the Cyber DT routes change.
  */
-const CYBER_DT_REV = "2026-11-16-stream-hangfix";
+const CYBER_DT_REV = "2026-11-17-live-voice";
 
 /**
  * How many models to ask at the same time. Free-tier quota is per model, so
@@ -129,7 +130,14 @@ export async function POST(req: NextRequest) {
     const prompt =
       message ||
       "Explain what this image shows according to the NIE Resource Book and the A/L syllabus.";
-    const requestBody = buildGeminiRequestBody(history, prompt, image);
+    // Live Voice Tutor: ask for a short, spoken-style answer with no markdown.
+    const voiceMode = body.mode === "voice" || body.voice === true;
+    const requestBody = buildGeminiRequestBody(
+      history,
+      prompt,
+      image,
+      voiceMode ? CYBER_DT_VOICE_PROMPT : undefined,
+    );
 
     // Ask several models at once, keep the first complete answer, and — if the
     // whole wave fails with a transient 503/429 — retry the wave with
