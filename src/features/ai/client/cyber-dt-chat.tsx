@@ -1221,7 +1221,9 @@ export function CyberDTChat({
         return;
       }
       if (code === "audio-capture") {
-        failVoiceCall("No microphone was found. Connect one and start again.");
+        failVoiceCall(
+          "The microphone could not be opened. Check Windows Settings → Privacy & security → Microphone (allow desktop apps) and that no other app is using the mic.",
+        );
         return;
       }
       if (code === "network") {
@@ -1277,8 +1279,39 @@ export function CyberDTChat({
       failVoiceCall("Live voice needs Chrome or Edge — this browser has no speech recognition.");
       return;
     }
-    // Small delay so the overlay is on screen before the mic prompt appears.
-    scheduleListen(500);
+    // Ask for the microphone up front. SpeechRecognition reports a blocked device as
+    // the vague "no microphone found", so probing getUserMedia first lets the overlay
+    // name the real cause (Windows privacy switch, busy device, missing mic).
+    const md = typeof navigator === "undefined" ? undefined : navigator.mediaDevices;
+    if (!md?.getUserMedia) {
+      // Insecure context (plain http on a LAN address) — let recognition try anyway.
+      scheduleListen(500);
+      return;
+    }
+    void md
+      .getUserMedia({ audio: true })
+      .then((stream) => {
+        try {
+          stream.getTracks().forEach((track) => track.stop());
+        } catch {
+          /* ignore */
+        }
+        if (voiceActiveRef.current) scheduleListen(150);
+      })
+      .catch((err: unknown) => {
+        const name = (err as { name?: string })?.name || "";
+        if (name === "NotAllowedError" || name === "SecurityError") {
+          failVoiceCall(
+            "The microphone is blocked by Windows or the browser. Open Windows Settings → Privacy & security → Microphone and turn on “Let desktop apps access your microphone”, then try again.",
+          );
+        } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+          failVoiceCall("No microphone was found. Connect a microphone and try again.");
+        } else if (name === "NotReadableError" || name === "AbortError") {
+          failVoiceCall("The microphone is busy in another app. Close it (Zoom, OBS, a recorder) and try again.");
+        } else {
+          failVoiceCall(`Could not open the microphone${name ? ` (${name})` : ""}. Check Windows sound settings and try again.`);
+        }
+      });
   };
 
   function endVoiceCall() {
@@ -2022,19 +2055,30 @@ export function CyberDTChat({
             </div>
 
             <div className="mt-4 flex w-full items-center justify-center gap-3">
-              <button
-                type="button"
-                onClick={toggleVoiceMute}
-                className={cn(
-                  "flex h-12 items-center gap-2 rounded-2xl border px-5 text-sm font-semibold transition",
-                  voiceMuted
-                    ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25"
-                    : "border-white/10 bg-white/5 text-cyan-200 hover:bg-white/10",
-                )}
-              >
-                {voiceMuted ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
-                {voiceMuted ? "Unmute" : "Mute"}
-              </button>
+              {voicePhase === "error" ? (
+                <button
+                  type="button"
+                  onClick={startVoiceCall}
+                  className="flex h-12 items-center gap-2 rounded-2xl border border-cyan-400/40 bg-cyan-500/15 px-5 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Try again
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={toggleVoiceMute}
+                  className={cn(
+                    "flex h-12 items-center gap-2 rounded-2xl border px-5 text-sm font-semibold transition",
+                    voiceMuted
+                      ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25"
+                      : "border-white/10 bg-white/5 text-cyan-200 hover:bg-white/10",
+                  )}
+                >
+                  {voiceMuted ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+                  {voiceMuted ? "Unmute" : "Mute"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={endVoiceCall}
