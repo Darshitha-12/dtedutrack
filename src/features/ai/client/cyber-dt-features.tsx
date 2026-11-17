@@ -306,9 +306,9 @@ type EvaluatorState =
   | { status: "error"; message: string };
 
 /** Marks a structured essay answer against the official A/L marking scheme. */
-export function CyberDTEssayEvaluator({ initialTopic }: { initialTopic?: string } = {}) {
+export function CyberDTEssayEvaluator() {
   const [subject, setSubject] = useState<CyberDTSubject>("Biology");
-  const [question, setQuestion] = useState(initialTopic ?? "");
+  const [question, setQuestion] = useState("");
   const [studentAnswer, setStudentAnswer] = useState("");
   const [attachment, setAttachment] = useState<CyberDTImageAttachment | null>(null);
   const [attachBusy, setAttachBusy] = useState(false);
@@ -474,9 +474,9 @@ type FlashcardsState =
   | { status: "error"; message: string };
 
 /** Generates a flashcard deck and lets the student flip, browse and mark cards. */
-export function CyberDTFlashcards({ initialTopic }: { initialTopic?: string } = {}) {
+export function CyberDTFlashcards() {
   const [subject, setSubject] = useState<CyberDTSubject>("Biology");
-  const [topic, setTopic] = useState(initialTopic ?? "");
+  const [topic, setTopic] = useState("");
   const [language, setLanguage] = useState<"si" | "en">("en");
   const [state, setState] = useState<FlashcardsState>({ status: "idle" });
   const [index, setIndex] = useState(0);
@@ -662,9 +662,9 @@ type OrganicState =
   | { status: "error"; message: string };
 
 /** Finds syllabus-only reaction pathways between two compounds. */
-export function CyberDTOrganicAssistant({ initialTopic }: { initialTopic?: string } = {}) {
+export function CyberDTOrganicAssistant() {
   const [mode, setMode] = useState<OrganicMode>("conversion");
-  const [startCompound, setStartCompound] = useState(initialTopic ?? "");
+  const [startCompound, setStartCompound] = useState("");
   const [targetCompound, setTargetCompound] = useState("");
   const [state, setState] = useState<OrganicState>({ status: "idle" });
 
@@ -830,40 +830,20 @@ export function CyberDTExamTracker() {
   const [goals, setGoals] = useState<MicroGoal[]>([]);
   const [goalsLoading, setGoalsLoading] = useState(false);
   const [goalsError, setGoalsError] = useState("");
-  const [targetStream, setTargetStream] = useState("");
 
   useEffect(() => {
-    const loadSaved = () => {
-      const key = localDateKey();
-      setToday(key);
-      setNow(Date.now());
+    const key = localDateKey();
+    setToday(key);
+    setNow(Date.now());
 
-      const savedDate = window.localStorage.getItem(EXAM_DATE_KEY) || "";
-      if (/^\d{4}-\d{2}-\d{2}$/.test(savedDate)) {
-        setExamDate(savedDate);
-        setDateDraft(savedDate);
-      } else {
-        setExamDate("");
-      }
+    const savedDate = window.localStorage.getItem(EXAM_DATE_KEY) || "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(savedDate)) {
+      setExamDate(savedDate);
+      setDateDraft(savedDate);
+    }
 
-      setTargetStream(window.localStorage.getItem("cyberdt.targetStream") || "");
-
-      const savedGoals = readJson<MicroGoal[]>(`${GOALS_KEY_PREFIX}${key}`);
-      if (Array.isArray(savedGoals)) setGoals(savedGoals);
-    };
-
-    loadSaved();
-
-    // Cyber DT can change the exam date and add a micro-goal straight from
-    // chat. Re-read storage when the action executor announces a change so the
-    // tracker updates without a page reload.
-    const onChanged = () => loadSaved();
-    window.addEventListener("cyberdt:exam-changed", onChanged);
-    window.addEventListener("cyberdt:goals-changed", onChanged);
-    return () => {
-      window.removeEventListener("cyberdt:exam-changed", onChanged);
-      window.removeEventListener("cyberdt:goals-changed", onChanged);
-    };
+    const savedGoals = readJson<MicroGoal[]>(`${GOALS_KEY_PREFIX}${key}`);
+    if (Array.isArray(savedGoals)) setGoals(savedGoals);
   }, []);
 
   useEffect(() => {
@@ -949,11 +929,6 @@ export function CyberDTExamTracker() {
           ) : (
             <p className="mt-2 text-sm text-cyan-400/70">
               Set your G.C.E. A/L exam date to start the countdown.
-            </p>
-          )}
-          {targetStream && (
-            <p className="mt-1 text-[0.7rem] font-semibold uppercase tracking-wide text-violet-300/80">
-              Target stream: {targetStream}
             </p>
           )}
         </div>

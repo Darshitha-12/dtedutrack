@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   buildGeminiRequestBody,
   callCyberDTGeminiWithRetry,
-  cyberDTLiveContext,
   readCyberDTImage,
-  readCyberDTTimeContext,
-  splitCyberDTActions,
   CYBER_DT_VOICE_PROMPT,
 } from "@/features/ai/cyber-dt-shared";
 
@@ -59,7 +56,7 @@ const TOTAL_BUDGET_MS = 22_000;
  * Release marker, returned by GET so a deploy can be verified from outside.
  * Bump this whenever the Cyber DT routes change.
  */
-const CYBER_DT_REV = "2026-11-17-live-time-actions";
+const CYBER_DT_REV = "2026-11-17-live-voice";
 
 /**
  * How many models to ask at the same time. Free-tier quota is per model, so
@@ -135,16 +132,12 @@ export async function POST(req: NextRequest) {
       "Explain what this image shows according to the NIE Resource Book and the A/L syllabus.";
     // Live Voice Tutor: ask for a short, spoken-style answer with no markdown.
     const voiceMode = body.mode === "voice" || body.voice === true;
-    // The client sends its own clock + time zone; Gemini has no internal clock,
-    // so this block is the only way it can resolve "in 30 minutes" or
-    // "tomorrow at 6 AM" correctly.
-    const liveContext = cyberDTLiveContext(readCyberDTTimeContext(body));
-    const requestBody = buildGeminiRequestBody(history, prompt, image, {
-      systemSuffix: voiceMode ? CYBER_DT_VOICE_PROMPT : undefined,
-      liveContext,
-      // Chat and voice may both change the app (alarms, reminders, goals).
-      allowActions: true,
-    });
+    const requestBody = buildGeminiRequestBody(
+      history,
+      prompt,
+      image,
+      voiceMode ? CYBER_DT_VOICE_PROMPT : undefined,
+    );
 
     // Ask several models at once, keep the first complete answer, and — if the
     // whole wave fails with a transient 503/429 — retry the wave with
@@ -159,17 +152,7 @@ export async function POST(req: NextRequest) {
     });
 
     if (result.ok) {
-      // Strip the machine-readable action block before the answer is shown or
-      // spoken. A model that only emitted a block still gets a usable reply.
-      const { text, actions } = splitCyberDTActions(result.text);
-      return NextResponse.json(
-        {
-          ok: true,
-          text: text || result.text,
-          ...(actions.length > 0 ? { actions } : {}),
-        },
-        { headers: CORS },
-      );
+      return NextResponse.json({ ok: true, text: result.text }, { headers: CORS });
     }
 
     return NextResponse.json(

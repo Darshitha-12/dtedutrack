@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,13 +18,6 @@ export default function DiagramsPage() {
   const [image, setImage] = useState("");
   const [mimeType, setMimeType] = useState("image/png");
   const [error, setError] = useState("");
-
-  // Cyber DT can open this page with a topic ("draw the human digestive
-  // system"), so prefill the form instead of making the student retype it.
-  useEffect(() => {
-    const preset = new URLSearchParams(window.location.search).get("topic");
-    if (preset?.trim()) setTopic(preset.trim().slice(0, 160));
-  }, []);
 
   const generate = async (e: React.FormEvent) => {
     e.preventDefault();

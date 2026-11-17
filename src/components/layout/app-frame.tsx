@@ -5,7 +5,6 @@ import { ToastProvider } from "@/components/ui/toast"
 import { MediaCommandBridge } from "@/components/app/media-command-bridge"
 import { AccountSyncPortal } from "@/components/account-sync-portal"
 import { CyberDTFloatingWidget } from "@/features/ai/client/cyber-dt-floating"
-import { CyberDTScheduleBridge } from "@/components/layout/cyber-dt-schedule-bridge"
 import { LanguageProvider } from "@/lib/language-context"
 
 // The full app chrome (sidebar, top bar, portals, toasts). Shared by the (app) route
@@ -19,7 +18,6 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
       <AppShell>{children}</AppShell>
       <ReminderPortal />
       <AlarmPortal />
-      <CyberDTScheduleBridge />
       <LanguageProvider>
         <CyberDTFloatingWidget />
       </LanguageProvider>
