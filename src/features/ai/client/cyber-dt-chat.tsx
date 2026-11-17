@@ -39,12 +39,22 @@ import {
 } from "@/features/ai/client/cyber-dt-ai";
 import {
   buildGeminiRequestBody,
+  cyberDTLiveContext,
   extractGeminiStreamDelta,
   geminiStreamEndpoint,
   cyberDTModelChain,
   parseSSEBuffer,
+  sanitizeCyberDTActions,
+  splitCyberDTActions,
+  CYBER_DT_ACTIONS_OPEN,
   CYBER_DT_VOICE_PROMPT,
+  type CyberDTAction,
 } from "@/features/ai/cyber-dt-shared";
+import {
+  applyCyberDTAction,
+  type AppliedCyberDTAction,
+} from "@/features/ai/client/cyber-dt-actions";
+import { CyberDTActionCard } from "@/features/ai/client/cyber-dt-action-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -66,6 +76,8 @@ interface ChatMessage {
   streaming?: boolean;
   /** True when the answer is the "AI is busy" notice, so we show a retry button. */
   busy?: boolean;
+  /** In-app actions the AI ran for this reply (alarm, reminder, goal, …). */
+  actions?: AppliedCyberDTAction[];
 }
 
 interface Conversation {
@@ -191,6 +203,8 @@ async function readAnswerStream(
   onServerBusy?: () => void,
   /** Reveal the answer at once instead of running the typewriter (voice mode). */
   instant?: boolean,
+  /** Receives the validated in-app actions the model attached to its reply. */
+  onActions?: (actions: CyberDTAction[]) => void,
 ): Promise<string | null> {
   const res = await fetch(url, init);
   const contentType = res.headers.get("content-type") || "";
@@ -210,18 +224,36 @@ async function readAnswerStream(
         const delta = mapEvent(event);
         if (delta) acc += delta;
       }
-      onDelta(acc);
+      // Hide the machine-readable block while it is still streaming in: cut
+      // everything from the opening tag so it never flashes on screen.
+      const cut = acc.indexOf(CYBER_DT_ACTIONS_OPEN);
+      onDelta(cut >= 0 ? acc.slice(0, cut) : acc);
     }
-    return acc.trim() ? acc : null;
+    // The browser-direct path streams the action block too: strip it once the
+    // answer is complete so it never reaches the screen or text-to-speech.
+    const parsed = splitCyberDTActions(acc);
+    if (parsed.actions.length > 0) {
+      onDelta(parsed.text);
+      onActions?.(parsed.actions);
+    }
+    return parsed.text.trim() ? parsed.text : null;
   }
 
   // Plain JSON response: the complete answer (typed out progressively so it
   // still looks like the AI is writing it), or a fallback shape.
   const data = await res.json().catch(() => null);
   if (data && data.ok && typeof data.text === "string" && data.text.trim()) {
-    const full = data.text.trim();
-    await typeOutAnswer(full, onDelta, init.signal, instant);
-    return full;
+    // The route already strips the block and returns the actions separately;
+    // the same parsing still runs here so both transport shapes behave the same.
+    const parsed = splitCyberDTActions(data.text);
+    const visible = parsed.text || data.text.trim();
+    await typeOutAnswer(visible, onDelta, init.signal, instant);
+    const actions = [
+      ...sanitizeCyberDTActions((data as { actions?: unknown }).actions),
+      ...parsed.actions,
+    ];
+    if (actions.length > 0) onActions?.(actions.slice(0, 3));
+    return visible;
   }
   // The route answered, but couldn't get an AI reply (busy/out of quota).
   // Distinguish that from "offline" so the caller can offer a retry instead of
@@ -591,6 +623,26 @@ export function CyberDTChat({
     const controller = new AbortController();
     abortRef.current = controller;
 
+    // Live clock: Gemini has no internal clock, so every request carries the
+    // student's local date/time and zone. The route turns this into the
+    // authoritative "right now" system block; the browser-direct fallback
+    // builds the same block locally.
+    const now = new Date();
+    const timeContext = {
+      iso: now.toISOString(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Colombo",
+      local: now.toLocaleString(),
+      offsetMinutes: -now.getTimezoneOffset(),
+      locale: typeof navigator !== "undefined" ? navigator.language : "en-US",
+    };
+    const liveContext = cyberDTLiveContext(timeContext);
+
+    // In-app actions the model attached to this reply (validated server-side).
+    let pendingActions: CyberDTAction[] = [];
+    const onActions = (actions: CyberDTAction[]) => {
+      if (actions.length > 0) pendingActions = actions;
+    };
+
     // Throttled progressive rendering: update the message at most ~12×/s.
     let lastFlush = 0;
     let aiText = "";
@@ -628,6 +680,7 @@ export function CyberDTChat({
           body: JSON.stringify({
             message: text,
             history,
+            time: timeContext,
             ...(image ? { image: { mimeType: image.mimeType, data: image.base64 } } : {}),
             ...(opts?.voice ? { mode: "voice" } : {}),
           }),
@@ -642,6 +695,7 @@ export function CyberDTChat({
           serverBusy = true;
         },
         opts?.voice,
+        onActions,
       );
       if (!answer) serverFailed = true;
     } catch {
@@ -669,7 +723,11 @@ export function CyberDTChat({
                   history,
                   text,
                   image ? { mimeType: image.mimeType, data: image.base64 } : undefined,
-                  opts?.voice ? CYBER_DT_VOICE_PROMPT : undefined,
+                  {
+                    systemSuffix: opts?.voice ? CYBER_DT_VOICE_PROMPT : undefined,
+                    liveContext,
+                    allowActions: true,
+                  },
                 ),
               ),
               signal: controller.signal,
@@ -678,6 +736,7 @@ export function CyberDTChat({
             onDelta,
             undefined,
             opts?.voice,
+            onActions,
           );
           if (answer) break;
           // Most likely rate-limited on this model — the loop tries the next.
@@ -731,6 +790,17 @@ export function CyberDTChat({
     } else {
       finalText = answer ?? aiText;
       finishStreaming(finalText);
+    }
+
+    // 4) Run the in-app actions the model attached (alarm, reminder, goal,
+    //    exam date, tool). Regenerate re-asks a question that already ran its
+    //    actions, so it only shows the answer again instead of duplicating
+    //    alarms and reminders.
+    if (pendingActions.length > 0 && !opts?.noUserMessage && !controller.signal.aborted) {
+      const applied = pendingActions.map((action) => applyCyberDTAction(action));
+      setMessages((prev) =>
+        prev.map((m) => (m.id === aiId ? { ...m, actions: applied } : m)),
+      );
     }
 
     setIsTyping(false);
@@ -800,6 +870,17 @@ export function CyberDTChat({
       setCopiedId(m.id);
       setTimeout(() => setCopiedId(null), 1500);
     }
+  };
+
+  /** Replaces one action card after the student edits or cancels it. */
+  const updateActionCard = (messageId: string, next: AppliedCyberDTAction) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId
+          ? { ...m, actions: (m.actions ?? []).map((a) => (a.key === next.key ? next : a)) }
+          : m,
+      ),
+    );
   };
 
   const clearChat = () => {
@@ -1695,6 +1776,17 @@ export function CyberDTChat({
                       </div>
                     )}
                   </div>
+                  {m.actions && m.actions.length > 0 && (
+                    <div>
+                      {m.actions.map((action) => (
+                        <CyberDTActionCard
+                          key={action.key}
+                          item={action}
+                          onUpdate={(next) => updateActionCard(m.id, next)}
+                        />
+                      ))}
+                    </div>
+                  )}
                   {m.text && !m.streaming && m.busy && (
                     <button
                       type="button"

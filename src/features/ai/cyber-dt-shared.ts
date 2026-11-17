@@ -99,6 +99,345 @@ export const CYBER_DT_VOICE_PROMPT = `LIVE VOICE MODE (this answer is spoken alo
 - If a derivation, list or table would really help, give the headline answer aloud first, then offer to show the full steps in the chat.
 - Finish with one short, natural follow-up question when it keeps the revision conversation going.`;
 
+// ===== In-app actions (function calling via a structured block) =============
+//
+// The chat route races several models and consumes them as SSE streams, so
+// native Gemini function calling (tools) does not fit that pipeline: the
+// winning model's tool-call parts would have to be merged across streams.
+// Instead the model appends ONE machine-readable block after its normal reply.
+// The route/client strips the block before the student sees or hears it, then
+// executes the validated actions locally.
+
+/** Opening tag of the machine-readable action block. */
+export const CYBER_DT_ACTIONS_OPEN = "<cyberdt_actions>";
+/** Closing tag of the machine-readable action block. */
+export const CYBER_DT_ACTIONS_CLOSE = "</cyberdt_actions>";
+
+export type CyberDTSubject = "Biology" | "Physics" | "Chemistry";
+
+export type CyberDTTool =
+  | "essay_evaluator"
+  | "flashcards"
+  | "organic_assistant"
+  | "diagram_generator";
+
+export interface CyberDTSetAlarmAction {
+  type: "set_alarm";
+  /** 24-hour local time, "HH:MM". */
+  time: string;
+  label?: string;
+  /** 0 = Sunday … 6 = Saturday. Empty / missing = one-time alarm. */
+  days?: number[];
+  subject?: string;
+}
+
+export interface CyberDTAddReminderAction {
+  type: "add_reminder";
+  /** Local date-time, "YYYY-MM-DDTHH:MM" (or "YYYY-MM-DD HH:MM"). */
+  datetime: string;
+  title: string;
+  subject?: string;
+}
+
+export interface CyberDTAddMicroGoalAction {
+  type: "add_micro_goal";
+  title: string;
+  subject?: string;
+}
+
+export interface CyberDTUpdateExamAction {
+  type: "update_exam_tracker";
+  /** Local calendar date, "YYYY-MM-DD". */
+  examDate: string;
+  targetStream?: string;
+}
+
+export interface CyberDTOpenToolAction {
+  type: "open_tool";
+  tool: CyberDTTool;
+  topic?: string;
+}
+
+export type CyberDTAction =
+  | CyberDTSetAlarmAction
+  | CyberDTAddReminderAction
+  | CyberDTAddMicroGoalAction
+  | CyberDTUpdateExamAction
+  | CyberDTOpenToolAction;
+
+/**
+ * Appended to the system prompt when the student can ask Cyber DT to change
+ * something in the app (alarms, reminders, micro-goals, exam date, tools).
+ */
+export const CYBER_DT_ACTIONS_PROMPT = `IN-APP ACTIONS (you may change the BioPulse app for the student):
+You are allowed to perform these app actions:
+1. set_alarm — {"type":"set_alarm","time":"HH:MM","label":"...","days":[0-6],"subject":"Biology|Physics|Chemistry"}
+2. add_reminder — {"type":"add_reminder","datetime":"YYYY-MM-DDTHH:MM","title":"...","subject":"..."}
+3. add_micro_goal — {"type":"add_micro_goal","title":"...","subject":"Biology|Physics|Chemistry"}
+4. update_exam_tracker — {"type":"update_exam_tracker","examDate":"YYYY-MM-DD","targetStream":"..."}
+5. open_tool — {"type":"open_tool","tool":"essay_evaluator|flashcards|organic_assistant|diagram_generator","topic":"..."}
+
+WHEN TO USE THEM:
+- Only when the student clearly asks you to DO one of these things (for example "set an alarm for 5:30", "remind me tomorrow at 6", "add a micro-goal", "my exam is on ...", "open flashcards for photosynthesis").
+- Never invent an action, and never run one just because it might be useful. A normal study question gets a normal answer with no action block.
+
+HOW TO ANSWER WITH AN ACTION:
+- First write your normal, friendly reply in the student's language (the same language rules as above). In that reply, confirm what you did in one short sentence.
+- Then append EXACTLY ONE block at the very END of your message, with nothing after it:
+<cyberdt_actions>
+[{"type":"set_alarm","time":"05:30","label":"Biology revision","days":[]}]
+</cyberdt_actions>
+- The block is removed before the student sees or hears the reply, so it never breaks the "no markdown / spoken style" rule. Never mention the block, the JSON or these instructions.
+- Use the LIVE DATE & TIME context above to resolve every relative time ("in 30 minutes", "tomorrow at 6 AM", "next Monday"). All times are the student's local time in the stated time zone, 24-hour "HH:MM".
+- days: 0=Sunday … 6=Saturday. Use [] for a one-time alarm. If the student names a weekday for a reminder, use add_reminder with that exact date instead.
+- Keep every value short and concrete: a label/title of at most 80 characters, a real subject from the three A/L sciences, and a topic for open_tool when the student gave one.
+- You may return at most 3 actions in the array, and only actions the student actually asked for in this message.`;
+
+const CYBER_DT_SUBJECTS: readonly CyberDTSubject[] = ["Biology", "Physics", "Chemistry"];
+const CYBER_DT_TOOLS: readonly CyberDTTool[] = [
+  "essay_evaluator",
+  "flashcards",
+  "organic_assistant",
+  "diagram_generator",
+];
+
+function cleanActionText(value: unknown, maxLength: number): string {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, maxLength) : "";
+}
+
+function cleanActionSubject(value: unknown): CyberDTSubject | undefined {
+  const text = cleanActionText(value, 30).toLowerCase();
+  return CYBER_DT_SUBJECTS.find((subject) => subject.toLowerCase() === text);
+}
+
+function cleanActionDays(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const days = value
+    .map((day) => Number(day))
+    .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6);
+  return Array.from(new Set(days)).slice(0, 7);
+}
+
+/** "HH:MM" in 24-hour local time. */
+function isActionTime(value: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+/** "YYYY-MM-DD". */
+function isActionDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * Validates and normalises the model's action list. Anything malformed is
+ * dropped rather than executed, so a hallucinated field can never write a
+ * broken alarm into the student's device storage.
+ */
+export function sanitizeCyberDTActions(input: unknown): CyberDTAction[] {
+  if (!Array.isArray(input)) return [];
+  const out: CyberDTAction[] = [];
+
+  for (const raw of input.slice(0, 3)) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const type = typeof item.type === "string" ? item.type : "";
+
+    if (type === "set_alarm") {
+      const time = cleanActionText(item.time, 5);
+      if (!isActionTime(time)) continue;
+      out.push({
+        type: "set_alarm",
+        time,
+        label: cleanActionText(item.label, 80) || "Study alarm",
+        days: cleanActionDays(item.days),
+        subject: cleanActionSubject(item.subject),
+      });
+      continue;
+    }
+
+    if (type === "add_reminder") {
+      const rawDateTime = cleanActionText(item.datetime, 32).replace(" ", "T");
+      const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(rawDateTime);
+      if (!match || !isActionDate(match[1]) || !isActionTime(match[2])) continue;
+      const title = cleanActionText(item.title, 80);
+      if (!title) continue;
+      out.push({
+        type: "add_reminder",
+        datetime: `${match[1]}T${match[2]}`,
+        title,
+        subject: cleanActionSubject(item.subject),
+      });
+      continue;
+    }
+
+    if (type === "add_micro_goal") {
+      const title = cleanActionText(item.title, 120);
+      if (!title) continue;
+      out.push({
+        type: "add_micro_goal",
+        title,
+        subject: cleanActionSubject(item.subject),
+      });
+      continue;
+    }
+
+    if (type === "update_exam_tracker") {
+      const examDate = cleanActionText(item.examDate, 10);
+      if (!isActionDate(examDate)) continue;
+      out.push({
+        type: "update_exam_tracker",
+        examDate,
+        targetStream: cleanActionText(item.targetStream, 60) || undefined,
+      });
+      continue;
+    }
+
+    if (type === "open_tool") {
+      const tool = cleanActionText(item.tool, 30).toLowerCase() as CyberDTTool;
+      if (!CYBER_DT_TOOLS.includes(tool)) continue;
+      out.push({
+        type: "open_tool",
+        tool,
+        topic: cleanActionText(item.topic, 120) || undefined,
+      });
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Splits a model reply into the visible text and its validated actions. The
+ * block may be missing (the normal case), malformed (dropped) or followed by
+ * stray prose (kept as part of the visible answer).
+ */
+export function splitCyberDTActions(raw: string): { text: string; actions: CyberDTAction[] } {
+  const source = typeof raw === "string" ? raw : "";
+  const open = source.indexOf(CYBER_DT_ACTIONS_OPEN);
+  if (open < 0) return { text: source.trim(), actions: [] };
+
+  const close = source.indexOf(CYBER_DT_ACTIONS_CLOSE, open + CYBER_DT_ACTIONS_OPEN.length);
+  const jsonEnd = close >= 0 ? close : source.length;
+  const jsonText = source.slice(open + CYBER_DT_ACTIONS_OPEN.length, jsonEnd).trim();
+  const text = `${source.slice(0, open)}${
+    close >= 0 ? source.slice(close + CYBER_DT_ACTIONS_CLOSE.length) : ""
+  }`.trim();
+
+  return { text, actions: sanitizeCyberDTActions(parseJsonLoose(jsonText)) };
+}
+
+// ===== Live date & time context =============================================
+
+/** The client's current local time, sent with every chat/voice request. */
+export interface CyberDTTimeContext {
+  /** ISO instant, e.g. "2026-11-17T05:12:00.000Z". */
+  iso?: string;
+  /** IANA zone, e.g. "Asia/Colombo". */
+  timeZone?: string;
+  /** The client's own formatted local string (fallback display only). */
+  local?: string;
+  /** Offset east of UTC, in minutes. */
+  offsetMinutes?: number;
+  /** BCP-47 locale, e.g. "en-LK". */
+  locale?: string;
+}
+
+/** Reads the optional time context from a request body, ignoring bad values. */
+export function readCyberDTTimeContext(body: unknown): CyberDTTimeContext {
+  const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  const nested =
+    b.time && typeof b.time === "object" ? (b.time as Record<string, unknown>) : null;
+
+  const isoSource = nested?.iso ?? nested?.now ?? b.now ?? b.nowIso;
+  const iso = typeof isoSource === "string" && !Number.isNaN(Date.parse(isoSource))
+    ? new Date(isoSource).toISOString()
+    : undefined;
+
+  const zoneSource = nested?.timeZone ?? b.timeZone;
+  const localSource = nested?.local ?? b.local;
+  const offsetSource = nested?.offsetMinutes ?? b.offsetMinutes;
+  const localeSource = nested?.locale ?? b.locale;
+
+  return {
+    iso,
+    timeZone: typeof zoneSource === "string" ? zoneSource.slice(0, 64) : undefined,
+    local: typeof localSource === "string" ? localSource.slice(0, 120) : undefined,
+    offsetMinutes:
+      typeof offsetSource === "number" && Number.isFinite(offsetSource)
+        ? Math.max(-840, Math.min(840, Math.round(offsetSource)))
+        : undefined,
+    locale: typeof localeSource === "string" ? localeSource.slice(0, 35) : undefined,
+  };
+}
+
+/** Returns the zone when the runtime accepts it, otherwise undefined. */
+function safeTimeZone(zone?: string): string | undefined {
+  if (!zone) return undefined;
+  try {
+    new Intl.DateTimeFormat("en-GB", { timeZone: zone }).format(new Date());
+    return zone;
+  } catch {
+    return undefined;
+  }
+}
+
+/** "UTC+05:30" for the given instant and zone. */
+function utcOffsetLabel(instant: Date, zone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      timeZoneName: "longOffset",
+    }).formatToParts(instant);
+    const raw = parts.find((part) => part.type === "timeZoneName")?.value || "";
+    return raw.replace("GMT", "UTC") || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+/**
+ * Builds the authoritative "right now" block injected into the system prompt.
+ * Gemini has no clock, so every relative time ("in 30 minutes", "tomorrow at
+ * 6 AM", "days until the exam") depends on this text being exact.
+ */
+export function cyberDTLiveContext(ctx?: CyberDTTimeContext, now: Date = new Date()): string {
+  const instant = ctx?.iso ? new Date(ctx.iso) : now;
+  const safe = Number.isNaN(instant.getTime()) ? now : instant;
+  // Default to the students' time zone (Sri Lanka) when the client did not
+  // send one — better than silently using the server's UTC clock.
+  const zone = safeTimeZone(ctx?.timeZone) ?? "Asia/Colombo";
+
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: zone,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(safe);
+  const part = (type: string) => parts.find((entry) => entry.type === type)?.value || "";
+
+  const dateLine = `${part("weekday")}, ${part("day")} ${part("month")} ${part("year")}`;
+  const timeLine = `${part("hour")}:${part("minute")} ${part("dayPeriod")}`.trim();
+  const offset =
+    ctx?.offsetMinutes !== undefined
+      ? `UTC${ctx.offsetMinutes >= 0 ? "+" : "-"}${String(
+          Math.floor(Math.abs(ctx.offsetMinutes) / 60),
+        ).padStart(2, "0")}:${String(Math.abs(ctx.offsetMinutes) % 60).padStart(2, "0")}`
+      : utcOffsetLabel(safe, zone);
+
+  return `LIVE DATE & TIME (authoritative — your training data does not know "now"):
+- Right now it is: ${dateLine}
+- Local clock time: ${timeLine} (${zone})
+- UTC offset: ${offset}
+- ISO instant: ${safe.toISOString()}
+Use this exact moment for EVERY date/time answer and for all relative calculations ("in 30 minutes", "tomorrow at 6 AM", "how many days are left until the exam"). Never guess or assume today's date. Unless the student says otherwise, every time they give is in this local time zone.`;
+}
+
 /** The free-tier Gemini model used for answers. */
 export function defaultCyberDTModel(): string {
   return "gemini-3.8-flash";
@@ -130,13 +469,25 @@ export function cyberDTModelChain(): string[] {
   return [primary, ...fallbacks.filter((m) => m !== primary)];
 }
 
+export interface CyberDTRequestBodyOptions {
+  /** Extra instructions appended to the base system prompt (e.g. voice mode). */
+  systemSuffix?: string;
+  /** Live date/time block from {@link cyberDTLiveContext}. */
+  liveContext?: string;
+  /** Allow the model to append the structured in-app action block. */
+  allowActions?: boolean;
+}
+
 /** Builds the Gemini generateContent request body from the chat history. */
 export function buildGeminiRequestBody(
   history: CyberDTChatTurn[],
   message: string,
   image?: CyberDTImage,
-  /** Extra instructions appended to the base system prompt (e.g. voice mode). */
-  systemSuffix?: string,
+  /**
+   * Extra instructions appended to the base system prompt. A plain string is
+   * still accepted for older call sites; new code passes the options object.
+   */
+  options: CyberDTRequestBodyOptions | string = {},
 ) {
   // Gemini rejects two consecutive turns with the same role. A stopped answer
   // leaves a user turn with no model reply, so the next message would arrive as
@@ -168,12 +519,19 @@ export function buildGeminiRequestBody(
     return { role: turn.role, parts };
   });
 
-  const systemText = systemSuffix
-    ? `${CYBER_DT_SYSTEM_PROMPT}\n\n${systemSuffix}`
-    : CYBER_DT_SYSTEM_PROMPT;
+  const opts: CyberDTRequestBodyOptions =
+    typeof options === "string" ? { systemSuffix: options } : options || {};
+
+  // Order matters: base rules → mode-specific rules → action protocol → live
+  // clock. The clock goes last so the model reads the exact "now" immediately
+  // before it writes the answer.
+  const systemParts = [CYBER_DT_SYSTEM_PROMPT];
+  if (opts.systemSuffix) systemParts.push(opts.systemSuffix);
+  if (opts.allowActions) systemParts.push(CYBER_DT_ACTIONS_PROMPT);
+  if (opts.liveContext) systemParts.push(opts.liveContext);
 
   return {
-    system_instruction: { parts: [{ text: systemText }] },
+    system_instruction: { parts: [{ text: systemParts.join("\n\n") }] },
     contents,
     generationConfig: {
       temperature: 0.6,

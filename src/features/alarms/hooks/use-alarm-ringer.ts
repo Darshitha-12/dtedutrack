@@ -8,6 +8,7 @@ import {
 } from "../lib/background-playback";
 import type { Alarm } from "../lib/scheduler";
 import { speechService } from "@/services/speech";
+import { notificationService } from "@/services/notification";
 
 export function useAlarmRinger() {
   const [currentAlarm, setCurrentAlarm] = useState<Alarm | null>(null);
@@ -149,6 +150,17 @@ export function useAlarmRinger() {
       // ringer, so the web is responsible for vibration in-app.
       startVibration();
       requestWakeLock();
+      // Browser build: also raise a system notification, so an alarm set from
+      // Cyber DT is visible even when the student is in another tab. The APK
+      // already shows its own native notification.
+      if (!hasNativeRingBridge()) {
+        notificationService
+          .sendBrowser(
+            `⏰ ${alarm.label || "Alarm"}`,
+            alarm.time ? `Study alarm · ${alarm.time}` : "BioPulse alarm",
+          )
+          .catch(() => {});
+      }
     },
     [getBridge, startVibration, requestWakeLock, stopSpeech, stopVibration, releaseWakeLock],
   );
