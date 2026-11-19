@@ -64,7 +64,7 @@ const TOTAL_BUDGET_MS = 22_000;
  * Release marker, returned by GET so a deploy can be verified from outside.
  * Bump this whenever the Cyber DT routes change.
  */
-const CYBER_DT_REV = "2026-11-19-empathy2";
+const CYBER_DT_REV = "2026-11-19-empathy3";
 
 /**
  * How many models to ask at the same time. Free-tier quota is per model, so

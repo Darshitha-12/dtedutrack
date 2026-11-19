@@ -1053,6 +1053,14 @@ const CYBER_DT_CRISIS_RE =
   /(want to die|kill myself|end my life|suicid|self[-\s]?harm|no reason to live|maerenna|maranna|මැරෙන්න|මැරෙනවා|මම මැරෙ|ජීවිතේ අර්ථයක් නැ|ජීවත් වෙන්න ඕන නැ)/i;
 
 /**
+ * Relationship / personal-feeling cues (crush, break-up, loneliness). Supported
+ * with care and age-appropriately — never sexual. Mirrors the relationship
+ * section of {@link CYBER_DT_EMPATHY_PROMPT}.
+ */
+const CYBER_DT_RELATION_RE =
+  /(break[\s-]?up|broke up|broke my heart|crush on|my (?:girlfriend|boyfriend|partner|ex)|being alone|so alone|feel alone|feel lonely|lonely|no friends|left out|තනිකම|ආදරේ|ආදරය|පෙම්|හිත රිද්|හිත රිදෙ)/i;
+
+/**
  * Generates a complete Cyber DT AI answer for a message.
  * The response contains BOTH languages; render it with
  * renderCyberDTResponse() using the detected locale.
@@ -1072,6 +1080,21 @@ I'm still here to help with your studies, but first please reach out to a real p
 දැන්ම ඔබ විශ්වාස කරන කෙනෙකුට කියන්න: අම්මා/තාත්තා, ගුරුවරයෙකුට, නැත්නම් පාසලේ counsellor ට. ඔබ ශ්‍රී ලංකාවේ නම් Sumithrayo හෙල්ප්ලයින් 1926 ට කතා කරන්න — එය නොමිලේ, ඕනෑම වෙලාවක.
 
 මම ඔබේ පාඩම් වලට උදව් කරන්න ලෑස්තියි, නමුත් මුලින්ම ඔබ ළඟම ඉන්න කෙනෙකුට කතා කරන්න. ඔබ තනියම නෙවෙයි.`,
+      emoji: "💙",
+    };
+  }
+  if (CYBER_DT_RELATION_RE.test(message)) {
+    return {
+      textEn: `💙 Thank you for trusting me with this — feelings like this are real, and it's okay to feel them.
+
+I'm your study companion, so I'll always be honest and kind with you rather than pretend to be something I'm not. What I can do is listen, help you make sense of it, and think about one healthy next step — like talking to the person honestly, or giving yourself some time and space.
+
+You matter, and so do your studies and your rest. If you'd like, tell me what happened and we'll take it one small step at a time.`,
+      textSi: `💙 මේක මට කිව්වට ගොඩක් හොඳයි — මෙහෙම හැඟීම් ඇත්ත, ඒවා දැනෙන එක වැරදි නැහැ.
+
+මම ඔබේ study companion, ඒ නිසා මම ඔබට ඇත්තටම උදව් කරනවා — රඟපාන්නෙ නැහැ. මට කරන්න පුළුවන් දේ තමයි ඔබට ඇහුම්කන් දෙන එක, හැඟීම් ටික පැහැදිලි කරගන්න උදව් කරන එක, සහ එක හොඳ පියවරක් ගැන හිතන එක — ඒ කෙනාට අවංකව කතා කරන එක වගේ, නැත්නම් ටිකක් කාලයක් ඉඩ දෙන එක වගේ.
+
+ඔබ වැදගත්, ඔබේ පාඩම් සහ නින්දත් වැදගත්. කැමති නම් මොකද වුණේ කියලා මට කියන්න — අපි එකින් එක පියවරෙන් පියවර ගමු.`,
       emoji: "💙",
     };
   }
