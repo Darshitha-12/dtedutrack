@@ -332,11 +332,27 @@ function isActionTime(value: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
-/** "YYYY-MM-DD". */
+/**
+ * "YYYY-MM-DD", validated as a real calendar date.
+ *
+ * This must be timezone-independent: the server runs in UTC but the student's
+ * browser is in Asia/Colombo (+5:30), and `new Date("2027-04-20T00:00:00")` is
+ * parsed as LOCAL midnight, so its UTC date is the previous day. Comparing the
+ * UTC slice against the input therefore rejected every valid date on the
+ * client while the server accepted it. Parsing in UTC keeps both sides equal.
+ */
 function isActionDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
 }
 
 function cleanActionBool(value: unknown): boolean | undefined {
