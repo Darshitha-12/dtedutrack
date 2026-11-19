@@ -1040,11 +1040,56 @@ function stableFallbackIndex(message: string, length: number): number {
 }
 
 /**
+ * Strong distress cues (English, Singlish and Sinhala). When the real AI is
+ * unreachable the offline knowledge base must never answer a student who is
+ * stressed, scared or ready to give up with a random study note — it answers
+ * with care instead. Mirrors {@link CYBER_DT_EMPATHY_PROMPT}.
+ */
+const CYBER_DT_DISTRESS_RE =
+  /(stress(?:ed|ing)?|anxious|anxiety|panic(?:king)?|scared|afraid|depress(?:ed|ing)?|burn(?:t|ed)?\s?out|exhausted|overwhelm(?:ed|ing)?|giv(?:e|ing)\s+up|can'?t do (?:this|it)|hopeless|worthless|baya|bayai|pissu|dukai|kalakiri|බය|පිස්සු|දුක|කලකිරි|තනියම|අත්හැර)/i;
+
+/** Crisis cues — self-harm or "I want to die". Handled with a safety-first reply. */
+const CYBER_DT_CRISIS_RE =
+  /(want to die|kill myself|end my life|suicid|self[-\s]?harm|no reason to live|maerenna|maranna|මැරෙන්න|මැරෙනවා|මම මැරෙ|ජීවිතේ අර්ථයක් නැ|ජීවත් වෙන්න ඕන නැ)/i;
+
+/**
  * Generates a complete Cyber DT AI answer for a message.
  * The response contains BOTH languages; render it with
  * renderCyberDTResponse() using the detected locale.
  */
 export function generateCyberDTResponse(message: string, _locale: CyberDTLocale = "en"): CyberDTResponse {
+  // Emotional support comes first: a student who is hurting should be heard,
+  // never handed a random study note just because the AI is offline.
+  if (CYBER_DT_CRISIS_RE.test(message)) {
+    return {
+      textEn: `💙 Thank you for telling me — you matter, and this is too heavy to carry alone.
+
+Please talk to someone you trust right now: a parent, a teacher, or your school counsellor. If you're in Sri Lanka you can call the Sumithrayo helpline on 1926 — it's free and available any time.
+
+I'm still here to help with your studies, but first please reach out to a real person who can be with you. You are not alone.`,
+      textSi: `💙 මට මේක කිව්වට ගොඩක් හොඳයි — ඔබ වැදගත්, ඔබ මේ බර තනියම උස්සන්න එපා.
+
+දැන්ම ඔබ විශ්වාස කරන කෙනෙකුට කියන්න: අම්මා/තාත්තා, ගුරුවරයෙකුට, නැත්නම් පාසලේ counsellor ට. ඔබ ශ්‍රී ලංකාවේ නම් Sumithrayo හෙල්ප්ලයින් 1926 ට කතා කරන්න — එය නොමිලේ, ඕනෑම වෙලාවක.
+
+මම ඔබේ පාඩම් වලට උදව් කරන්න ලෑස්තියි, නමුත් මුලින්ම ඔබ ළඟම ඉන්න කෙනෙකුට කතා කරන්න. ඔබ තනියම නෙවෙයි.`,
+      emoji: "💙",
+    };
+  }
+  if (CYBER_DT_DISTRESS_RE.test(message)) {
+    return {
+      textEn: `💙 I hear you, and it's completely okay to feel like this — A/L pressure is genuinely heavy, and feeling stuck doesn't mean you're failing.
+
+You don't have to fix everything today. Let's take just ONE small step — or if you're tired, rest first: drink some water, breathe, and come back when you're ready.
+
+Tell me what's weighing on you most (a subject, a deadline, or just the pressure) and we'll face it together, one piece at a time.`,
+      textSi: `💙 මට ඔබව තේරෙනවා, මෙහෙම දැනෙන එක හරිම සාමාන්‍යයි — A/L බර ඇත්තටම ලොකුයි, "මට බැරි" කියලා දැනෙන එක ඔබ අසාර්ථක කියන එක නෙවෙයි.
+
+අද හැම දෙයක්ම විසඳන්න ඕන නැහැ. අපි එක පොඩි පියවරක් විතරක් ගමු — ඔබ මහන්සි නම් මුලින්ම විවේක ගන්න: වතුර ටිකක් බොන්න, හුස්ම ගන්න, ඊට පස්සේ ආයෙ එන්න.
+
+ඔබට වඩාම බර දැනෙන දේ (subject එකක්ද, deadline එකක්ද, නැත්නම් බරම?) මට කියන්න — අපි එකින් එක එකට මුහුණ දෙමු.`,
+      emoji: "💙",
+    };
+  }
   // Study-plan / timetable requests need the real AI (they depend on the
   // student's dates, hours and subjects). When the AI is unavailable and we
   // fall back to this knowledge base, don't pretend to answer a single topic
