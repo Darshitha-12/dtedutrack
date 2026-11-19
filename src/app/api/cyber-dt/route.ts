@@ -2,8 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   buildGeminiRequestBody,
   callCyberDTGeminiWithRetry,
+  cyberDTLiveContext,
+  cyberDTUserContextPrompt,
   readCyberDTImage,
+  readCyberDTTimeContext,
+  readCyberDTUserContext,
+  splitCyberDTActions,
+  CYBER_DT_REFUSAL,
+  CYBER_DT_SECURITY_PROMPT,
   CYBER_DT_VOICE_PROMPT,
+  detectCyberDTAdminRequest,
 } from "@/features/ai/cyber-dt-shared";
 
 /**
@@ -56,7 +64,7 @@ const TOTAL_BUDGET_MS = 22_000;
  * Release marker, returned by GET so a deploy can be verified from outside.
  * Bump this whenever the Cyber DT routes change.
  */
-const CYBER_DT_REV = "2026-11-17-live-voice";
+const CYBER_DT_REV = "2026-11-19-study-agent";
 
 /**
  * How many models to ask at the same time. Free-tier quota is per model, so
@@ -120,6 +128,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Security lock: an app- or system-level change is admin-only. Refuse it
+    // here as well as in the system prompt, so the request never reaches the
+    // model and the reply is always the exact same sentence.
+    if (message && detectCyberDTAdminRequest(message)) {
+      return NextResponse.json(
+        { ok: true, text: CYBER_DT_REFUSAL, actions: [] },
+        { headers: CORS },
+      );
+    }
+
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
     if (!apiKey) {
       // No server key: the chat page tries its own fallbacks.
@@ -132,12 +150,23 @@ export async function POST(req: NextRequest) {
       "Explain what this image shows according to the NIE Resource Book and the A/L syllabus.";
     // Live Voice Tutor: ask for a short, spoken-style answer with no markdown.
     const voiceMode = body.mode === "voice" || body.voice === true;
-    const requestBody = buildGeminiRequestBody(
-      history,
-      prompt,
-      image,
-      voiceMode ? CYBER_DT_VOICE_PROMPT : undefined,
-    );
+    // The client sends its own clock + time zone; Gemini has no internal clock,
+    // so this block is the only way it can resolve "in 30 minutes" or
+    // "tomorrow at 6 AM" correctly.
+    const timeContext = readCyberDTTimeContext(body);
+    const liveContext = cyberDTLiveContext(timeContext);
+    // Live snapshot of the student's own account data (exam date + days left,
+    // study minutes, alarms, reminders, micro-goals, marks), re-validated here.
+    const userContext = cyberDTUserContextPrompt(readCyberDTUserContext(body), timeContext);
+    const requestBody = buildGeminiRequestBody(history, prompt, image, {
+      systemSuffix: voiceMode ? CYBER_DT_VOICE_PROMPT : undefined,
+      liveContext,
+      // Chat and voice may both change the app (alarms, reminders, goals).
+      allowActions: true,
+      // The security lock is always present, even in voice mode.
+      securityContext: CYBER_DT_SECURITY_PROMPT,
+      userContext,
+    });
 
     // Ask several models at once, keep the first complete answer, and — if the
     // whole wave fails with a transient 503/429 — retry the wave with
@@ -152,7 +181,17 @@ export async function POST(req: NextRequest) {
     });
 
     if (result.ok) {
-      return NextResponse.json({ ok: true, text: result.text }, { headers: CORS });
+      // Strip the machine-readable action block before the answer is shown or
+      // spoken. A model that only emitted a block still gets a usable reply.
+      const { text, actions } = splitCyberDTActions(result.text);
+      return NextResponse.json(
+        {
+          ok: true,
+          text: text || result.text,
+          ...(actions.length > 0 ? { actions } : {}),
+        },
+        { headers: CORS },
+      );
     }
 
     return NextResponse.json(

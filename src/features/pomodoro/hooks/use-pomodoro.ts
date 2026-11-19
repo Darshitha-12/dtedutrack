@@ -11,6 +11,7 @@ import {
 } from "@/features/pomodoro/types/pomodoro";
 import { AudioEngine } from "@/features/alarms/lib/audio-engine";
 import { notificationService } from "@/services/notification";
+import { CYBER_DT_TIMER_COMMAND_EVENT } from "@/features/ai/client/cyber-dt-actions";
 
 const CONFIG_KEY = "biopulse_pomodoro_config_v1";
 const LIVE_KEY = "biopulse_pomodoro_live_v1";
@@ -350,6 +351,54 @@ export function usePomodoroTimer() {
     },
     [],
   );
+
+  // Cyber DT can control the study timer from chat ("start a 25 minute focus
+  // timer", "pause the timer"). The action executor fires this event; the hook
+  // owns the real state so the AI never duplicates the timer the student sees.
+  useEffect(() => {
+    const onCommand = (e: Event) => {
+      const detail = (e as CustomEvent<{ command?: string; minutes?: number }>).detail || {};
+      const command = detail.command;
+      if (command === "pause") {
+        pause();
+        return;
+      }
+      if (command === "reset") {
+        reset();
+        return;
+      }
+      if (command !== "start") return;
+      const current = liveRef.current;
+      if (current.running) return;
+      const minutes = Math.round(Number(detail.minutes));
+      const hasMinutes = Number.isFinite(minutes) && minutes >= 1 && minutes <= 180;
+      const now = Date.now();
+      // A custom length applies to a fresh session; resuming keeps the remainder.
+      if (current.pausedMs > 0 && !hasMinutes) {
+        setLive((prev) => ({
+          ...prev,
+          running: true,
+          endTs: now + prev.pausedMs,
+          pausedMs: 0,
+          lastHyd: now,
+        }));
+        return;
+      }
+      const studyMinutes = hasMinutes ? minutes : configRef.current.study;
+      if (hasMinutes) updateConfig({ study: minutes });
+      setLive({
+        running: true,
+        phase: "study",
+        endTs: now + studyMinutes * 60_000,
+        pausedMs: 0,
+        cyclesDone: 0,
+        setDone: 0,
+        lastHyd: now,
+      });
+    };
+    window.addEventListener(CYBER_DT_TIMER_COMMAND_EVENT, onCommand);
+    return () => window.removeEventListener(CYBER_DT_TIMER_COMMAND_EVENT, onCommand);
+  }, [pause, reset, updateConfig]);
 
   const remainingMs =
     live.running || live.pausedMs > 0
